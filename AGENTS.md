@@ -68,11 +68,46 @@ export const actionsXxx = { /* async methods */ };
 - Prefer Tailwind utility classes for layout
 - Use component `<style>` blocks only for bespoke animations
 - CSS variables: `var(--primary)`, `var(--base-content)`
+- Anything beyond layout — controls, states, tokens — follows *UI Components & Design System* below
 
 **Error Handling:**
 - Rust: Return `Result<T, AppError>` from commands; use `thiserror` for error types
 - Frontend: Use `normalizeError()` and `showAppError()` from `$lib/utils/error`
 - Always catch and log async errors: `.catch((error) => console.error(...))`
+
+## UI Components & Design System
+
+`docs/ui-design.md` (design language) and `docs/ui-components.md` (component contract)
+are **binding for every UI change** — read them before writing a component, not after
+review. The base library is `src/lib/components/ui/`, its style tables live in
+`ui/variants.ts`, and `/settings/components` renders every atom by `variant × size ×
+state` in both themes as the regression baseline.
+
+- **Compose, never hand-roll.** Buttons, inputs, selects, checkboxes, modals, menus,
+  tooltips and table rows come from `ui/`. A raw `<button>` / `<input>` dressed in
+  Tailwind inside a feature component is a defect: it forks the hover / focus /
+  disabled contract, and the fork is invisible until the two drift apart.
+- **Extend the library before you add to it.** A new base component needs a real gap
+  no existing atom covers — the default move is a new `variant` / `size` / prop in
+  `ui/variants.ts`, not a near-duplicate file. When one does earn its place, it goes
+  in `ui/`, is documented in `docs/ui-components.md`, and gets a tile in the
+  `/settings/components` gallery. Overlapping atoms get consolidated, never left side
+  by side.
+- **The library owns style; feature code only composes.** Public APIs are semantic
+  props (`variant` / `size` / `disabled` / `error`) — no color-as-prop, no utility
+  soup threaded through. A caller's `class` adjusts layout, it does not restyle a
+  control.
+- **Codified once, everywhere:** hover lifts one level (`bg-transparent` →
+  `hover:bg-base-300`), focus is `focus-visible:ring-2 ring-primary/50`, disabled is
+  `disabled:opacity-60`, and heights come from the shared ladder (`sm` / `md` / `lg`,
+  square `icon-sm` / `icon` / `icon-lg`). Never re-invent these per component.
+- **Tokens, not literals:** semantic colors (`bg-base-200`, `text-base-content`,
+  `var(--hairline)`), motion (`duration-[var(--dur-fast)]`, `ease-[var(--ease-out)]`),
+  layering (`var(--z-popover)`). Never a raw palette value (`bg-gray-100`, `#666`),
+  never `z-[9999]`, and never `base-100` as a foreground color.
+- **Copying a utility string from another component is the signal** that the
+  abstraction belongs in `ui/`. Move it there instead of maintaining two copies that
+  will drift.
 
 ## Testing Guidelines
 

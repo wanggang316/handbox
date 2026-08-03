@@ -69,11 +69,15 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.compacting": "Compacting context…",
   "agent.timeline.usageInput": "Input {count}",
   "agent.timeline.usageOutput": "Output {count}",
+  "agent.timeline.copy": "Copy",
+  "agent.timeline.copied": "Copied",
   "agent.timeline.genuiStreaming": "Generating UI…",
 
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "Thinking...",
   "agent.thinkingBlock.title": "Thinking",
+  "agent.thinkingBlock.showMore": "Show more",
+  "agent.thinkingBlock.showLess": "Show less",
 
   // Built-in tool labels (constants/agentTools.ts; shared by settings + AgentInput).
   // Kept identical to the coding-agent registration id so the UI reads the same

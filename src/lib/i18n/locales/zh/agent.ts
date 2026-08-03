@@ -61,10 +61,14 @@ export const agentZh = {
   "agent.timeline.usageInput": "输入 {count}",
   "agent.timeline.usageOutput": "输出 {count}",
   "agent.timeline.genuiStreaming": "生成界面中…",
+  "agent.timeline.copy": "复制",
+  "agent.timeline.copied": "已复制",
 
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "思考中...",
   "agent.thinkingBlock.title": "思考",
+  "agent.thinkingBlock.showMore": "展开",
+  "agent.thinkingBlock.showLess": "收起",
 
   // Built-in tool labels (constants/agentTools.ts; shared by settings + AgentInput).
   // Kept identical to the coding-agent registration id so the UI reads the same

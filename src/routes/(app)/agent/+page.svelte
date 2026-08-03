@@ -249,7 +249,7 @@
           composer state (input / attachments / forced chip / slash overlay) resets
           and never leaks between sessions. A fresh mount is the correct semantics.
         -->
-        <div class="shrink-0 px-4 pb-3">
+        <div class="shrink-0 chat-column pb-3">
           {#if currentSession}
             {#key currentSession.id}
               <AgentInput session={currentSession} />

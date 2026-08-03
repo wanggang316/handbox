@@ -108,6 +108,18 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* The chat column: the transcript and the composer are laid out by different
+   parents (one inside the scroll container, one below it), so they only line up
+   if both derive their width from the same rule. Content width is identical at
+   every window size — max-width covers the gutter, padding re-inserts it — and
+   message text ends exactly on the composer's box edges. */
+.chat-column {
+  width: 100%;
+  max-width: calc(var(--chat-column) + 2 * var(--chat-gutter));
+  margin-inline: auto;
+  padding-inline: var(--chat-gutter);
+}
+
 /* Suppress the UA default focus outline globally. Editable controls also match
    :focus-visible on a mouse click, so a global outline would sit outside
    .field's own ring as a box-in-a-box. Focus is indicated by each component's
@@ -179,6 +191,10 @@ code,
   --hairline-strong: var(--color-hairline-strong);
   --ink-subtle: var(--color-ink-subtle);
   --ink-tertiary: var(--color-ink-tertiary);
+
+  /* Chat column geometry, shared by the transcript and the composer (.chat-column) */
+  --chat-column: 800px;
+  --chat-gutter: 1rem;
 
   /* Layout role tokens: page = sidebar backdrop; card = raised content card (Linear main layout) */
   /* Light: page slightly gray (97%) → card brightest (99%); dark: page deepest (8%) → card raised (15%) */
