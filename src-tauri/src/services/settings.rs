@@ -1,7 +1,7 @@
 use crate::models::{
     AccountSettings, AgentSettings, AppError, AppSettings, GeneralSettings, Language, MCPSettings,
-    QuickActionSettings, QuickToolsSettings, ShortcutConfig, SkillSettings, Theme, ThemeColor,
-    TranslationSettings, UpdateSettingsRequest,
+    QuickActionSettings, QuickToolsSettings, SessionSettings, ShortcutConfig, SkillSettings, Theme,
+    ThemeColor, TranslationSettings, UpdateSettingsRequest,
 };
 use crate::services::StorageService;
 use serde_json::Value;
@@ -74,6 +74,9 @@ impl SettingsService {
                 settings.quick_action =
                     self.merge_section(settings.quick_action, request.data, "quickAction")?;
             }
+            "session" => {
+                settings.session = self.merge_section(settings.session, request.data, "session")?;
+            }
             _ => {
                 return Err(AppError::validation_error("未知设置分组"));
             }
@@ -120,6 +123,7 @@ impl SettingsService {
                         "quickAction" => {
                             current.quick_action = default_settings.quick_action.clone()
                         }
+                        "session" => current.session = default_settings.session.clone(),
                         _ => return Err(AppError::validation_error("未知设置分组")),
                     }
                 }
@@ -251,12 +255,14 @@ fn default_settings() -> AppSettings {
         skills: SkillSettings::default(),
         agent: AgentSettings::default(),
         quick_action: QuickActionSettings::default(),
+        session: SessionSettings::default(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::TitleGenerationRule;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -937,6 +943,47 @@ mod tests {
 
         let reread = service(&dir).get_settings().unwrap();
         assert!(!reread.quick_action.enabled);
+    }
+
+    // The closed section enum recognizes "session" in both update and reset
+    // (no unknown-section VALIDATION_ERROR), and the rule round-trips through
+    // config.json via a fresh service.
+    #[test]
+    fn update_and_reset_recognize_session_section() {
+        let dir = TempDir::new().unwrap();
+        let svc = service(&dir);
+
+        let updated = svc
+            .update_settings(UpdateSettingsRequest {
+                section: "session".to_string(),
+                data: serde_json::json!({ "titleGeneration": "everyMessage" }),
+            })
+            .unwrap_or_else(|err| {
+                panic!(
+                    "persisting session must succeed, got {}: {}",
+                    error_code(&err),
+                    err.message
+                )
+            });
+        assert_eq!(
+            updated.session.title_generation,
+            TitleGenerationRule::EveryMessage
+        );
+
+        // Round-trips through config.json (fresh service, same data dir).
+        let reread = service(&dir).get_settings().unwrap();
+        assert_eq!(
+            reread.session.title_generation,
+            TitleGenerationRule::EveryMessage
+        );
+
+        let reset = svc
+            .reset_settings(Some(vec!["session".to_string()]))
+            .unwrap();
+        assert_eq!(
+            reset.session.title_generation,
+            TitleGenerationRule::FirstMessage
+        );
     }
 
     // quickTools.translationAgentId round-trips through update → config.json →
