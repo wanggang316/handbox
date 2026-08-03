@@ -13,6 +13,7 @@ import {
   MousePointerClick,
   LayoutGrid,
   Wrench,
+  MessagesSquare,
 } from "@lucide/svelte";
 import type { Icon as IconType } from "@lucide/svelte";
 import { t } from "$lib/i18n";
@@ -46,6 +47,7 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
       id: "features",
       title: t("settings.sidebar.group.features"),
       items: [
+        { id: "session", title: t("settings.sidebar.session"), icon: MessagesSquare, url: "/settings/session" },
         { id: "quicktools", title: t("settings.sidebar.quicktools"), icon: MousePointerClick, url: "/settings/quicktools" },
         { id: "models", title: t("settings.sidebar.models"), icon: Brain, url: "/settings/models" },
         { id: "agent-tools", title: t("settings.sidebar.agentTools"), icon: Wrench, url: "/settings/agent-tools" },

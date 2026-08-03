@@ -23,6 +23,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.sidebar.group.other": "Other",
   "settings.sidebar.account": "Account",
   "settings.sidebar.general": "General",
+  "settings.sidebar.session": "Sessions",
   "settings.sidebar.quicktools": "Quick Tools",
   "settings.sidebar.models": "Models",
   "settings.sidebar.agentTools": "Agent Tools",
@@ -62,6 +63,13 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
     'Enabling this feature requires accessibility permission. Go to "System Settings > Privacy & Security > Accessibility" and enable HandBox.',
   "settings.quicktools.openSystemSettings": "Open System Settings",
   "settings.quicktools.refreshPermission": "Refresh permission status",
+
+  // Session page
+  "settings.session.section": "Session Title",
+  "settings.session.titleGeneration": "Title generation",
+  "settings.session.titleGeneration.firstMessage": "After the first message",
+  "settings.session.titleGeneration.everyMessage": "After every message",
+  "settings.session.titleGeneration.off": "Off",
 
   // Agent Tools page
   "settings.agentTools.title": "Agent Tools",

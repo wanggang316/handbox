@@ -79,6 +79,14 @@ export interface QuickActionSettings {
   providerId?: string | null; // Unset falls back to the default-model resolver.
 }
 
+// When a session's title is regenerated automatically. The manual "generate
+// title" action is unaffected by this rule.
+export type TitleGenerationRule = "firstMessage" | "everyMessage" | "off";
+
+export interface SessionSettings {
+  titleGeneration: TitleGenerationRule;
+}
+
 export interface AppSettings {
   general: GeneralSettings;
   mcp: MCPSettings;
@@ -87,6 +95,7 @@ export interface AppSettings {
   quickTools: QuickToolsSettings;
   agent: AgentSettings;
   quickAction?: QuickActionSettings;
+  session?: SessionSettings; // Absent on configs written before the section existed.
 }
 
 export interface UpdateSettingsRequest {

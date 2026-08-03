@@ -21,6 +21,7 @@ export const settingsZh = {
   "settings.sidebar.group.other": "其他",
   "settings.sidebar.account": "账户",
   "settings.sidebar.general": "通用",
+  "settings.sidebar.session": "会话",
   "settings.sidebar.quicktools": "快捷工具",
   "settings.sidebar.models": "模型",
   "settings.sidebar.agentTools": "Agent 工具",
@@ -58,6 +59,13 @@ export const settingsZh = {
     '启用此功能需要授予辅助功能权限。请前往"系统设置 > 隐私与安全性 > 辅助功能"，并启用 HandBox 的权限。',
   "settings.quicktools.openSystemSettings": "打开系统设置",
   "settings.quicktools.refreshPermission": "刷新权限状态",
+
+  // Session page
+  "settings.session.section": "会话标题",
+  "settings.session.titleGeneration": "标题生成",
+  "settings.session.titleGeneration.firstMessage": "首次发送消息后",
+  "settings.session.titleGeneration.everyMessage": "每次发送消息后",
+  "settings.session.titleGeneration.off": "关闭",
 
   // Agent Tools page
   "settings.agentTools.title": "Agent 工具",
