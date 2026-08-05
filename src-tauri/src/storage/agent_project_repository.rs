@@ -315,7 +315,7 @@ mod tests {
     }
 
     async fn count_rows(db: &Database, query: &str, bind: &str) -> i64 {
-        sqlx::query(query)
+        sqlx::query(sqlx::AssertSqlSafe(query))
             .bind(bind)
             .fetch_one(db.pool())
             .await

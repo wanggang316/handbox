@@ -241,7 +241,10 @@ mod tests {
     }
 
     async fn count_rows(db: &Database, table: &str) -> i64 {
-        let row = sqlx::query(&format!("SELECT COUNT(*) AS count FROM {}", table))
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) AS count FROM {}",
+            table
+        )))
             .fetch_one(db.pool())
             .await
             .unwrap();

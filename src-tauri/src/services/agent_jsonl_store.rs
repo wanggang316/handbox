@@ -1053,11 +1053,16 @@ mod tests {
             .expect("deleting a session with no JSONL file must be a clean no-op");
     }
 
-    /// A garbage line between valid messages is silently skipped by the upstream
-    /// parser: activity reports the surviving count and the max surviving
-    /// timestamp, never counting the bad line as 0 or as newest.
+    /// A fully-written garbage line is corruption, not a skippable entry: the
+    /// upstream reader refuses the file rather than serving a partial history,
+    /// so the transcript read fails. Activity degrades separately —
+    /// `build_session_info` maps corruption to "not a session" — so the sidebar
+    /// falls back to the SQLite row instead of rendering a blank one.
+    ///
+    /// A torn last line is the tolerated case; see
+    /// [`truncated_last_jsonl_line_keeps_the_complete_prefix`].
     #[test]
-    fn malformed_jsonl_line_is_skipped_on_read_without_polluting_activity() {
+    fn malformed_jsonl_line_fails_the_read_and_reports_no_activity() {
         let base = TempDir::new().unwrap();
         let cwd = TempDir::new().unwrap();
         let id = "sess-garbage-line";
@@ -1097,27 +1102,55 @@ mod tests {
         )
         .unwrap();
 
+        load_transcript(base.path(), cwd.path(), id)
+            .expect_err("a fully-written malformed line is corruption, not a skippable entry");
+
+        let activity = session_activity(base.path(), cwd.path(), id)
+            .expect("corruption degrades to no-activity rather than propagating an error");
+        assert!(
+            activity.is_none(),
+            "a corrupt file reports no JSONL activity, so the SQLite values stand"
+        );
+    }
+
+    /// A last line with no trailing newline is a torn write — the process died
+    /// mid-append — and must not cost the user the session: the reader returns
+    /// the complete prefix. This is the crash shape HandBox actually produces,
+    /// so it is the one that has to stay readable.
+    #[test]
+    fn truncated_last_jsonl_line_keeps_the_complete_prefix() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-torn-write";
+
+        append_message_at(
+            base.path(),
+            cwd.path(),
+            id,
+            TEST_CREATED_AT,
+            &user_msg("first valid"),
+            1_600_000_000_000,
+        )
+        .unwrap();
+
+        // Half an entry, no trailing newline.
+        {
+            use std::io::Write;
+            let path = session_path(base.path(), cwd.path(), id);
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            write!(f, "{{\"type\":\"message\",\"role\":\"us").unwrap();
+        }
+
         let rows = load_transcript(base.path(), cwd.path(), id)
-            .unwrap()
+            .expect("a torn tail must not fail the read")
             .expect("a seeded session has a transcript");
         assert_eq!(
             rows.len(),
-            2,
-            "malformed line must be skipped, leaving exactly the two valid messages"
-        );
-        assert!(rows.iter().all(|r| r.role == "user"));
-
-        let activity = session_activity(base.path(), cwd.path(), id)
-            .unwrap()
-            .expect("file exists");
-        assert_eq!(
-            activity.message_count, 2,
-            "count reflects only the valid messages"
-        );
-        assert_eq!(
-            activity.last_message_at,
-            Some(late_ts),
-            "activity key must equal the max VALID message timestamp, not the bad line"
+            1,
+            "the torn tail is dropped and the valid prefix survives"
         );
     }
 

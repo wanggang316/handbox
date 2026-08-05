@@ -34,7 +34,10 @@ serde_json = "1"
 serde_yaml = "0.9"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 tokio = { version = "1.0", features = ["full"] }
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+# 0.9 accepts libsqlite3-sys >=0.30.1,<0.38, which is what lets it share the
+# single `links = "sqlite3"` slot with hand-agent's rusqlite 0.37. Staying on
+# 0.7 (libsqlite3-sys 0.27) makes the dependency graph unresolvable.
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "sqlite", "chrono", "uuid"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 thiserror = "1.0"
@@ -70,21 +73,20 @@ image = "0.25"
 arboard = "3.4"
 handbox-mcp = { path = "crates/handbox-mcp" }
 # Direct dep on hand-ai's model crate for services/chat_engine.rs (M2-T1).
-# Pinned to hand-ai's `model-v0.3.0` tag. Single source of truth for
-# provider catalog + chat after the dissolve-handbox-llm migration.
-# v0.3.0 carries the #94 cerebras phantom-model catalog fix + an additive
-# runtime catalog-refresh API (catalog_refresh); HandBox uses the embedded
-# catalog only for now.
-hand-ai-model = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "model" }
+# Single source of truth for provider catalog + chat after the
+# dissolve-handbox-llm migration. HandBox uses the embedded catalog only;
+# v0.4.0 additionally streams the Anthropic Messages API incrementally
+# instead of buffering the whole reply (hand-ai#135).
+hand-ai-model = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.0", package = "model" }
 # Agent runtime crate from hand-ai, same git source + tag as the model crate
 # above so Cargo unifies the transitive `model` dependency to a single copy
 # (hand-agent depends on model via path; same-source+same-tag => dedup).
-hand-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "hand-agent" }
+hand-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.0", package = "hand-agent" }
 # Coding-agent runtime crate from hand-ai, same git source + tag as the model
 # and hand-agent crates above so Cargo unifies the transitive `model`/`hand-agent`
-# dependencies to a single copy (same-source+same-tag => dedup). Dependency-only
-# for now (Approach A de-risk slice): not yet `use`d from src.
-hand-coding-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.3.0", package = "hand-coding-agent" }
+# dependencies to a single copy (same-source+same-tag => dedup). Drives Agent
+# mode: sessions, tools, and the extension hook chain (services/agent_permission).
+hand-coding-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.0", package = "hand-coding-agent" }
 tokio-util = "0.7"
 croner = "3.0.1"
 

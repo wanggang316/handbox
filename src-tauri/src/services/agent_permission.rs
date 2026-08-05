@@ -79,6 +79,8 @@ impl SandboxExtension {
                 env: Default::default(),
                 slash_commands: Vec::new(),
                 custom_tools: Vec::new(),
+                // Tier 1 runs in-process; the host applies these to subprocess RPC only.
+                timeouts: Default::default(),
             },
             working_dir,
         }
@@ -159,6 +161,8 @@ impl DangerousDenyExtension {
                 env: Default::default(),
                 slash_commands: Vec::new(),
                 custom_tools: Vec::new(),
+                // Tier 1 runs in-process; the host applies these to subprocess RPC only.
+                timeouts: Default::default(),
             },
         }
     }
@@ -356,6 +360,8 @@ impl PermissionExtension {
                 env: Default::default(),
                 slash_commands: Vec::new(),
                 custom_tools: Vec::new(),
+                // Tier 1 runs in-process; the host applies these to subprocess RPC only.
+                timeouts: Default::default(),
             },
             session_id,
             emitter,
