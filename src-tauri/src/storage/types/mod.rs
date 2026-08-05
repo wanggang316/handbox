@@ -3,6 +3,7 @@ pub mod agent_project;
 pub mod agent_session;
 pub mod common;
 pub mod genui;
+pub mod hook_rule;
 pub mod job;
 pub mod mcp;
 pub mod model;
@@ -16,6 +17,9 @@ pub use agent_session::{
 };
 pub use common::{Timestamp, UUID};
 pub use genui::{CreateGenUiRequest, GenUi, UpdateGenUiRequest};
+pub use hook_rule::{
+    CreateHookRuleRequest, HookAction, HookEvent, HookRule, UpdateHookRuleRequest,
+};
 pub use job::{
     ExecutionStatus, Job, JobExecution, JobTarget, SessionStrategy, Trigger,
     DEFAULT_EXEC_TIMEOUT_SECS, DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY_SECS,
