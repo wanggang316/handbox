@@ -26,6 +26,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.sidebar.quicktools": "Quick Tools",
   "settings.sidebar.models": "Models",
   "settings.sidebar.agentTools": "Agent Tools",
+  "settings.sidebar.hooks": "Hook Rules",
   "settings.sidebar.skills": "Skills",
   "settings.sidebar.components": "Components",
   "settings.sidebar.shortcuts": "Shortcuts",
@@ -92,6 +93,36 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.skills.empty": "No skills yet",
   "settings.skills.emptyHint":
     "Put a SKILL.md file in the skills directory, then click Refresh to see it here.",
+
+  // Hook rules page
+  "settings.hooks.description":
+    "Rules applied automatically around the agent's tool calls, matched in order — the first hit decides",
+  "settings.hooks.add": "Add rule",
+  "settings.hooks.addTitle": "Add rule",
+  "settings.hooks.editTitle": "Edit rule",
+  "settings.hooks.empty": "No rules yet",
+  "settings.hooks.emptyHint":
+    "Add a rule to block dangerous commands, confirm specific operations, or get notified when a tool returns something you care about.",
+  "settings.hooks.anyArgument": "any argument",
+  "settings.hooks.event.before": "Before call",
+  "settings.hooks.event.after": "After call",
+  "settings.hooks.action.deny": "Deny",
+  "settings.hooks.action.ask": "Ask",
+  "settings.hooks.action.allow": "Allow",
+  "settings.hooks.action.notify": "Notify",
+  "settings.hooks.field.name": "Name",
+  "settings.hooks.field.namePlaceholder": "e.g. Block rm -rf",
+  "settings.hooks.field.event": "When",
+  "settings.hooks.field.action": "Action",
+  "settings.hooks.field.toolPattern": "Tool name",
+  "settings.hooks.field.argField": "Argument (optional)",
+  "settings.hooks.field.argContains": "Argument contains (optional)",
+  "settings.hooks.field.message": "Message (optional)",
+  "settings.hooks.field.messagePlaceholder": "Given to the model as the reason when denied",
+  "settings.hooks.field.hint":
+    "Tool name accepts * as a wildcard, e.g. mcp__* or *. Leave the argument name empty to search all arguments; leave the condition empty to match on the tool name alone.",
+  "settings.hooks.deleteTitle": "Delete rule",
+  "settings.hooks.deleteMessage": "Delete \"{name}\"?",
 
   // Account page
   "settings.account.editProfile": "Edit Profile",

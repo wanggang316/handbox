@@ -24,6 +24,7 @@ export const settingsZh = {
   "settings.sidebar.quicktools": "快捷工具",
   "settings.sidebar.models": "模型",
   "settings.sidebar.agentTools": "Agent 工具",
+  "settings.sidebar.hooks": "钩子规则",
   "settings.sidebar.skills": "技能",
   "settings.sidebar.components": "组件",
   "settings.sidebar.shortcuts": "快捷键",
@@ -85,6 +86,36 @@ export const settingsZh = {
   "settings.skills.expandBody": "查看内容",
   "settings.skills.empty": "暂无技能",
   "settings.skills.emptyHint": "在技能目录中放入 SKILL.md 文件，然后点击「刷新」即可在此处看到。",
+
+  // Hook rules page
+  "settings.hooks.description":
+    "在 Agent 调用工具前后自动应用的规则，按顺序匹配，命中的第一条生效",
+  "settings.hooks.add": "添加规则",
+  "settings.hooks.addTitle": "添加规则",
+  "settings.hooks.editTitle": "编辑规则",
+  "settings.hooks.empty": "暂无规则",
+  "settings.hooks.emptyHint":
+    "添加规则可以拦截危险命令、对特定操作二次确认，或在工具返回特定内容时收到提醒。",
+  "settings.hooks.anyArgument": "任意参数",
+  "settings.hooks.event.before": "调用前",
+  "settings.hooks.event.after": "调用后",
+  "settings.hooks.action.deny": "拒绝",
+  "settings.hooks.action.ask": "询问",
+  "settings.hooks.action.allow": "放行",
+  "settings.hooks.action.notify": "提醒",
+  "settings.hooks.field.name": "名称",
+  "settings.hooks.field.namePlaceholder": "例如：拦截 rm -rf",
+  "settings.hooks.field.event": "触发时机",
+  "settings.hooks.field.action": "动作",
+  "settings.hooks.field.toolPattern": "工具名",
+  "settings.hooks.field.argField": "参数名（可选）",
+  "settings.hooks.field.argContains": "参数包含（可选）",
+  "settings.hooks.field.message": "说明（可选）",
+  "settings.hooks.field.messagePlaceholder": "拒绝时会作为理由告诉模型",
+  "settings.hooks.field.hint":
+    "工具名支持 * 通配，如 mcp__* 或 *。留空参数名则在全部参数中查找；参数条件留空表示只按工具名匹配。",
+  "settings.hooks.deleteTitle": "删除规则",
+  "settings.hooks.deleteMessage": "确定要删除「{name}」吗？",
 
   // Account page
   "settings.account.editProfile": "编辑资料",
