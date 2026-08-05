@@ -16,8 +16,8 @@ use tauri::Manager;
 use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
-    GenUiService, JobExecutor, JobScheduler, JobService, McpService, ModelService, ProviderService,
-    SettingsService, StorageService, UserSessionService,
+    GenUiService, HookRuleService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
+    ProviderService, SettingsService, StorageService, UserSessionService,
 };
 use crate::storage::Database;
 use crate::utils::logger;
@@ -285,6 +285,8 @@ async fn initialize_services(
 
     let mcp_service = McpService::new(database_service.clone());
 
+    let hook_rule_service = HookRuleService::new(database_service.clone());
+
     let settings_service = SettingsService::new(storage_service.clone());
 
     // Register the Quick Action global hotkey from the persisted
@@ -399,6 +401,7 @@ async fn initialize_services(
             Arc::new(agent_service.clone()),
             Arc::new(agent_session_service.clone()),
             provider_service_shared.clone(),
+            Arc::new(hook_rule_service.clone()),
             data_dir.clone(),
         );
 
@@ -410,6 +413,7 @@ async fn initialize_services(
     app.manage(provider_service);
     app.manage(model_service);
     app.manage(mcp_service);
+    app.manage(hook_rule_service);
     app.manage(settings_service);
     app.manage(user_session_service);
     app.manage(agent_service);

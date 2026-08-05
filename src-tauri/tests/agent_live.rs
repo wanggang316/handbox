@@ -35,7 +35,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use handbox_lib::services::coding_agent_runtime::{drive_agent_run, CodingRunSink};
-use handbox_lib::services::coding_agent_session::{build_agent_session, config_from_rows};
+use handbox_lib::services::coding_agent_session::{
+    build_agent_session, config_from_rows, HookEmitters,
+};
 use handbox_lib::storage::types::{AgentSession, Provider};
 
 use hand_agent::{CancellationToken, ToolExecuteCtx, ToolResult};
@@ -192,7 +194,7 @@ fn seeded_session(
     // lands under it and never touches the app's real data root.
     let config = config_from_rows(&row, &provider, temp_dir.path().to_path_buf())
         .expect("config_from_rows should succeed for a live-probe session");
-    let session = build_agent_session(&config, None, Vec::new())
+    let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
         .expect("build_agent_session should construct the engine session");
 
     (session, session_id, temp_dir)

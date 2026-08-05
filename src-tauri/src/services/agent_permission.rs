@@ -376,63 +376,96 @@ impl PermissionExtension {
         self
     }
 
-    /// Request approval for one dangerous tool call and await the decision:
-    /// `Continue` on allow, `Cancel` on deny or fail-closed. A tool already on
-    /// the session always-allow set short-circuits without emitting or awaiting.
-    /// Keyed off `self.session_id`, never the per-event `cx.session_id`.
-    async fn request_approval(
-        &self,
-        call_id: &str,
-        tool_name: &str,
-        arguments: &serde_json::Value,
-    ) -> HookDecision {
-        let session_id = self.session_id.as_str();
+}
 
-        // A remembered tool runs without prompting — no event emitted, no await.
-        if is_session_allow_always(session_id, tool_name) {
-            return HookDecision::Continue;
+/// Request approval for one tool call and await the decision: `Continue` on
+/// allow, `Cancel` on deny or fail-closed. A tool already on the session
+/// always-allow set short-circuits without emitting or awaiting.
+///
+/// Module-level rather than a method because two extensions raise approvals —
+/// [`PermissionExtension`] for the inherently dangerous tools, and the rule
+/// engine for whatever the user's `ask` rules cover — and both must land in the
+/// same pending registry, or `abort_run` would only be able to unblock one of
+/// them.
+///
+/// `session_id` MUST be the HandBox UUID, never the per-event `cx.session_id`.
+pub(crate) async fn request_approval(
+    session_id: &str,
+    emitter: Option<&ApprovalEmitter>,
+    call_id: &str,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> HookDecision {
+    // A remembered tool runs without prompting — no event emitted, no await.
+    if is_session_allow_always(session_id, tool_name) {
+        return HookDecision::Continue;
+    }
+
+    // No approval surface → fail closed. Never await, never run the tool.
+    let Some(emitter) = emitter else {
+        return HookDecision::Cancel(deny_reason(tool_name));
+    };
+
+    // Register the wake channel BEFORE emitting, so a response that races
+    // back the instant the event lands still finds a live entry to resolve.
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (tx, rx) = oneshot::channel::<ApprovalDecision>();
+    pending_approvals().lock().unwrap().insert(
+        request_id.clone(),
+        PendingApproval {
+            session_id: session_id.to_string(),
+            tool_name: tool_name.to_string(),
+            sender: tx,
+        },
+    );
+
+    emitter(serde_json::json!({
+        "sessionId": session_id,
+        "callId": call_id,
+        "toolName": tool_name,
+        "args": arguments,
+        "requestId": request_id,
+    }));
+
+    // A dropped sender (`Err`) denies, so a lost response can never hang the
+    // turn.
+    match rx.await {
+        Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowAlways) => {
+            HookDecision::Continue
         }
-
-        // No approval surface → fail closed. Never await, never run the tool.
-        let Some(emitter) = &self.emitter else {
-            return HookDecision::Cancel(deny_reason(tool_name));
-        };
-
-        // Register the wake channel BEFORE emitting, so a response that races
-        // back the instant the event lands still finds a live entry to resolve.
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel::<ApprovalDecision>();
-        pending_approvals().lock().unwrap().insert(
-            request_id.clone(),
-            PendingApproval {
-                session_id: session_id.to_string(),
-                tool_name: tool_name.to_string(),
-                sender: tx,
-            },
-        );
-
-        emitter(serde_json::json!({
-            "sessionId": session_id,
-            "callId": call_id,
-            "toolName": tool_name,
-            "args": arguments,
-            "requestId": request_id,
-        }));
-
-        // A dropped sender (`Err`) denies, so a lost response can never hang the
-        // turn.
-        match rx.await {
-            Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowAlways) => {
-                HookDecision::Continue
-            }
-            Ok(ApprovalDecision::Deny) => HookDecision::Cancel(deny_reason(tool_name)),
-            Err(_) => {
-                // Run aborted: clean up any lingering entry and deny.
-                pending_approvals().lock().unwrap().remove(&request_id);
-                HookDecision::Cancel(deny_reason(tool_name))
-            }
+        Ok(ApprovalDecision::Deny) => HookDecision::Cancel(deny_reason(tool_name)),
+        Err(_) => {
+            // Run aborted: clean up any lingering entry and deny.
+            pending_approvals().lock().unwrap().remove(&request_id);
+            HookDecision::Cancel(deny_reason(tool_name))
         }
     }
+}
+
+/// Process-level set of `call_id`s a user rule already cleared, consumed by
+/// [`PermissionExtension`] so it does not re-prompt for a call the rule engine
+/// (which runs earlier in the chain) has already allowed or approved.
+///
+/// Keyed by `call_id` — unique per tool call — and taken exactly once, so a
+/// clearance can never widen into standing consent for the tool. That is the
+/// difference from [`session_allow_always`]: a rule matching `bash` with
+/// `command` containing `git ` must not also clear the next `rm -rf` bash call.
+fn rule_cleared_calls() -> &'static Mutex<HashSet<String>> {
+    static CLEARED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    CLEARED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Mark one call as cleared by a user rule.
+pub(crate) fn clear_call_for_rule(call_id: &str) {
+    rule_cleared_calls()
+        .lock()
+        .unwrap()
+        .insert(call_id.to_string());
+}
+
+/// Consume a clearance. Returns whether this call had one.
+fn take_rule_clearance(call_id: &str) -> bool {
+    rule_cleared_calls().lock().unwrap().remove(call_id)
 }
 
 /// The denial reason handed to the model. Must read as a refusal rather than a
@@ -460,9 +493,20 @@ impl Extension for PermissionExtension {
         {
             return Ok(HookDecision::Continue);
         }
-        Ok(self
-            .request_approval(&event.call_id, &event.tool_name, &event.arguments)
-            .await)
+        // A user rule earlier in the chain already allowed this exact call (or
+        // raised its own prompt for it) — asking again would be a second dialog
+        // for one action.
+        if take_rule_clearance(&event.call_id) {
+            return Ok(HookDecision::Continue);
+        }
+        Ok(request_approval(
+            &self.session_id,
+            self.emitter.as_ref(),
+            &event.call_id,
+            &event.tool_name,
+            &event.arguments,
+        )
+        .await)
     }
 
     async fn on_after_tool_call(
