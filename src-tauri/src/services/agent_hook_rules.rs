@@ -12,7 +12,9 @@
 //! tool call that is already being judged.
 
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hand_coding_agent::core::extensions::api::{ToolCallEvent, ToolResultEvent};
 use hand_coding_agent::{
@@ -20,7 +22,8 @@ use hand_coding_agent::{
 };
 
 use crate::services::agent_permission::{clear_call_for_rule, request_approval, ApprovalEmitter};
-use crate::storage::types::{HookAction, HookEvent, HookRule};
+use crate::services::hook_command::{run_hook_command, CommandSpec, CommandVerdict};
+use crate::storage::types::{HookAction, HookEvent, HookRule, DEFAULT_HOOK_COMMAND_TIMEOUT_MS};
 
 const RULE_EXTENSION_NAME: &str = "handbox-hook-rules";
 
@@ -39,6 +42,12 @@ mod outcome {
     pub const APPROVED: &str = "approved";
     pub const REJECTED: &str = "rejected";
     pub const OBSERVED: &str = "observed";
+    /// A `run_command` hook ran and raised no objection.
+    pub const RAN: &str = "ran";
+    /// Its command rewrote the tool's arguments.
+    pub const REWROTE: &str = "rewrote";
+    /// It failed after the call had already run, so nothing could be undone.
+    pub const FAILED: &str = "failed";
 }
 
 /// Sink for [`HOOK_RULE_NOTIFY_EVENT`]. Same shape as [`ApprovalEmitter`] so the
@@ -54,6 +63,9 @@ pub struct RuleHookExtension {
     /// `None` makes an `ask` rule fail closed, exactly like the approval gate.
     emitter: Option<ApprovalEmitter>,
     notifier: Option<NotifyEmitter>,
+    /// Where a `run_command` hook runs. The session's working directory, so a
+    /// hook can act on the files the agent is touching without absolute paths.
+    working_dir: PathBuf,
     /// Pre-split by event so neither hook filters at call time. Both keep the
     /// repository's `sort_order` — first match decides.
     before_rules: Vec<HookRule>,
@@ -88,9 +100,17 @@ impl RuleHookExtension {
             session_id,
             emitter: None,
             notifier: None,
+            working_dir: std::env::temp_dir(),
             before_rules,
             after_rules,
         }
+    }
+
+    /// Where `run_command` hooks run. Defaults to a temp dir so a session built
+    /// without one still spawns rather than failing on a missing cwd.
+    pub fn with_working_dir(mut self, working_dir: PathBuf) -> Self {
+        self.working_dir = working_dir;
+        self
     }
 
     /// Wire the approval surface an `ask` rule prompts through. Without it such
@@ -110,6 +130,56 @@ impl RuleHookExtension {
     /// extension that would do nothing on every tool call.
     pub fn is_empty(&self) -> bool {
         self.before_rules.is_empty() && self.after_rules.is_empty()
+    }
+
+    /// Run a `run_command` rule's command against `payload`.
+    ///
+    /// The payload is built lazily so a rule that somehow reaches here without a
+    /// command costs nothing. A missing command denies rather than silently
+    /// proceeding: the service layer rejects that combination at write time, so
+    /// reaching it means the row was tampered with.
+    async fn run_command<F>(
+        &self,
+        rule: &HookRule,
+        event_name: &str,
+        tool_name: &str,
+        payload: F,
+    ) -> CommandVerdict
+    where
+        F: FnOnce() -> serde_json::Value,
+    {
+        let Some(command) = rule.command.as_deref().filter(|c| !c.trim().is_empty()) else {
+            return CommandVerdict::Deny(format!(
+                "hook rule \"{}\" is set to run a command but has none",
+                rule.name
+            ));
+        };
+
+        let timeout = Duration::from_millis(
+            rule.timeout_ms
+                .filter(|ms| *ms > 0)
+                .unwrap_or(DEFAULT_HOOK_COMMAND_TIMEOUT_MS) as u64,
+        );
+
+        // The same facts as the JSON, for scripts that would rather branch on an
+        // env var than parse stdin.
+        let env = vec![
+            ("HANDBOX_HOOK_EVENT".to_string(), event_name.to_string()),
+            ("HANDBOX_TOOL_NAME".to_string(), tool_name.to_string()),
+            ("HANDBOX_SESSION_ID".to_string(), self.session_id.clone()),
+            ("HANDBOX_RULE_NAME".to_string(), rule.name.clone()),
+        ];
+
+        run_hook_command(
+            CommandSpec {
+                command,
+                working_dir: &self.working_dir,
+                timeout,
+                env,
+            },
+            &payload(),
+        )
+        .await
     }
 
     /// Report a match to the frontend and the log.
@@ -220,6 +290,34 @@ impl Extension for RuleHookExtension {
                 );
                 Ok(decision)
             }
+            HookAction::RunCommand => {
+                let verdict = self.run_command(rule, "before_tool_call", &event.tool_name, || {
+                    serde_json::json!({
+                        "event": "before_tool_call",
+                        "sessionId": self.session_id,
+                        "ruleId": rule.id,
+                        "ruleName": rule.name,
+                        "toolName": event.tool_name,
+                        "callId": event.call_id,
+                        "arguments": event.arguments,
+                    })
+                });
+
+                match verdict.await {
+                    CommandVerdict::Proceed => {
+                        self.report(rule, &event.tool_name, outcome::RAN);
+                        Ok(HookDecision::Continue)
+                    }
+                    CommandVerdict::Deny(reason) => {
+                        self.report(rule, &event.tool_name, outcome::DENIED);
+                        Ok(HookDecision::Cancel(reason))
+                    }
+                    CommandVerdict::ReplaceInput(args) => {
+                        self.report(rule, &event.tool_name, outcome::REWROTE);
+                        Ok(HookDecision::Replace(args))
+                    }
+                }
+            }
             // Only meaningful after a call; a rule stored this way is inert
             // rather than an error, so a mis-set action never blocks work.
             HookAction::Notify => Ok(HookDecision::Continue),
@@ -241,12 +339,39 @@ impl Extension for RuleHookExtension {
             return Ok(());
         };
 
-        if rule.action != HookAction::Notify {
+        match rule.action {
+            HookAction::Notify => {
+                self.report(rule, &event.tool_name, outcome::OBSERVED);
+            }
+            HookAction::RunCommand => {
+                // The call already ran, so a verdict cannot undo it. The command
+                // runs for its side effect — format the file just written, commit,
+                // notify — and a failure is reported, not enforced.
+                let verdict = self
+                    .run_command(rule, "after_tool_call", &event.tool_name, || {
+                        serde_json::json!({
+                            "event": "after_tool_call",
+                            "sessionId": self.session_id,
+                            "ruleId": rule.id,
+                            "ruleName": rule.name,
+                            "toolName": event.tool_name,
+                            "callId": event.call_id,
+                            "success": event.success,
+                            "result": event.result,
+                        })
+                    })
+                    .await;
+
+                let outcome = match verdict {
+                    CommandVerdict::Deny(_) => outcome::FAILED,
+                    _ => outcome::RAN,
+                };
+                self.report(rule, &event.tool_name, outcome);
+            }
             // A decision action cannot un-run a finished call.
-            return Ok(());
+            _ => {}
         }
 
-        self.report(rule, &event.tool_name, outcome::OBSERVED);
         Ok(())
     }
 }
@@ -276,6 +401,8 @@ mod tests {
             arg_contains: Some("rm -rf".to_string()),
             action,
             message: None,
+            command: None,
+            timeout_ms: None,
             enabled: true,
             sort_order: 0,
             created_at: 0,
@@ -538,6 +665,152 @@ mod tests {
             .unwrap();
 
         assert!(seen.lock().unwrap().is_empty());
+    }
+
+    /// The point of the whole action: a hook that DOES something. The command
+    /// runs in the session's working directory with the event on stdin.
+    #[tokio::test]
+    async fn a_run_command_rule_executes_its_command() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let marker = dir.path().join("hook-ran.txt");
+
+        let ext = RuleHookExtension::new(
+            "s10".to_string(),
+            vec![HookRule {
+                action: HookAction::RunCommand,
+                command: Some(format!("cat > {}", marker.display())),
+                ..rule("on bash", HookEvent::BeforeToolCall, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext
+            .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /tmp/x"})))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(decision, HookDecision::Continue),
+            "a command that says nothing lets the call through"
+        );
+        let seen: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&marker).unwrap()).unwrap();
+        assert_eq!(seen["event"], "before_tool_call");
+        assert_eq!(seen["toolName"], "bash");
+        assert_eq!(seen["arguments"]["command"], "rm -rf /tmp/x");
+    }
+
+    /// A command can still decide, which is what makes the built-in actions a
+    /// special case of this one.
+    #[tokio::test]
+    async fn a_run_command_rule_can_deny() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s11".to_string(),
+            vec![HookRule {
+                action: HookAction::RunCommand,
+                command: Some(
+                    r#"echo '{"decision":"deny","reason":"policy says no"}'"#.to_string(),
+                ),
+                ..rule("gate", HookEvent::BeforeToolCall, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext
+            .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /"})))
+            .await
+            .unwrap();
+
+        match decision {
+            HookDecision::Cancel(reason) => assert_eq!(reason, "policy says no"),
+            other => panic!("expected Cancel, got {other:?}"),
+        }
+    }
+
+    /// `updatedInput` rewrites the arguments the tool actually runs with.
+    #[tokio::test]
+    async fn a_run_command_rule_can_rewrite_the_arguments() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s12".to_string(),
+            vec![HookRule {
+                action: HookAction::RunCommand,
+                command: Some(r#"echo '{"updatedInput":{"command":"ls"}}'"#.to_string()),
+                ..rule("rewrite", HookEvent::BeforeToolCall, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext
+            .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /"})))
+            .await
+            .unwrap();
+
+        match decision {
+            HookDecision::Replace(args) => assert_eq!(args, json!({"command": "ls"})),
+            other => panic!("expected Replace, got {other:?}"),
+        }
+    }
+
+    /// After the call the command still runs — that is the auto-format /
+    /// auto-commit case — but its verdict cannot un-run anything.
+    #[tokio::test]
+    async fn an_after_call_command_runs_for_its_side_effect() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let marker = dir.path().join("after.txt");
+
+        let ext = RuleHookExtension::new(
+            "s13".to_string(),
+            vec![HookRule {
+                tool_pattern: "write".to_string(),
+                arg_field: None,
+                arg_contains: None,
+                action: HookAction::RunCommand,
+                command: Some(format!("cat > {}", marker.display())),
+                ..rule("format", HookEvent::AfterToolCall, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        ext.on_after_tool_call(
+            &cx(),
+            &ToolResultEvent {
+                tool_name: "write".to_string(),
+                call_id: "c1".to_string(),
+                success: true,
+                result: json!({"path": "/repo/a.rs"}),
+            },
+        )
+        .await
+        .unwrap();
+
+        let seen: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&marker).unwrap()).unwrap();
+        assert_eq!(seen["event"], "after_tool_call");
+        assert_eq!(seen["success"], true);
+        assert_eq!(seen["result"]["path"], "/repo/a.rs");
+    }
+
+    /// A rule set to run a command but carrying none denies rather than quietly
+    /// doing nothing — the write path rejects this, so seeing it means the row
+    /// was tampered with.
+    #[tokio::test]
+    async fn a_command_rule_without_a_command_denies() {
+        let ext = RuleHookExtension::new(
+            "s14".to_string(),
+            vec![HookRule {
+                action: HookAction::RunCommand,
+                command: None,
+                ..rule("broken", HookEvent::BeforeToolCall, HookAction::RunCommand)
+            }],
+        );
+
+        let decision = ext
+            .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /"})))
+            .await
+            .unwrap();
+        assert!(matches!(decision, HookDecision::Cancel(_)));
     }
 
     /// `notify` fires on the result rather than the arguments, since a finished

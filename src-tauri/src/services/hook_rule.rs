@@ -24,13 +24,18 @@ fn now_ms() -> i64 {
 /// An action only means something on one of the two events. Rejecting the
 /// mismatch here — rather than storing it and ignoring it at dispatch — keeps a
 /// rule from looking active in the UI while doing nothing at runtime.
+///
+/// [`HookAction::RunCommand`] pairs with both: before a call its output can
+/// still decide, after a call it is a side effect.
 fn validate_pairing(event: HookEvent, action: HookAction) -> Result<(), AppError> {
     let ok = match event {
         HookEvent::BeforeToolCall => matches!(
             action,
-            HookAction::Deny | HookAction::Ask | HookAction::Allow
+            HookAction::Deny | HookAction::Ask | HookAction::Allow | HookAction::RunCommand
         ),
-        HookEvent::AfterToolCall => matches!(action, HookAction::Notify),
+        HookEvent::AfterToolCall => {
+            matches!(action, HookAction::Notify | HookAction::RunCommand)
+        }
     };
 
     if ok {
@@ -39,12 +44,24 @@ fn validate_pairing(event: HookEvent, action: HookAction) -> Result<(), AppError
 
     Err(AppError::validation_error(match event {
         HookEvent::BeforeToolCall => {
-            "A before-tool-call rule must deny, ask, or allow — notify only applies after a call"
+            "A before-tool-call rule must deny, ask, allow, or run a command — notify only applies after a call"
         }
         HookEvent::AfterToolCall => {
-            "An after-tool-call rule can only notify — the call has already run"
+            "An after-tool-call rule can only notify or run a command — the call has already run"
         }
     }))
+}
+
+/// A `run_command` rule without a command would match and then do nothing,
+/// which is exactly the "looks active, isn't" shape the pairing check exists to
+/// prevent.
+fn validate_command(action: HookAction, command: Option<&str>) -> Result<(), AppError> {
+    if action == HookAction::RunCommand && command.is_none_or(|c| c.trim().is_empty()) {
+        return Err(AppError::validation_error(
+            "A run-command rule needs a command to run",
+        ));
+    }
+    Ok(())
 }
 
 impl HookRuleService {
@@ -76,6 +93,7 @@ impl HookRuleService {
 
     pub async fn create(&self, request: CreateHookRuleRequest) -> Result<HookRule, AppError> {
         validate_pairing(request.event, request.action)?;
+        validate_command(request.action, request.command.as_deref())?;
         self.repository.create(request, now_ms()).await
     }
 
@@ -84,18 +102,22 @@ impl HookRuleService {
         id: &str,
         request: UpdateHookRuleRequest,
     ) -> Result<HookRule, AppError> {
-        // Either side of the pair may be omitted, so validate the resulting
-        // combination rather than whichever half was sent.
-        if request.event.is_some() || request.action.is_some() {
+        // Any of the three may be omitted, so validate the resulting
+        // combination rather than whichever part was sent.
+        if request.event.is_some() || request.action.is_some() || request.command.is_some() {
             let current = self
                 .repository
                 .get(id)
                 .await?
                 .ok_or_else(|| AppError::not_found(&format!("Hook rule not found: {}", id)))?;
-            validate_pairing(
-                request.event.unwrap_or(current.event),
-                request.action.unwrap_or(current.action),
-            )?;
+            let action = request.action.unwrap_or(current.action);
+            validate_pairing(request.event.unwrap_or(current.event), action)?;
+            let command = request
+                .command
+                .clone()
+                .or_else(|| current.command.clone())
+                .filter(|c| !c.trim().is_empty());
+            validate_command(action, command.as_deref())?;
         }
 
         self.repository.update(id, request, now_ms()).await
@@ -130,6 +152,8 @@ mod tests {
             arg_contains: None,
             action,
             message: None,
+            command: None,
+            timeout_ms: None,
             sort_order: None,
         }
     }

@@ -35,7 +35,18 @@ pub enum HookAction {
     Allow,
     /// Emit an event to the frontend; never changes the outcome.
     Notify,
+    /// Run the rule's command, feeding it the event on stdin. Its output can
+    /// still decide the call, so the built-in actions above are shorthands for
+    /// what a command could do — this is the general case.
+    RunCommand,
 }
+
+/// Default budget for a [`HookAction::RunCommand`] hook, in milliseconds.
+///
+/// Deliberately short: this runs inline with a tool call, so a slow hook is
+/// felt on every turn. Formatters and notifiers finish well inside it; anything
+/// genuinely long-running should be started detached by the command itself.
+pub const DEFAULT_HOOK_COMMAND_TIMEOUT_MS: i64 = 10_000;
 
 /// One user-authored rule.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,6 +65,11 @@ pub struct HookRule {
     pub action: HookAction,
     /// Shown to the model on `Deny`, and to the user on `Ask` / `Notify`.
     pub message: Option<String>,
+    /// Shell command for [`HookAction::RunCommand`]; ignored by the others.
+    pub command: Option<String>,
+    /// Budget for the command in milliseconds; `None` uses
+    /// [`DEFAULT_HOOK_COMMAND_TIMEOUT_MS`].
+    pub timeout_ms: Option<i64>,
     pub enabled: bool,
     /// Evaluation order; the first matching rule decides the call.
     pub sort_order: i64,
@@ -75,6 +91,10 @@ pub struct CreateHookRuleRequest {
     #[serde(default)]
     pub message: Option<String>,
     #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<i64>,
+    #[serde(default)]
     pub sort_order: Option<i64>,
 }
 
@@ -95,6 +115,8 @@ pub struct UpdateHookRuleRequest {
     pub arg_contains: Option<String>,
     pub action: Option<HookAction>,
     pub message: Option<String>,
+    pub command: Option<String>,
+    pub timeout_ms: Option<i64>,
     pub enabled: Option<bool>,
     pub sort_order: Option<i64>,
 }
@@ -172,6 +194,8 @@ mod tests {
             arg_contains: arg_contains.map(str::to_string),
             action: HookAction::Deny,
             message: None,
+            command: None,
+            timeout_ms: None,
             enabled: true,
             sort_order: 0,
             created_at: 0,

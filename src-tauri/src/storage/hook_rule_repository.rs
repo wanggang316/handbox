@@ -39,6 +39,7 @@ fn action_as_str(action: HookAction) -> &'static str {
         HookAction::Ask => "ask",
         HookAction::Allow => "allow",
         HookAction::Notify => "notify",
+        HookAction::RunCommand => "run_command",
     }
 }
 
@@ -48,6 +49,7 @@ fn action_from_str(value: &str) -> Result<HookAction, AppError> {
         "ask" => Ok(HookAction::Ask),
         "allow" => Ok(HookAction::Allow),
         "notify" => Ok(HookAction::Notify),
+        "run_command" => Ok(HookAction::RunCommand),
         other => Err(AppError::internal_error(&format!(
             "Invalid hook action in database: {}",
             other
@@ -58,7 +60,8 @@ fn action_from_str(value: &str) -> Result<HookAction, AppError> {
 /// Every column, in a fixed order shared by all reads.
 const RULE_COLUMNS: &str = r#"
     SELECT id, name, event, tool_pattern, arg_field, arg_contains,
-           action, message, enabled, sort_order, created_at, updated_at
+           action, message, command, timeout_ms, enabled, sort_order,
+           created_at, updated_at
     FROM agent_hook_rules
 "#;
 
@@ -94,6 +97,8 @@ impl HookRuleRepository {
                     .as_str(),
             )?,
             message: row.try_get("message").map_err(decode_err)?,
+            command: row.try_get("command").map_err(decode_err)?,
+            timeout_ms: row.try_get("timeout_ms").map_err(decode_err)?,
             enabled: row.try_get::<i64, _>("enabled").map_err(decode_err)? != 0,
             sort_order: row.try_get("sort_order").map_err(decode_err)?,
             created_at: row.try_get("created_at").map_err(decode_err)?,
@@ -163,6 +168,8 @@ impl HookRuleRepository {
             arg_contains: blank_to_null(request.arg_contains),
             action: request.action,
             message: blank_to_null(request.message),
+            command: blank_to_null(request.command),
+            timeout_ms: request.timeout_ms,
             enabled: true,
             sort_order,
             created_at: now,
@@ -173,8 +180,9 @@ impl HookRuleRepository {
             r#"
             INSERT INTO agent_hook_rules
                 (id, name, event, tool_pattern, arg_field, arg_contains,
-                 action, message, enabled, sort_order, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 action, message, command, timeout_ms, enabled, sort_order,
+                 created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         "#,
         )
         .bind(&rule.id)
@@ -185,6 +193,8 @@ impl HookRuleRepository {
         .bind(&rule.arg_contains)
         .bind(action_as_str(rule.action))
         .bind(&rule.message)
+        .bind(&rule.command)
+        .bind(rule.timeout_ms)
         .bind(i64::from(rule.enabled))
         .bind(rule.sort_order)
         .bind(rule.created_at)
@@ -223,6 +233,10 @@ impl HookRuleRepository {
             message: request
                 .message
                 .map_or(current.message, |v| blank_to_null(Some(v))),
+            command: request
+                .command
+                .map_or(current.command, |v| blank_to_null(Some(v))),
+            timeout_ms: request.timeout_ms.or(current.timeout_ms),
             enabled: request.enabled.unwrap_or(current.enabled),
             sort_order: request.sort_order.unwrap_or(current.sort_order),
             updated_at: now,
@@ -233,9 +247,9 @@ impl HookRuleRepository {
             r#"
             UPDATE agent_hook_rules SET
                 name = $1, event = $2, tool_pattern = $3, arg_field = $4,
-                arg_contains = $5, action = $6, message = $7, enabled = $8,
-                sort_order = $9, updated_at = $10
-            WHERE id = $11
+                arg_contains = $5, action = $6, message = $7, command = $8,
+                timeout_ms = $9, enabled = $10, sort_order = $11, updated_at = $12
+            WHERE id = $13
         "#,
         )
         .bind(&updated.name)
@@ -245,6 +259,8 @@ impl HookRuleRepository {
         .bind(&updated.arg_contains)
         .bind(action_as_str(updated.action))
         .bind(&updated.message)
+        .bind(&updated.command)
+        .bind(updated.timeout_ms)
         .bind(i64::from(updated.enabled))
         .bind(updated.sort_order)
         .bind(updated.updated_at)
@@ -310,6 +326,8 @@ mod tests {
             arg_contains: Some("rm -rf".to_string()),
             action,
             message: Some("blocked by policy".to_string()),
+            command: None,
+            timeout_ms: None,
             sort_order: None,
         }
     }

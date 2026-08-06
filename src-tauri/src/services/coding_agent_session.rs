@@ -197,7 +197,8 @@ pub fn build_agent_session(
     // answered by writing the rule. Skipped entirely when no rule is configured.
     let rules = RuleHookExtension::new(config.session_id.clone(), config.hook_rules.clone())
         .with_approval_emitter(emitters.approval.clone())
-        .with_notifier(emitters.notify.clone());
+        .with_notifier(emitters.notify.clone())
+        .with_working_dir(config.working_dir.clone());
     // Logged unconditionally: "did my rule load?" is the first question when a
     // rule appears not to fire, and a zero here answers it immediately.
     tracing::info!(
@@ -1537,6 +1538,8 @@ mod tests {
             arg_contains: Some("rm -rf".to_string()),
             action: crate::storage::types::HookAction::Deny,
             message: None,
+            command: None,
+            timeout_ms: None,
             enabled: true,
             sort_order: 0,
             created_at: 0,
