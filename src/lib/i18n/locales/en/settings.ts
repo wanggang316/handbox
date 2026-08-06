@@ -123,6 +123,12 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
     "Tool name accepts * as a wildcard, e.g. mcp__* or *. Leave the argument name empty to search all arguments; leave the condition empty to match on the tool name alone.",
   "settings.hooks.deleteTitle": "Delete rule",
   "settings.hooks.deleteMessage": "Delete \"{name}\"?",
+  // Runtime notices — shown when a rule matches a tool call
+  "settings.hooks.notice.denied": "Rule \"{rule}\" blocked {tool}",
+  "settings.hooks.notice.allowed": "Rule \"{rule}\" allowed {tool}",
+  "settings.hooks.notice.approved": "Rule \"{rule}\" asked about {tool} — allowed",
+  "settings.hooks.notice.rejected": "Rule \"{rule}\" asked about {tool} — denied",
+  "settings.hooks.notice.observed": "Rule \"{rule}\" matched the result of {tool}",
 
   // Account page
   "settings.account.editProfile": "Edit Profile",

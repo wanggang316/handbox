@@ -24,9 +24,22 @@ use crate::storage::types::{HookAction, HookEvent, HookRule};
 
 const RULE_EXTENSION_NAME: &str = "handbox-hook-rules";
 
-/// Tauri event emitted when a `notify` rule matches a finished tool call.
-/// Carries `{ sessionId, ruleId, ruleName, toolName, success, message }`.
+/// Tauri event emitted whenever a rule matches — not only for the `notify`
+/// action. A rule that silently changes what the agent may do is worse than no
+/// rule: the user cannot tell "no rule matched" from "a rule fired and I missed
+/// it". Carries `{ sessionId, ruleId, ruleName, action, toolName, outcome,
+/// message }`.
 pub const HOOK_RULE_NOTIFY_EVENT: &str = "agent_hook_rule_notify";
+
+/// What actually happened to the call, for the notification payload. Distinct
+/// from the rule's action because an `ask` resolves either way.
+mod outcome {
+    pub const DENIED: &str = "denied";
+    pub const ALLOWED: &str = "allowed";
+    pub const APPROVED: &str = "approved";
+    pub const REJECTED: &str = "rejected";
+    pub const OBSERVED: &str = "observed";
+}
 
 /// Sink for [`HOOK_RULE_NOTIFY_EVENT`]. Same shape as [`ApprovalEmitter`] so the
 /// extension stays free of Tauri types and is testable with a plain closure.
@@ -98,6 +111,35 @@ impl RuleHookExtension {
     pub fn is_empty(&self) -> bool {
         self.before_rules.is_empty() && self.after_rules.is_empty()
     }
+
+    /// Report a match to the frontend and the log.
+    ///
+    /// Every match reports, whatever the action: a rule that quietly blocks or
+    /// waves through a tool call leaves the user unable to tell it apart from no
+    /// rule matching at all. The log line carries the same facts for the
+    /// headless paths, which have no emitter.
+    fn report(&self, rule: &HookRule, tool_name: &str, outcome: &str) {
+        tracing::info!(
+            rule = %rule.name,
+            rule_id = %rule.id,
+            action = ?rule.action,
+            tool = %tool_name,
+            outcome = %outcome,
+            "[hook_rules] rule matched"
+        );
+
+        if let Some(notify) = &self.notifier {
+            notify(serde_json::json!({
+                "sessionId": self.session_id,
+                "ruleId": rule.id,
+                "ruleName": rule.name,
+                "action": rule.action,
+                "toolName": tool_name,
+                "outcome": outcome,
+                "message": rule.message,
+            }));
+        }
+    }
 }
 
 /// The refusal handed to the model. Uses the rule's own message when set, so the
@@ -130,10 +172,13 @@ impl Extension for RuleHookExtension {
         };
 
         match rule.action {
-            HookAction::Deny => Ok(HookDecision::Cancel(rule_deny_reason(
-                rule,
-                &event.tool_name,
-            ))),
+            HookAction::Deny => {
+                self.report(rule, &event.tool_name, outcome::DENIED);
+                Ok(HookDecision::Cancel(rule_deny_reason(
+                    rule,
+                    &event.tool_name,
+                )))
+            }
             HookAction::Allow => {
                 // Consent for this one call, so the approval gate behind us does
                 // not prompt for what a rule already permits.
@@ -146,6 +191,7 @@ impl Extension for RuleHookExtension {
                 if self.emitter.is_some() {
                     clear_call_for_rule(&event.call_id);
                 }
+                self.report(rule, &event.tool_name, outcome::ALLOWED);
                 Ok(HookDecision::Continue)
             }
             HookAction::Ask => {
@@ -159,9 +205,19 @@ impl Extension for RuleHookExtension {
                 .await;
                 // The user just answered for this call; clear it so a dangerous
                 // tool does not raise a second, identical dialog.
-                if matches!(decision, HookDecision::Continue) {
+                let approved = matches!(decision, HookDecision::Continue);
+                if approved {
                     clear_call_for_rule(&event.call_id);
                 }
+                self.report(
+                    rule,
+                    &event.tool_name,
+                    if approved {
+                        outcome::APPROVED
+                    } else {
+                        outcome::REJECTED
+                    },
+                );
                 Ok(decision)
             }
             // Only meaningful after a call; a rule stored this way is inert
@@ -190,17 +246,7 @@ impl Extension for RuleHookExtension {
             return Ok(());
         }
 
-        if let Some(notify) = &self.notifier {
-            notify(serde_json::json!({
-                "sessionId": self.session_id,
-                "ruleId": rule.id,
-                "ruleName": rule.name,
-                "toolName": event.tool_name,
-                "success": event.success,
-                "message": rule.message,
-            }));
-        }
-
+        self.report(rule, &event.tool_name, outcome::OBSERVED);
         Ok(())
     }
 }
@@ -438,6 +484,60 @@ mod tests {
 
         let decision = hook.await.unwrap().unwrap();
         assert!(matches!(decision, HookDecision::Continue));
+    }
+
+    /// A block must announce itself. Without this the user cannot tell a rule
+    /// firing apart from no rule matching — the failure that made the feature
+    /// look broken in real use.
+    #[tokio::test]
+    async fn a_deny_rule_reports_the_block() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let ext = RuleHookExtension::new(
+            "s8".to_string(),
+            vec![rule(
+                "block rm",
+                HookEvent::BeforeToolCall,
+                HookAction::Deny,
+            )],
+        )
+        .with_notifier(Some(notifier));
+
+        ext.on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /"})))
+            .await
+            .unwrap();
+
+        let events = seen.lock().unwrap();
+        assert_eq!(events.len(), 1, "a block must surface");
+        assert_eq!(events[0]["outcome"], "denied");
+        assert_eq!(events[0]["ruleName"], "block rm");
+        assert_eq!(events[0]["toolName"], "bash");
+    }
+
+    /// A call no rule matched stays silent, or every tool call would toast.
+    #[tokio::test]
+    async fn a_non_matching_call_reports_nothing() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let ext = RuleHookExtension::new(
+            "s9".to_string(),
+            vec![rule(
+                "block rm",
+                HookEvent::BeforeToolCall,
+                HookAction::Deny,
+            )],
+        )
+        .with_notifier(Some(notifier));
+
+        ext.on_before_tool_call(&cx(), &call("bash", json!({"command": "ls"})))
+            .await
+            .unwrap();
+
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     /// `notify` fires on the result rather than the arguments, since a finished

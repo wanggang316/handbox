@@ -116,6 +116,12 @@ export const settingsZh = {
     "工具名支持 * 通配，如 mcp__* 或 *。留空参数名则在全部参数中查找；参数条件留空表示只按工具名匹配。",
   "settings.hooks.deleteTitle": "删除规则",
   "settings.hooks.deleteMessage": "确定要删除「{name}」吗？",
+  // Runtime notices — shown when a rule matches a tool call
+  "settings.hooks.notice.denied": "规则「{rule}」拦截了 {tool}",
+  "settings.hooks.notice.allowed": "规则「{rule}」放行了 {tool}",
+  "settings.hooks.notice.approved": "规则「{rule}」要求确认 {tool}，已允许",
+  "settings.hooks.notice.rejected": "规则「{rule}」要求确认 {tool}，已拒绝",
+  "settings.hooks.notice.observed": "规则「{rule}」匹配了 {tool} 的结果",
 
   // Account page
   "settings.account.editProfile": "编辑资料",

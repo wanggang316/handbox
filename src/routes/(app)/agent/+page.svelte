@@ -12,6 +12,9 @@
   } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
+  // Side-effect import: constructing the store starts the global hook-rule
+  // listener, the same way the approval store starts its own.
+  import "$lib/states/hookRuleNotice.svelte";
   import { agentProjectState } from "$lib/states/agentProject.svelte";
   import AgentSessionHeader from "$lib/components/agentsession/AgentSessionHeader.svelte";
   import AgentInput from "$lib/components/agentsession/AgentInput.svelte";

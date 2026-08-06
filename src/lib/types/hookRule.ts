@@ -60,12 +60,25 @@ export interface UpdateHookRuleRequest {
   sortOrder?: number;
 }
 
-/** Payload of the `agent_hook_rule_notify` event raised by a `notify` rule. */
+/** What actually happened to the call; an `ask` resolves either way. */
+export type HookRuleOutcome =
+  | "denied"
+  | "allowed"
+  | "approved"
+  | "rejected"
+  | "observed";
+
+/**
+ * Payload of `agent_hook_rule_notify`, emitted on **every** rule match, not
+ * just the `notify` action — otherwise a rule that blocks or waves through a
+ * call is indistinguishable from no rule matching at all.
+ */
 export interface HookRuleNotification {
   sessionId: string;
   ruleId: string;
   ruleName: string;
+  action: HookAction;
   toolName: string;
-  success: boolean;
+  outcome: HookRuleOutcome;
   message: string | null;
 }

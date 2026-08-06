@@ -198,6 +198,12 @@ pub fn build_agent_session(
     let rules = RuleHookExtension::new(config.session_id.clone(), config.hook_rules.clone())
         .with_approval_emitter(emitters.approval.clone())
         .with_notifier(emitters.notify.clone());
+    // Logged unconditionally: "did my rule load?" is the first question when a
+    // rule appears not to fire, and a zero here answers it immediately.
+    tracing::info!(
+        hook_rules = config.hook_rules.len(),
+        "[build_agent_session] hook rules loaded"
+    );
     if !rules.is_empty() {
         session.register_extension(Arc::new(rules));
     }

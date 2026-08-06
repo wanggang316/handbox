@@ -20,6 +20,7 @@ import type {
   AgentSessionLifecyclePayload,
   AgentApprovalRequest,
   ApprovalDecision,
+  HookRuleNotification,
 } from "../types";
 
 export async function createAgentSession(
@@ -194,6 +195,11 @@ export interface AgentStreamEventHandlers {
    * independent of the run channels; answer via `respondAgentApproval`.
    */
   onApprovalRequest?: (payload: AgentApprovalRequest) => void;
+  /**
+   * A hook rule matched this run's tool call. Fires for every action, so the
+   * user can tell a rule firing apart from no rule matching.
+   */
+  onHookRuleMatch?: (payload: HookRuleNotification) => void;
 }
 
 /** Subscribes to all agent event channels; returns a function that removes every listener. */
@@ -215,6 +221,9 @@ export async function listenToAgentStreamEvents(
     }),
     listen<AgentApprovalRequest>("agent_approval_request", (event) => {
       handlers.onApprovalRequest?.(event.payload);
+    }),
+    listen<HookRuleNotification>("agent_hook_rule_notify", (event) => {
+      handlers.onHookRuleMatch?.(event.payload);
     }),
   ];
 
