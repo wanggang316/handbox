@@ -52,6 +52,8 @@ mod outcome {
     pub const REWROTE: &str = "rewrote";
     /// It failed after the call had already run, so nothing could be undone.
     pub const FAILED: &str = "failed";
+    /// Its command contributed context for the model to read this turn.
+    pub const INFORMED: &str = "informed";
 }
 
 /// Sink for [`HOOK_RULE_NOTIFY_EVENT`]. Same shape as [`ApprovalEmitter`] so the
@@ -285,13 +287,24 @@ impl Extension for RuleHookExtension {
                     .await;
 
                 match verdict {
-                    // v0.4.2 added `additional_context`, which would let a
-                    // command's stdout be injected here as context for the
-                    // model. Not wired yet — the executor currently discards
-                    // non-decision stdout.
-                    CommandVerdict::Proceed => {
-                        self.report(rule, SUBJECT, outcome::RAN);
-                        Ok(UserMessageOutcome::cont())
+                    // The command's non-decision output becomes context the
+                    // model reads for this turn. Upstream attributes it to this
+                    // extension and records it as its own message, so it never
+                    // masquerades as something the user typed.
+                    CommandVerdict::Proceed { context } => {
+                        self.report(
+                            rule,
+                            SUBJECT,
+                            if context.is_some() {
+                                outcome::INFORMED
+                            } else {
+                                outcome::RAN
+                            },
+                        );
+                        Ok(match context {
+                            Some(text) => UserMessageOutcome::context(text),
+                            None => UserMessageOutcome::cont(),
+                        })
                     }
                     CommandVerdict::Deny(reason) => {
                         self.report(rule, SUBJECT, outcome::DENIED);
@@ -398,7 +411,10 @@ impl Extension for RuleHookExtension {
                 });
 
                 match verdict.await {
-                    CommandVerdict::Proceed => {
+                    // A tool-call hook has no context channel upstream, so any
+                    // text the command printed is dropped rather than smuggled
+                    // somewhere it does not belong.
+                    CommandVerdict::Proceed { .. } => {
                         self.report(rule, &event.tool_name, outcome::RAN);
                         Ok(HookDecision::Continue)
                     }
@@ -471,7 +487,7 @@ impl Extension for RuleHookExtension {
                         self.report(rule, &event.tool_name, outcome::FAILED);
                         Ok(ResultDecision::Continue)
                     }
-                    CommandVerdict::Proceed => {
+                    CommandVerdict::Proceed { .. } => {
                         self.report(rule, &event.tool_name, outcome::RAN);
                         Ok(ResultDecision::Continue)
                     }
@@ -994,6 +1010,63 @@ mod tests {
         assert_eq!(seen["event"], "after_tool_call");
         assert_eq!(seen["success"], true);
         assert_eq!(seen["result"]["path"], "/repo/a.rs");
+    }
+
+    /// The case #147 was filed for: tell the model something without spending
+    /// the turn. The prompt is untouched and the context rides alongside it.
+    #[tokio::test]
+    async fn a_prompt_command_can_contribute_context() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s21".to_string(),
+            vec![HookRule {
+                event: HookEvent::UserPromptSubmit,
+                arg_field: None,
+                arg_contains: None,
+                action: HookAction::RunCommand,
+                command: Some("echo 'on branch main, 3 files dirty'".to_string()),
+                ..rule("state", HookEvent::UserPromptSubmit, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let outcome = ext
+            .on_user_message(&cx(), &prompt("fix the build"))
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(outcome.decision, HookDecision::Continue),
+            "informing the model must not cost the turn"
+        );
+        assert_eq!(
+            outcome.additional_context.as_deref(),
+            Some("on branch main, 3 files dirty")
+        );
+    }
+
+    /// A command that only acts contributes nothing, so a hook that writes a
+    /// file does not also whisper at the model.
+    #[tokio::test]
+    async fn a_silent_prompt_command_contributes_no_context() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s22".to_string(),
+            vec![HookRule {
+                event: HookEvent::UserPromptSubmit,
+                arg_field: None,
+                arg_contains: None,
+                action: HookAction::RunCommand,
+                command: Some("true".to_string()),
+                ..rule("quiet", HookEvent::UserPromptSubmit, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let outcome = ext.on_user_message(&cx(), &prompt("hi")).await.unwrap();
+
+        assert!(matches!(outcome.decision, HookDecision::Continue));
+        assert_eq!(outcome.additional_context, None);
     }
 
     /// v0.4.2 made the after hook able to rewrite a result, so a command can

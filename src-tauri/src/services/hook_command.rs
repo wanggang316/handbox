@@ -7,12 +7,18 @@
 //!
 //! ```text
 //! stdin   {"event":"before_tool_call","toolName":"bash","arguments":{...},...}
-//! stdout  {"decision":"deny","reason":"..."}   → block the call
-//!         {"updatedInput":{...}}               → run the tool with these args
-//!         anything else / nothing              → proceed unchanged
+//! stdout  {"decision":"deny","reason":"..."}     → block the call
+//!         {"updatedInput":{...}}                 → before: new tool args
+//!                                                  after:  new tool result
+//!         {"additionalContext":"..."}            → text for the model
+//!         plain text                             → same, as context
+//!         nothing                                → proceed unchanged
 //! exit    0        → stdout decides
 //!         non-zero → block, stderr is the reason
 //! ```
+//!
+//! Only the prompt hook has somewhere to put context; the tool-call hooks
+//! discard it, so a hook that logs to stdout stays a logger.
 //!
 //! Timeouts fail CLOSED on a pending call, matching the approval gate: a hook
 //! that was asked for an opinion and did not answer is not consent.
@@ -31,12 +37,20 @@ const MAX_CAPTURED_OUTPUT: usize = 64 * 1024;
 /// What the command told us to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandVerdict {
-    /// Proceed unchanged.
-    Proceed,
+    /// Proceed. `context` is text the hook wants the model to see; only the
+    /// prompt hook has somewhere to put it, so the tool-call hooks ignore it.
+    Proceed { context: Option<String> },
     /// Block the call with this reason.
     Deny(String),
     /// Run the tool with these arguments instead.
     ReplaceInput(serde_json::Value),
+}
+
+impl CommandVerdict {
+    /// Proceed with nothing to add — the common case.
+    pub fn proceed() -> Self {
+        Self::Proceed { context: None }
+    }
 }
 
 /// The subset of the response we act on. Unknown fields are ignored so a hook
@@ -50,6 +64,10 @@ struct CommandResponse {
     reason: Option<String>,
     #[serde(default)]
     updated_input: Option<serde_json::Value>,
+    /// Text to put in front of the model, mirroring Claude Code's field of the
+    /// same name. Orthogonal to the decision: a hook can allow *and* inform.
+    #[serde(default)]
+    additional_context: Option<String>,
 }
 
 /// Everything the command needs to run: what to run, where, and for how long.
@@ -120,16 +138,23 @@ pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) 
     parse_verdict(&stdout)
 }
 
-/// Interpret stdout. Anything that is not a recognised decision object means
-/// "no opinion" — a hook that just logs should not have to print JSON.
+/// Interpret stdout. Anything that is not a recognised decision means "no
+/// opinion, but here is what I found" — a hook should not have to print JSON to
+/// contribute context, and printing prose must never be read as a decision.
 fn parse_verdict(stdout: &str) -> CommandVerdict {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
-        return CommandVerdict::Proceed;
+        return CommandVerdict::proceed();
     }
 
     let Ok(response) = serde_json::from_str::<CommandResponse>(trimmed) else {
-        return CommandVerdict::Proceed;
+        // Plain output is context, not noise. `echo "branch: $(git branch
+        // --show-current)"` should be a complete hook, which is how Claude Code
+        // treats stdout on prompt submission. Hooks with nowhere to put context
+        // discard it, so a logger that prints is still just a logger.
+        return CommandVerdict::Proceed {
+            context: Some(trimmed.to_string()),
+        };
     };
 
     if response.decision.as_deref() == Some("deny") {
@@ -141,9 +166,11 @@ fn parse_verdict(stdout: &str) -> CommandVerdict {
         );
     }
 
+    let context = response.additional_context.filter(|c| !c.trim().is_empty());
+
     match response.updated_input {
         Some(input) if input.is_object() => CommandVerdict::ReplaceInput(input),
-        _ => CommandVerdict::Proceed,
+        _ => CommandVerdict::Proceed { context },
     }
 }
 
@@ -193,7 +220,7 @@ mod tests {
     async fn a_silent_command_proceeds() {
         let dir = TempDir::new().unwrap();
         let verdict = run_hook_command(spec("true", dir.path()), &json!({})).await;
-        assert_eq!(verdict, CommandVerdict::Proceed);
+        assert_eq!(verdict, CommandVerdict::proceed());
     }
 
     /// The plain side-effect case: a hook that just does work and says nothing.
@@ -205,7 +232,7 @@ mod tests {
 
         let verdict = run_hook_command(spec(&command, dir.path()), &json!({})).await;
 
-        assert_eq!(verdict, CommandVerdict::Proceed);
+        assert_eq!(verdict, CommandVerdict::proceed());
         assert!(marker.exists(), "the command's side effect must happen");
     }
 
@@ -268,12 +295,47 @@ mod tests {
         }
     }
 
-    /// A hook that logs prose must not be mistaken for one that has an opinion.
+    /// Prose is not a decision — but it is not thrown away either: it becomes
+    /// context for whichever hook has somewhere to put it.
     #[tokio::test]
-    async fn non_json_output_is_not_a_decision() {
+    async fn non_json_output_becomes_context_not_a_decision() {
         let dir = TempDir::new().unwrap();
         let verdict = run_hook_command(spec("echo formatting done", dir.path()), &json!({})).await;
-        assert_eq!(verdict, CommandVerdict::Proceed);
+        assert_eq!(
+            verdict,
+            CommandVerdict::Proceed {
+                context: Some("formatting done".to_string())
+            }
+        );
+    }
+
+    /// The explicit field, for a hook that prints structured output and still
+    /// wants to contribute context.
+    #[tokio::test]
+    async fn additional_context_is_read_from_the_json_field() {
+        let dir = TempDir::new().unwrap();
+        let command = r#"echo '{"additionalContext":"on branch main, 3 files dirty"}'"#;
+
+        let verdict = run_hook_command(spec(command, dir.path()), &json!({})).await;
+
+        assert_eq!(
+            verdict,
+            CommandVerdict::Proceed {
+                context: Some("on branch main, 3 files dirty".to_string())
+            }
+        );
+    }
+
+    /// A decision object with no context field contributes none, rather than
+    /// having its own JSON read back at the model.
+    #[tokio::test]
+    async fn a_bare_decision_object_contributes_no_context() {
+        let dir = TempDir::new().unwrap();
+        let command = r#"echo '{"updatedInput":{"command":"ls"}}'"#;
+
+        let verdict = run_hook_command(spec(command, dir.path()), &json!({})).await;
+
+        assert!(matches!(verdict, CommandVerdict::ReplaceInput(_)));
     }
 
     /// Fail closed: a hook asked for an opinion that never answers is not consent.
@@ -324,6 +386,6 @@ mod tests {
     async fn a_missing_working_dir_falls_back_instead_of_failing() {
         let missing = PathBuf::from("/definitely/not/here/at/all");
         let verdict = run_hook_command(spec("true", &missing), &json!({})).await;
-        assert_eq!(verdict, CommandVerdict::Proceed);
+        assert_eq!(verdict, CommandVerdict::proceed());
     }
 }

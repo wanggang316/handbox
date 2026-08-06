@@ -87,7 +87,9 @@ export type HookRuleOutcome =
   /** Its command rewrote the tool's arguments. */
   | "rewrote"
   /** It failed after the call had run, so nothing could be undone. */
-  | "failed";
+  | "failed"
+  /** Its command contributed context for the model to read this turn. */
+  | "informed";
 
 /**
  * Payload of `agent_hook_rule_notify`, emitted on **every** rule match, not

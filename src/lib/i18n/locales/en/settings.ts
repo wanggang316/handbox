@@ -124,7 +124,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.field.promptContainsPlaceholder": "Leave empty to fire on every prompt",
   "settings.hooks.field.command": "Command",
   "settings.hooks.field.commandHint":
-    "The event arrives as JSON on stdin; $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME are set. Runs in the session's working directory, 10s timeout by default. Print {\"decision\":\"deny\",\"reason\":\"…\"} to block or {\"updatedInput\":{…}} to rewrite the arguments; printing nothing lets the call through, and a non-zero exit blocks it.",
+    "The event arrives as JSON on stdin; $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME are set. Runs in the session's working directory, 10s timeout by default. Print {\"decision\":\"deny\",\"reason\":\"…\"} to block or {\"updatedInput\":{…}} to rewrite the arguments (after a call this rewrites the result, which is how redaction works); a non-zero exit blocks it. On prompt submission, plain output becomes context for the model — or set it explicitly with {\"additionalContext\":\"…\"}.",
   "settings.hooks.field.message": "Message (optional)",
   "settings.hooks.field.messagePlaceholder": "Given to the model as the reason when denied",
   "settings.hooks.field.hint":
@@ -140,6 +140,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.notice.ran": "Rule \"{rule}\" ran its command on {tool}",
   "settings.hooks.notice.rewrote": "Rule \"{rule}\" rewrote the arguments to {tool}",
   "settings.hooks.notice.failed": "Rule \"{rule}\" command failed on {tool}",
+  "settings.hooks.notice.informed": "Rule \"{rule}\" added context for this turn",
 
   // Account page
   "settings.account.editProfile": "Edit Profile",
