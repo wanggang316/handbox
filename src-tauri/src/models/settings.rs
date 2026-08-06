@@ -46,7 +46,16 @@ pub struct GeneralSettings {
     pub theme_color: ThemeColor,
     pub language: Language,
     pub auto_scroll: bool,
+    /// macOS frosted-glass sidebar (behind-window vibrancy). Ignored on
+    /// platforms without the effect; default on so configs written before the
+    /// field existed pick up the native look.
+    #[serde(default = "default_sidebar_vibrancy")]
+    pub sidebar_vibrancy: bool,
     pub shortcuts: ShortcutConfig,
+}
+
+fn default_sidebar_vibrancy() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -495,6 +504,7 @@ mod tests {
                 theme_color: ThemeColor::System,
                 language: Language::ZhCN,
                 auto_scroll: true,
+                sidebar_vibrancy: true,
                 shortcuts: ShortcutConfig {
                     send_message: "Enter".to_string(),
                     new_line: "Shift+Enter".to_string(),

@@ -8,6 +8,8 @@
     <script>
       // Paint the persisted theme before any CSS loads: the webview background defaults to the
       // system scheme and HTML to white, so a system-dark + app-light start would flash.
+      // With macOS sidebar vibrancy on, the root must stay transparent instead — any opaque
+      // inline color here would cover the native blur layer behind the window.
       (function () {
         try {
           var t = localStorage.getItem("theme") || "system";
@@ -15,9 +17,16 @@
             t = window.matchMedia("(prefers-color-scheme: dark)").matches
               ? "dark"
               : "light";
+          var vibrancy =
+            !!window.__TAURI_INTERNALS__ &&
+            navigator.userAgent.includes("Macintosh") &&
+            localStorage.getItem("sidebarVibrancy") !== "false";
           document.documentElement.dataset.theme = t;
-          document.documentElement.style.backgroundColor =
-            t === "dark" ? "#131316" : "#FCFCFC";
+          document.documentElement.style.backgroundColor = vibrancy
+            ? "transparent"
+            : t === "dark"
+              ? "#131316"
+              : "#FCFCFC";
           document.documentElement.style.colorScheme = t;
         } catch (e) {}
       })();

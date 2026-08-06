@@ -12,6 +12,8 @@ export const settingsZh = {
   "settings.general.appearanceDesc": "选择界面的明暗配色方案",
   "settings.general.languageDesc": "界面显示语言",
   "settings.general.autoScrollDesc": "有新消息时自动滚动到底部",
+  "settings.general.sidebarVibrancy": "侧边栏毛玻璃效果",
+  "settings.general.sidebarVibrancyDesc": "侧边栏背景呈现 macOS 原生半透明磨砂质感",
 
   // Sidebar
   "settings.sidebar.backToApp": "返回应用",

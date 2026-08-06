@@ -40,6 +40,17 @@ export function ensureTauriEnvironment(): void {
   }
 }
 
+/**
+ * Detect macOS from the user agent (WKWebView reports "Macintosh"). Used to
+ * gate macOS-only presentation such as sidebar vibrancy.
+ */
+export function isMacOS(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  return navigator.userAgent.includes("Macintosh");
+}
+
 /** Environment-detection details, for debugging. */
 export function getTauriEnvironmentInfo() {
   if (typeof window === "undefined") {

@@ -3,10 +3,16 @@
  */
 
 import type { Theme, Language } from "../types";
-import { isTauriEnvironment } from "../utils/tauri";
+import { isMacOS, isTauriEnvironment } from "../utils/tauri";
 
 const LAST_AGENT_SESSION_ID_KEY = "lastAgentSessionId";
 const LANGUAGE_KEY = "language";
+const SIDEBAR_VIBRANCY_KEY = "sidebarVibrancy";
+
+function loadPersistedSidebarVibrancy(): boolean {
+  if (typeof localStorage === "undefined") return true;
+  return localStorage.getItem(SIDEBAR_VIBRANCY_KEY) !== "false";
+}
 
 const SUPPORTED_LANGUAGES: ReadonlySet<Language> = new Set<Language>([
   "zh-CN",
@@ -43,6 +49,7 @@ interface UIStateData {
   notifications: Notification[];
   theme: Theme;
   language: Language;
+  sidebarVibrancy: boolean;
   globalLoading: boolean;
   lastAgentSessionId: string | null;
 }
@@ -56,6 +63,7 @@ class UIState {
     notifications: [],
     theme: "system",
     language: loadPersistedLanguage(),
+    sidebarVibrancy: loadPersistedSidebarVibrancy(),
     globalLoading: false,
     lastAgentSessionId: loadPersistedLastAgentSessionId(),
   });
@@ -87,6 +95,10 @@ class UIState {
 
   get language() {
     return this.state.language;
+  }
+
+  get sidebarVibrancy() {
+    return this.state.sidebarVibrancy;
   }
 
   get globalLoading() {
@@ -238,6 +250,33 @@ class UIState {
       .catch((error) => {
         console.error("Failed to sync native window theme:", error);
       });
+  }
+
+  /**
+   * Toggle the macOS frosted-glass sidebar. Persists to localStorage for a
+   * flash-free first paint; the class only ever lands on <html> in a macOS
+   * Tauri window, where the native vibrancy layer actually exists — elsewhere
+   * a transparent sidebar would show a hole, so the backdrop stays opaque.
+   */
+  setSidebarVibrancy(enabled: boolean): void {
+    this.state.sidebarVibrancy = enabled;
+
+    if (typeof localStorage !== "undefined") {
+      const value = String(enabled);
+      if (localStorage.getItem(SIDEBAR_VIBRANCY_KEY) !== value) {
+        localStorage.setItem(SIDEBAR_VIBRANCY_KEY, value);
+      }
+    }
+
+    if (typeof document !== "undefined") {
+      const active = enabled && isTauriEnvironment() && isMacOS();
+      document.documentElement.classList.toggle("sidebar-vibrancy", active);
+      // The app.html anti-flash script writes an opaque inline background on
+      // <html> at boot; any opaque color there covers the native blur layer,
+      // so vibrancy owns it while active. Cleared (not repainted) when
+      // inactive — the layouts paint an opaque --bg-sidebar themselves.
+      document.documentElement.style.backgroundColor = active ? "transparent" : "";
+    }
   }
 
   setLanguage(lang: Language): void {

@@ -20,7 +20,7 @@
         "height": 800,
         "minWidth": 500,
         "decorations": true,
-        "transparent": false,
+        "transparent": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "visible": false,
