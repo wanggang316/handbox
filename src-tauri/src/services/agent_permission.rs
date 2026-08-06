@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use hand_coding_agent::core::extensions::api::{
-    ExtensionCapabilities, ToolCallEvent, ToolResultEvent,
+    ExtensionCapabilities, ResultDecision, ToolCallEvent, ToolResultEvent,
 };
 use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
@@ -130,8 +130,10 @@ impl Extension for SandboxExtension {
         &self,
         _cx: &ExtensionContext,
         _event: &ToolResultEvent,
-    ) -> Result<(), ExtensionError> {
-        Ok(())
+    ) -> Result<ResultDecision, ExtensionError> {
+        // Permission is decided before the call; the result is none of its
+        // business.
+        Ok(ResultDecision::Continue)
     }
 }
 
@@ -202,8 +204,10 @@ impl Extension for DangerousDenyExtension {
         &self,
         _cx: &ExtensionContext,
         _event: &ToolResultEvent,
-    ) -> Result<(), ExtensionError> {
-        Ok(())
+    ) -> Result<ResultDecision, ExtensionError> {
+        // Permission is decided before the call; the result is none of its
+        // business.
+        Ok(ResultDecision::Continue)
     }
 }
 
@@ -375,7 +379,6 @@ impl PermissionExtension {
         self.approval_tools = approval_tools;
         self
     }
-
 }
 
 /// Request approval for one tool call and await the decision: `Continue` on
@@ -513,8 +516,10 @@ impl Extension for PermissionExtension {
         &self,
         _cx: &ExtensionContext,
         _event: &ToolResultEvent,
-    ) -> Result<(), ExtensionError> {
-        Ok(())
+    ) -> Result<ResultDecision, ExtensionError> {
+        // Permission is decided before the call; the result is none of its
+        // business.
+        Ok(ResultDecision::Continue)
     }
 }
 
@@ -1086,7 +1091,9 @@ mod tests {
                         "{tool} cancel reason should name the denied tool, got: {reason:?}"
                     );
                 }
-                other => panic!("{tool} must be Cancelled by the dangerous-deny ext, got {other:?}"),
+                other => {
+                    panic!("{tool} must be Cancelled by the dangerous-deny ext, got {other:?}")
+                }
             }
         }
     }

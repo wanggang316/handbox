@@ -77,11 +77,11 @@ handbox-mcp = { path = "crates/handbox-mcp" }
 # dissolve-handbox-llm migration. HandBox uses the embedded catalog only;
 # v0.4.0 additionally streams the Anthropic Messages API incrementally
 # instead of buffering the whole reply (hand-ai#135).
-hand-ai-model = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.1", package = "model" }
+hand-ai-model = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.2", package = "model" }
 # Agent runtime crate from hand-ai, same git source + tag as the model crate
 # above so Cargo unifies the transitive `model` dependency to a single copy
 # (hand-agent depends on model via path; same-source+same-tag => dedup).
-hand-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.1", package = "hand-agent" }
+hand-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.2", package = "hand-agent" }
 # Coding-agent runtime crate from hand-ai, same git source + tag as the model
 # and hand-agent crates above so Cargo unifies the transitive `model`/`hand-agent`
 # dependencies to a single copy (same-source+same-tag => dedup). Drives Agent
@@ -91,7 +91,7 @@ hand-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.1
 # rusqlite's `links = "sqlite3"` claim — cargo allows only one per graph, and
 # sqlx already holds it. Sessions stay on `SessionBackend::Jsonl`, which is what
 # HandBox uses; selecting the sqlite backend would now fail loudly.
-hand-coding-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.1", package = "hand-coding-agent", default-features = false }
+hand-coding-agent = { git = "https://github.com/wanggang316/hand-ai.git", tag = "v0.4.2", package = "hand-coding-agent", default-features = false }
 tokio-util = "0.7"
 croner = "3.0.1"
 

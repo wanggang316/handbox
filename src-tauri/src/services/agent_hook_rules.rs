@@ -16,7 +16,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hand_coding_agent::core::extensions::api::{ToolCallEvent, ToolResultEvent, UserMessageEvent};
+use hand_coding_agent::core::extensions::api::{
+    ResultDecision, ToolCallEvent, ToolResultEvent, UserMessageEvent, UserMessageOutcome,
+};
 use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
 };
@@ -247,13 +249,13 @@ impl Extension for RuleHookExtension {
         &self,
         _cx: &ExtensionContext,
         event: &UserMessageEvent,
-    ) -> Result<HookDecision, ExtensionError> {
+    ) -> Result<UserMessageOutcome, ExtensionError> {
         let Some(rule) = self
             .prompt_rules
             .iter()
             .find(|rule| rule.matches_subject(&MatchSubject::Text(&event.text)))
         else {
-            return Ok(HookDecision::Continue);
+            return Ok(UserMessageOutcome::cont());
         };
 
         // The subject is the prompt, so the "tool" in a notice is the prompt
@@ -263,11 +265,11 @@ impl Extension for RuleHookExtension {
         match rule.action {
             HookAction::Deny => {
                 self.report(rule, SUBJECT, outcome::DENIED);
-                Ok(HookDecision::Cancel(rule_deny_reason(rule, SUBJECT)))
+                Ok(HookDecision::Cancel(rule_deny_reason(rule, SUBJECT)).into())
             }
             HookAction::Notify => {
                 self.report(rule, SUBJECT, outcome::OBSERVED);
-                Ok(HookDecision::Continue)
+                Ok(UserMessageOutcome::cont())
             }
             HookAction::RunCommand => {
                 let verdict = self
@@ -283,35 +285,40 @@ impl Extension for RuleHookExtension {
                     .await;
 
                 match verdict {
+                    // v0.4.2 added `additional_context`, which would let a
+                    // command's stdout be injected here as context for the
+                    // model. Not wired yet — the executor currently discards
+                    // non-decision stdout.
                     CommandVerdict::Proceed => {
                         self.report(rule, SUBJECT, outcome::RAN);
-                        Ok(HookDecision::Continue)
+                        Ok(UserMessageOutcome::cont())
                     }
                     CommandVerdict::Deny(reason) => {
                         self.report(rule, SUBJECT, outcome::DENIED);
-                        Ok(HookDecision::Cancel(reason))
+                        Ok(HookDecision::Cancel(reason).into())
                     }
                     // Upstream expects a JSON *string* here, not an object: the
                     // replacement is the prompt text itself.
                     CommandVerdict::ReplaceInput(value) => match value.get("prompt") {
                         Some(serde_json::Value::String(text)) => {
                             self.report(rule, SUBJECT, outcome::REWROTE);
-                            Ok(HookDecision::Replace(serde_json::Value::String(
-                                text.clone(),
-                            )))
+                            Ok(
+                                HookDecision::Replace(serde_json::Value::String(text.clone()))
+                                    .into(),
+                            )
                         }
                         // A rewrite that does not carry a prompt string would be
                         // dropped by the host anyway; treat it as no opinion
                         // rather than silently mangling the turn.
                         _ => {
                             self.report(rule, SUBJECT, outcome::RAN);
-                            Ok(HookDecision::Continue)
+                            Ok(UserMessageOutcome::cont())
                         }
                     },
                 }
             }
             // Ask/Allow gate a tool call; there is no call here to gate.
-            _ => Ok(HookDecision::Continue),
+            _ => Ok(UserMessageOutcome::cont()),
         }
     }
 
@@ -415,7 +422,7 @@ impl Extension for RuleHookExtension {
         &self,
         _cx: &ExtensionContext,
         event: &ToolResultEvent,
-    ) -> Result<(), ExtensionError> {
+    ) -> Result<ResultDecision, ExtensionError> {
         // After a call there are no arguments left to match on, so the needle is
         // tested against the tool's RESULT.
         let Some(rule) = self
@@ -423,12 +430,13 @@ impl Extension for RuleHookExtension {
             .iter()
             .find(|rule| rule.matches(&event.tool_name, &event.result))
         else {
-            return Ok(());
+            return Ok(ResultDecision::Continue);
         };
 
         match rule.action {
             HookAction::Notify => {
                 self.report(rule, &event.tool_name, outcome::OBSERVED);
+                Ok(ResultDecision::Continue)
             }
             HookAction::RunCommand => {
                 // The call already ran, so a verdict cannot undo it. The command
@@ -449,17 +457,29 @@ impl Extension for RuleHookExtension {
                     })
                     .await;
 
-                let outcome = match verdict {
-                    CommandVerdict::Deny(_) => outcome::FAILED,
-                    _ => outcome::RAN,
-                };
-                self.report(rule, &event.tool_name, outcome);
+                match verdict {
+                    // A `Replace` here rewrites what the model reads AND what
+                    // the transcript records, which is what makes redaction
+                    // actually redact rather than just hide.
+                    CommandVerdict::ReplaceInput(result) => {
+                        self.report(rule, &event.tool_name, outcome::REWROTE);
+                        Ok(ResultDecision::Replace(result))
+                    }
+                    // The call already ran, so a denial cannot undo it; it is
+                    // reported and the result stands.
+                    CommandVerdict::Deny(_) => {
+                        self.report(rule, &event.tool_name, outcome::FAILED);
+                        Ok(ResultDecision::Continue)
+                    }
+                    CommandVerdict::Proceed => {
+                        self.report(rule, &event.tool_name, outcome::RAN);
+                        Ok(ResultDecision::Continue)
+                    }
+                }
             }
             // A decision action cannot un-run a finished call.
-            _ => {}
+            _ => Ok(ResultDecision::Continue),
         }
-
-        Ok(())
     }
 }
 
@@ -781,7 +801,7 @@ mod tests {
             .on_user_message(&cx(), &prompt("please deploy to prod now"))
             .await
             .unwrap();
-        match blocked {
+        match blocked.decision {
             HookDecision::Cancel(reason) => assert!(reason.contains("not from here")),
             other => panic!("expected Cancel, got {other:?}"),
         }
@@ -790,7 +810,7 @@ mod tests {
             .on_user_message(&cx(), &prompt("run the tests"))
             .await
             .unwrap();
-        assert!(matches!(allowed, HookDecision::Continue));
+        assert!(matches!(allowed.decision, HookDecision::Continue));
     }
 
     /// The capability is host-ENFORCED: without it the hook is never dispatched,
@@ -843,7 +863,7 @@ mod tests {
             .await
             .unwrap();
 
-        match decision {
+        match decision.decision {
             HookDecision::Replace(value) => {
                 assert_eq!(value, serde_json::Value::String("rewritten prompt".into()))
             }
@@ -974,6 +994,79 @@ mod tests {
         assert_eq!(seen["event"], "after_tool_call");
         assert_eq!(seen["success"], true);
         assert_eq!(seen["result"]["path"], "/repo/a.rs");
+    }
+
+    /// v0.4.2 made the after hook able to rewrite a result, so a command can
+    /// now redact what the model reads — and, per upstream, what the transcript
+    /// records. Before this the verdict had nowhere to go.
+    #[tokio::test]
+    async fn an_after_call_command_can_rewrite_the_result() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s19".to_string(),
+            vec![HookRule {
+                tool_pattern: "read".to_string(),
+                arg_field: None,
+                arg_contains: Some("sk-live".to_string()),
+                action: HookAction::RunCommand,
+                command: Some(r#"echo '{"updatedInput":{"content":"[redacted]"}}'"#.to_string()),
+                ..rule("scrub", HookEvent::AfterToolCall, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext
+            .on_after_tool_call(
+                &cx(),
+                &ToolResultEvent {
+                    tool_name: "read".to_string(),
+                    call_id: "c1".to_string(),
+                    success: true,
+                    result: json!({"content": "token sk-live-abc123"}),
+                },
+            )
+            .await
+            .unwrap();
+
+        match decision {
+            ResultDecision::Replace(value) => {
+                assert_eq!(value, json!({"content": "[redacted]"}));
+            }
+            other => panic!("expected Replace, got {other:?}"),
+        }
+    }
+
+    /// A failure after the call cannot undo it, so the tool's own result stands.
+    #[tokio::test]
+    async fn a_failing_after_call_command_leaves_the_result_alone() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s20".to_string(),
+            vec![HookRule {
+                tool_pattern: "*".to_string(),
+                arg_field: None,
+                arg_contains: None,
+                action: HookAction::RunCommand,
+                command: Some("exit 1".to_string()),
+                ..rule("broken", HookEvent::AfterToolCall, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext
+            .on_after_tool_call(
+                &cx(),
+                &ToolResultEvent {
+                    tool_name: "read".to_string(),
+                    call_id: "c1".to_string(),
+                    success: true,
+                    result: json!({"content": "kept"}),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(decision, ResultDecision::Continue));
     }
 
     /// A rule set to run a command but carrying none denies rather than quietly
