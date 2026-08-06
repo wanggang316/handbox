@@ -104,8 +104,10 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.emptyHint":
     "Add a rule to block dangerous commands, confirm specific operations, or get notified when a tool returns something you care about.",
   "settings.hooks.anyArgument": "any argument",
+  "settings.hooks.promptSubject": "prompt",
   "settings.hooks.event.before": "Before call",
   "settings.hooks.event.after": "After call",
+  "settings.hooks.event.prompt": "On prompt submit",
   "settings.hooks.action.deny": "Deny",
   "settings.hooks.action.ask": "Ask",
   "settings.hooks.action.allow": "Allow",
@@ -118,6 +120,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.field.toolPattern": "Tool name",
   "settings.hooks.field.argField": "Argument (optional)",
   "settings.hooks.field.argContains": "Argument contains (optional)",
+  "settings.hooks.field.promptContains": "Prompt contains (optional)",
+  "settings.hooks.field.promptContainsPlaceholder": "Leave empty to fire on every prompt",
   "settings.hooks.field.command": "Command",
   "settings.hooks.field.commandHint":
     "The event arrives as JSON on stdin; $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME are set. Runs in the session's working directory, 10s timeout by default. Print {\"decision\":\"deny\",\"reason\":\"…\"} to block or {\"updatedInput\":{…}} to rewrite the arguments; printing nothing lets the call through, and a non-zero exit blocks it.",

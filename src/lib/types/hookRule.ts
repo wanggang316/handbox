@@ -4,7 +4,12 @@
  */
 
 /** Which point of the tool-call lifecycle a rule fires at. */
-export type HookEvent = "before_tool_call" | "after_tool_call";
+export type HookEvent =
+  | "before_tool_call"
+  | "after_tool_call"
+  /** The prompt the user submitted, before it enters the transcript. Matched
+   *  against the prompt text, and can be rewritten or refused. */
+  | "user_prompt_submit";
 
 /**
  * What a matching rule does. `deny` / `ask` / `allow` decide a pending call and

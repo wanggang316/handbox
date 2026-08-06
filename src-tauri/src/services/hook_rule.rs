@@ -36,6 +36,12 @@ fn validate_pairing(event: HookEvent, action: HookAction) -> Result<(), AppError
         HookEvent::AfterToolCall => {
             matches!(action, HookAction::Notify | HookAction::RunCommand)
         }
+        // A prompt can be refused, observed, or rewritten by a command. Ask and
+        // allow gate a tool call, and there is no call here to gate.
+        HookEvent::UserPromptSubmit => matches!(
+            action,
+            HookAction::Deny | HookAction::Notify | HookAction::RunCommand
+        ),
     };
 
     if ok {
@@ -48,6 +54,9 @@ fn validate_pairing(event: HookEvent, action: HookAction) -> Result<(), AppError
         }
         HookEvent::AfterToolCall => {
             "An after-tool-call rule can only notify or run a command — the call has already run"
+        }
+        HookEvent::UserPromptSubmit => {
+            "A prompt rule can deny, notify, or run a command — ask and allow gate a tool call"
         }
     }))
 }
@@ -74,15 +83,14 @@ impl HookRuleService {
     /// Every enabled rule, in evaluation order — the snapshot a session takes
     /// when it is built.
     pub async fn list_enabled(&self) -> Result<Vec<HookRule>, AppError> {
-        let mut rules = self
-            .repository
-            .list_enabled_for_event(HookEvent::BeforeToolCall)
-            .await?;
-        rules.extend(
-            self.repository
-                .list_enabled_for_event(HookEvent::AfterToolCall)
-                .await?,
-        );
+        let mut rules = Vec::new();
+        for event in [
+            HookEvent::BeforeToolCall,
+            HookEvent::AfterToolCall,
+            HookEvent::UserPromptSubmit,
+        ] {
+            rules.extend(self.repository.list_enabled_for_event(event).await?);
+        }
         Ok(rules)
     }
 

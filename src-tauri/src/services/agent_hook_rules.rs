@@ -16,14 +16,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hand_coding_agent::core::extensions::api::{ToolCallEvent, ToolResultEvent};
+use hand_coding_agent::core::extensions::api::{ToolCallEvent, ToolResultEvent, UserMessageEvent};
 use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
 };
 
 use crate::services::agent_permission::{clear_call_for_rule, request_approval, ApprovalEmitter};
 use crate::services::hook_command::{run_hook_command, CommandSpec, CommandVerdict};
-use crate::storage::types::{HookAction, HookEvent, HookRule, DEFAULT_HOOK_COMMAND_TIMEOUT_MS};
+use crate::storage::types::{
+    HookAction, HookEvent, HookRule, MatchSubject, DEFAULT_HOOK_COMMAND_TIMEOUT_MS,
+};
 
 const RULE_EXTENSION_NAME: &str = "handbox-hook-rules";
 
@@ -66,17 +68,25 @@ pub struct RuleHookExtension {
     /// Where a `run_command` hook runs. The session's working directory, so a
     /// hook can act on the files the agent is touching without absolute paths.
     working_dir: PathBuf,
-    /// Pre-split by event so neither hook filters at call time. Both keep the
+    /// Pre-split by event so no hook filters at call time. Each keeps the
     /// repository's `sort_order` — first match decides.
     before_rules: Vec<HookRule>,
     after_rules: Vec<HookRule>,
+    prompt_rules: Vec<HookRule>,
 }
 
 impl RuleHookExtension {
     pub fn new(session_id: String, rules: Vec<HookRule>) -> Self {
-        let (before_rules, after_rules) = rules
-            .into_iter()
-            .partition(|rule| rule.event == HookEvent::BeforeToolCall);
+        let mut before_rules = Vec::new();
+        let mut after_rules = Vec::new();
+        let mut prompt_rules = Vec::new();
+        for rule in rules {
+            match rule.event {
+                HookEvent::BeforeToolCall => before_rules.push(rule),
+                HookEvent::AfterToolCall => after_rules.push(rule),
+                HookEvent::UserPromptSubmit => prompt_rules.push(rule),
+            }
+        }
 
         Self {
             manifest: ExtensionManifest {
@@ -88,6 +98,10 @@ impl RuleHookExtension {
                 capabilities: hand_coding_agent::core::extensions::api::ExtensionCapabilities {
                     before_tool_call: true,
                     after_tool_call: true,
+                    // The host ENFORCES this one: an extension that does not
+                    // declare it is never called, so it must reflect whether
+                    // any prompt rule is actually loaded.
+                    on_user_message: !prompt_rules.is_empty(),
                     ..Default::default()
                 },
                 exec: None,
@@ -103,6 +117,7 @@ impl RuleHookExtension {
             working_dir: std::env::temp_dir(),
             before_rules,
             after_rules,
+            prompt_rules,
         }
     }
 
@@ -129,7 +144,7 @@ impl RuleHookExtension {
     /// Whether any rule is loaded — lets the caller skip registering an
     /// extension that would do nothing on every tool call.
     pub fn is_empty(&self) -> bool {
-        self.before_rules.is_empty() && self.after_rules.is_empty()
+        self.before_rules.is_empty() && self.after_rules.is_empty() && self.prompt_rules.is_empty()
     }
 
     /// Run a `run_command` rule's command against `payload`.
@@ -226,6 +241,78 @@ fn rule_deny_reason(rule: &HookRule, tool_name: &str) -> String {
 impl Extension for RuleHookExtension {
     fn manifest(&self) -> &ExtensionManifest {
         &self.manifest
+    }
+
+    async fn on_user_message(
+        &self,
+        _cx: &ExtensionContext,
+        event: &UserMessageEvent,
+    ) -> Result<HookDecision, ExtensionError> {
+        let Some(rule) = self
+            .prompt_rules
+            .iter()
+            .find(|rule| rule.matches_subject(&MatchSubject::Text(&event.text)))
+        else {
+            return Ok(HookDecision::Continue);
+        };
+
+        // The subject is the prompt, so the "tool" in a notice is the prompt
+        // itself; naming it keeps the toast readable.
+        const SUBJECT: &str = "prompt";
+
+        match rule.action {
+            HookAction::Deny => {
+                self.report(rule, SUBJECT, outcome::DENIED);
+                Ok(HookDecision::Cancel(rule_deny_reason(rule, SUBJECT)))
+            }
+            HookAction::Notify => {
+                self.report(rule, SUBJECT, outcome::OBSERVED);
+                Ok(HookDecision::Continue)
+            }
+            HookAction::RunCommand => {
+                let verdict = self
+                    .run_command(rule, "user_prompt_submit", SUBJECT, || {
+                        serde_json::json!({
+                            "event": "user_prompt_submit",
+                            "sessionId": self.session_id,
+                            "ruleId": rule.id,
+                            "ruleName": rule.name,
+                            "prompt": event.text,
+                        })
+                    })
+                    .await;
+
+                match verdict {
+                    CommandVerdict::Proceed => {
+                        self.report(rule, SUBJECT, outcome::RAN);
+                        Ok(HookDecision::Continue)
+                    }
+                    CommandVerdict::Deny(reason) => {
+                        self.report(rule, SUBJECT, outcome::DENIED);
+                        Ok(HookDecision::Cancel(reason))
+                    }
+                    // Upstream expects a JSON *string* here, not an object: the
+                    // replacement is the prompt text itself.
+                    CommandVerdict::ReplaceInput(value) => match value.get("prompt") {
+                        Some(serde_json::Value::String(text)) => {
+                            self.report(rule, SUBJECT, outcome::REWROTE);
+                            Ok(HookDecision::Replace(serde_json::Value::String(
+                                text.clone(),
+                            )))
+                        }
+                        // A rewrite that does not carry a prompt string would be
+                        // dropped by the host anyway; treat it as no opinion
+                        // rather than silently mangling the turn.
+                        _ => {
+                            self.report(rule, SUBJECT, outcome::RAN);
+                            Ok(HookDecision::Continue)
+                        }
+                    },
+                }
+            }
+            // Ask/Allow gate a tool call; there is no call here to gate.
+            _ => Ok(HookDecision::Continue),
+        }
     }
 
     async fn on_before_tool_call(
@@ -665,6 +752,103 @@ mod tests {
             .unwrap();
 
         assert!(seen.lock().unwrap().is_empty());
+    }
+
+    fn prompt(text: &str) -> UserMessageEvent {
+        UserMessageEvent {
+            text: text.to_string(),
+        }
+    }
+
+    /// A prompt rule matches the prompt TEXT — there is no tool name to glob,
+    /// so a rule written for prompts must not be filtered out by the pattern.
+    #[tokio::test]
+    async fn a_prompt_rule_matches_the_prompt_text() {
+        let ext = RuleHookExtension::new(
+            "s15".to_string(),
+            vec![HookRule {
+                event: HookEvent::UserPromptSubmit,
+                tool_pattern: "bash".to_string(), // deliberately irrelevant
+                arg_field: None,
+                arg_contains: Some("deploy to prod".to_string()),
+                action: HookAction::Deny,
+                message: Some("not from here".to_string()),
+                ..rule("guard", HookEvent::UserPromptSubmit, HookAction::Deny)
+            }],
+        );
+
+        let blocked = ext
+            .on_user_message(&cx(), &prompt("please deploy to prod now"))
+            .await
+            .unwrap();
+        match blocked {
+            HookDecision::Cancel(reason) => assert!(reason.contains("not from here")),
+            other => panic!("expected Cancel, got {other:?}"),
+        }
+
+        let allowed = ext
+            .on_user_message(&cx(), &prompt("run the tests"))
+            .await
+            .unwrap();
+        assert!(matches!(allowed, HookDecision::Continue));
+    }
+
+    /// The capability is host-ENFORCED: without it the hook is never dispatched,
+    /// so it must track whether a prompt rule is actually loaded.
+    #[test]
+    fn the_user_message_capability_tracks_whether_prompt_rules_exist() {
+        let without = RuleHookExtension::new(
+            "s16".to_string(),
+            vec![rule("tool", HookEvent::BeforeToolCall, HookAction::Deny)],
+        );
+        assert!(!without.manifest().capabilities.on_user_message);
+
+        let with = RuleHookExtension::new(
+            "s17".to_string(),
+            vec![rule(
+                "prompt",
+                HookEvent::UserPromptSubmit,
+                HookAction::Deny,
+            )],
+        );
+        assert!(with.manifest().capabilities.on_user_message);
+    }
+
+    /// Upstream expects the replacement prompt as a JSON string, so the command
+    /// returns it under `prompt` and we unwrap it.
+    #[tokio::test]
+    async fn a_prompt_command_can_rewrite_the_prompt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s18".to_string(),
+            vec![HookRule {
+                event: HookEvent::UserPromptSubmit,
+                arg_field: None,
+                arg_contains: None,
+                action: HookAction::RunCommand,
+                command: Some(
+                    r#"echo '{"updatedInput":{"prompt":"rewritten prompt"}}'"#.to_string(),
+                ),
+                ..rule(
+                    "inject",
+                    HookEvent::UserPromptSubmit,
+                    HookAction::RunCommand,
+                )
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext
+            .on_user_message(&cx(), &prompt("original"))
+            .await
+            .unwrap();
+
+        match decision {
+            HookDecision::Replace(value) => {
+                assert_eq!(value, serde_json::Value::String("rewritten prompt".into()))
+            }
+            other => panic!("expected Replace, got {other:?}"),
+        }
     }
 
     /// The point of the whole action: a hook that DOES something. The command

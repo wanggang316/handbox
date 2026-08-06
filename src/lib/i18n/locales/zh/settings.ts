@@ -97,8 +97,10 @@ export const settingsZh = {
   "settings.hooks.emptyHint":
     "添加规则可以拦截危险命令、对特定操作二次确认，或在工具返回特定内容时收到提醒。",
   "settings.hooks.anyArgument": "任意参数",
+  "settings.hooks.promptSubject": "提示词",
   "settings.hooks.event.before": "调用前",
   "settings.hooks.event.after": "调用后",
+  "settings.hooks.event.prompt": "提交提示词时",
   "settings.hooks.action.deny": "拒绝",
   "settings.hooks.action.ask": "询问",
   "settings.hooks.action.allow": "放行",
@@ -111,6 +113,8 @@ export const settingsZh = {
   "settings.hooks.field.toolPattern": "工具名",
   "settings.hooks.field.argField": "参数名（可选）",
   "settings.hooks.field.argContains": "参数包含（可选）",
+  "settings.hooks.field.promptContains": "提示词包含（可选）",
+  "settings.hooks.field.promptContainsPlaceholder": "留空则每次提交都触发",
   "settings.hooks.field.command": "命令",
   "settings.hooks.field.commandHint":
     "事件以 JSON 从标准输入传入，可用 $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME。命令在会话工作目录下执行，默认 10 秒超时。输出 {\"decision\":\"deny\",\"reason\":\"…\"} 可拦截调用，输出 {\"updatedInput\":{…}} 可改写参数；不输出即放行，非零退出码视为拦截。",

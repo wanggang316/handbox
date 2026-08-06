@@ -18,7 +18,7 @@ pub use agent_session::{
 pub use common::{Timestamp, UUID};
 pub use genui::{CreateGenUiRequest, GenUi, UpdateGenUiRequest};
 pub use hook_rule::{
-    CreateHookRuleRequest, HookAction, HookEvent, HookRule, UpdateHookRuleRequest,
+    CreateHookRuleRequest, HookAction, HookEvent, HookRule, MatchSubject, UpdateHookRuleRequest,
     DEFAULT_HOOK_COMMAND_TIMEOUT_MS,
 };
 pub use job::{

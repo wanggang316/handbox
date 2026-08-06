@@ -19,6 +19,7 @@ fn event_as_str(event: HookEvent) -> &'static str {
     match event {
         HookEvent::BeforeToolCall => "before_tool_call",
         HookEvent::AfterToolCall => "after_tool_call",
+        HookEvent::UserPromptSubmit => "user_prompt_submit",
     }
 }
 
@@ -26,6 +27,7 @@ fn event_from_str(value: &str) -> Result<HookEvent, AppError> {
     match value {
         "before_tool_call" => Ok(HookEvent::BeforeToolCall),
         "after_tool_call" => Ok(HookEvent::AfterToolCall),
+        "user_prompt_submit" => Ok(HookEvent::UserPromptSubmit),
         other => Err(AppError::internal_error(&format!(
             "Invalid hook event in database: {}",
             other

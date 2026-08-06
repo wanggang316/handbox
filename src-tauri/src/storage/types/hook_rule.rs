@@ -9,12 +9,28 @@ use serde::{Deserialize, Serialize};
 
 use super::{Timestamp, UUID};
 
-/// Which point of the tool-call lifecycle a rule fires at.
+/// Which point of the agent's lifecycle a rule fires at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookEvent {
     BeforeToolCall,
     AfterToolCall,
+    /// The user submitted a prompt, before it enters the transcript. Matching
+    /// is against the prompt text rather than a tool call, and the rule can
+    /// rewrite or refuse the turn.
+    UserPromptSubmit,
+}
+
+/// What a rule is matched against, which differs by event.
+pub enum MatchSubject<'a> {
+    /// A tool call: glob the name, then optionally test an argument.
+    Tool {
+        name: &'a str,
+        arguments: &'a serde_json::Value,
+    },
+    /// Free text (a prompt). The tool pattern does not apply; only the
+    /// substring test does, against the text itself.
+    Text(&'a str),
 }
 
 /// What a matching rule does.
@@ -132,8 +148,20 @@ impl HookRule {
     /// safer reading, since a rule written for `bash.command` should not fire on
     /// an unrelated tool that happens to have been caught by a loose glob.
     pub fn matches(&self, tool_name: &str, arguments: &serde_json::Value) -> bool {
-        if !glob_matches(&self.tool_pattern, tool_name) {
-            return false;
+        self.matches_subject(&MatchSubject::Tool {
+            name: tool_name,
+            arguments,
+        })
+    }
+
+    /// Whether this rule applies, for whichever subject its event carries.
+    pub fn matches_subject(&self, subject: &MatchSubject<'_>) -> bool {
+        // The tool glob only means something for a tool call; a prompt has no
+        // name to match, so the pattern is skipped rather than failing it.
+        if let MatchSubject::Tool { name, .. } = subject {
+            if !glob_matches(&self.tool_pattern, name) {
+                return false;
+            }
         }
 
         let Some(needle) = self
@@ -144,15 +172,21 @@ impl HookRule {
             return true;
         };
 
-        let haystack = match self.arg_field.as_deref().filter(|f| !f.is_empty()) {
-            Some(field) => match arguments.get(field) {
-                // Strings compare raw so the user's needle doesn't have to
-                // account for JSON quoting; anything else compares serialized.
-                Some(serde_json::Value::String(text)) => text.clone(),
-                Some(other) => other.to_string(),
-                None => return false,
-            },
-            None => arguments.to_string(),
+        let haystack = match subject {
+            MatchSubject::Text(text) => (*text).to_string(),
+            MatchSubject::Tool { arguments, .. } => {
+                match self.arg_field.as_deref().filter(|f| !f.is_empty()) {
+                    Some(field) => match arguments.get(field) {
+                        // Strings compare raw so the user's needle doesn't have
+                        // to account for JSON quoting; anything else compares
+                        // serialized.
+                        Some(serde_json::Value::String(text)) => text.clone(),
+                        Some(other) => other.to_string(),
+                        None => return false,
+                    },
+                    None => arguments.to_string(),
+                }
+            }
         };
 
         haystack.contains(needle)

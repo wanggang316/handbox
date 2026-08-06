@@ -50,8 +50,14 @@
   const actionsForEvent = $derived<HookAction[]>(
     formEvent === "before_tool_call"
       ? ["deny", "ask", "allow", "run_command"]
-      : ["notify", "run_command"],
+      : formEvent === "user_prompt_submit"
+        ? ["deny", "notify", "run_command"]
+        : ["notify", "run_command"],
   );
+
+  // A prompt has no tool name to glob and no arguments to inspect; showing
+  // those fields would invite rules that silently never match.
+  const matchesTool = $derived(formEvent !== "user_prompt_submit");
 
   // The command field only means something for run_command, and leaving a
   // stale command visible under another action reads as if it would still run.
@@ -60,6 +66,7 @@
   const eventOptions = $derived([
     { value: "before_tool_call", label: t("settings.hooks.event.before") },
     { value: "after_tool_call", label: t("settings.hooks.event.after") },
+    { value: "user_prompt_submit", label: t("settings.hooks.event.prompt") },
   ]);
 
   const actionOptions = $derived(
@@ -87,13 +94,25 @@
   }
 
   function eventLabel(event: HookEvent): string {
-    return event === "before_tool_call"
-      ? t("settings.hooks.event.before")
-      : t("settings.hooks.event.after");
+    switch (event) {
+      case "before_tool_call":
+        return t("settings.hooks.event.before");
+      case "after_tool_call":
+        return t("settings.hooks.event.after");
+      case "user_prompt_submit":
+        return t("settings.hooks.event.prompt");
+      default:
+        return event;
+    }
   }
 
   /** Human-readable summary of what a rule matches, for the list row. */
   function conditionSummary(rule: HookRule): string {
+    if (rule.event === "user_prompt_submit") {
+      return rule.argContains
+        ? `${t("settings.hooks.promptSubject")} ⊃ "${rule.argContains}"`
+        : t("settings.hooks.promptSubject");
+    }
     if (!rule.argContains) {
       return rule.toolPattern;
     }
@@ -152,7 +171,8 @@
   });
 
   async function handleSave() {
-    if (!formName.trim() || !formToolPattern.trim()) return;
+    if (!formName.trim()) return;
+    if (matchesTool && !formToolPattern.trim()) return;
     if (needsCommand && !formCommand.trim()) return;
     saving = true;
     saveError = null;
@@ -333,27 +353,36 @@
       />
     </div>
 
-    <Input
-      label={t("settings.hooks.field.toolPattern")}
-      bind:value={formToolPattern}
-      placeholder="bash"
-      literal
-    />
+    {#if matchesTool}
+      <Input
+        label={t("settings.hooks.field.toolPattern")}
+        bind:value={formToolPattern}
+        placeholder="bash"
+        literal
+      />
 
-    <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-2 gap-4">
+        <Input
+          label={t("settings.hooks.field.argField")}
+          bind:value={formArgField}
+          placeholder="command"
+          literal
+        />
+        <Input
+          label={t("settings.hooks.field.argContains")}
+          bind:value={formArgContains}
+          placeholder="rm -rf"
+          literal
+        />
+      </div>
+    {:else}
       <Input
-        label={t("settings.hooks.field.argField")}
-        bind:value={formArgField}
-        placeholder="command"
-        literal
-      />
-      <Input
-        label={t("settings.hooks.field.argContains")}
+        label={t("settings.hooks.field.promptContains")}
         bind:value={formArgContains}
-        placeholder="rm -rf"
+        placeholder={t("settings.hooks.field.promptContainsPlaceholder")}
         literal
       />
-    </div>
+    {/if}
 
     {#if needsCommand}
       <Input
