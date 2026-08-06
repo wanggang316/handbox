@@ -10,6 +10,14 @@
     disabled?: boolean;
     required?: boolean;
     error?: string;
+    /**
+     * Identifier-style input: turns off the platform's autocapitalize /
+     * autocorrect / spellcheck so the value is stored exactly as typed. Needed
+     * for anything matched literally — a tool name, a path, an argument key —
+     * where macOS would otherwise capitalize the first letter and silently
+     * break the match.
+     */
+    literal?: boolean;
   }
 
   let {
@@ -21,6 +29,7 @@
     disabled = false,
     required = false,
     error = "",
+    literal = false,
   }: Props = $props();
 
   // Inside a FormField the container supplies id / aria / error state, so the
@@ -55,6 +64,9 @@
   aria-required={required ? "true" : undefined}
   aria-invalid={invalid ? "true" : undefined}
   aria-describedby={describedby}
+  autocapitalize={literal ? "off" : undefined}
+  autocorrect={literal ? "off" : undefined}
+  spellcheck={literal ? false : undefined}
   bind:value
   oninput={(e) => onInput((e.currentTarget as HTMLInputElement).value)}
 />

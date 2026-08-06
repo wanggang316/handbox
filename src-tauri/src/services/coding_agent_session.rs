@@ -1503,4 +1503,83 @@ mod tests {
             "an overwrite must replace the file with the new content"
         );
     }
+
+    /// Names of the extensions registered on a built session, in dispatch order.
+    fn registered_extensions(session: &AgentSession) -> Vec<String> {
+        session
+            .extensions()
+            .iter()
+            .map(|e| e.manifest().name.clone())
+            .collect()
+    }
+
+    /// A configured rule reaches the chain, and lands BETWEEN the sandbox and the
+    /// approval gate. Order is the security contract: behind the sandbox so no
+    /// rule can widen the working-directory boundary, ahead of the gate so an
+    /// `allow` rule can clear a call before it prompts.
+    #[test]
+    fn hook_rules_register_between_the_sandbox_and_the_approval_gate() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        config.hook_rules = vec![crate::storage::types::HookRule {
+            id: "r1".to_string(),
+            name: "block rm".to_string(),
+            event: crate::storage::types::HookEvent::BeforeToolCall,
+            tool_pattern: "bash".to_string(),
+            arg_field: Some("command".to_string()),
+            arg_contains: Some("rm -rf".to_string()),
+            action: crate::storage::types::HookAction::Deny,
+            message: None,
+            enabled: true,
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }];
+
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
+        let names = registered_extensions(&session);
+
+        let sandbox = names
+            .iter()
+            .position(|n| n == "handbox-sandbox")
+            .expect("sandbox registered");
+        let rules = names
+            .iter()
+            .position(|n| n == "handbox-hook-rules")
+            .expect("rule engine registered when rules are configured");
+        let permission = names
+            .iter()
+            .position(|n| n == "handbox-permission")
+            .expect("approval gate registered");
+
+        assert!(
+            sandbox < rules && rules < permission,
+            "expected sandbox → rules → permission, got {names:?}"
+        );
+    }
+
+    /// With no rules configured the extension is left out entirely, so a session
+    /// pays nothing for a feature the user has not used.
+    #[test]
+    fn no_hook_rules_means_no_rule_extension() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        assert!(config.hook_rules.is_empty(), "precondition");
+
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
+        let names = registered_extensions(&session);
+
+        assert!(
+            !names.iter().any(|n| n == "handbox-hook-rules"),
+            "no rules configured, so the extension should be absent: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n == "handbox-sandbox"),
+            "the sandbox is unconditional: {names:?}"
+        );
+    }
 }

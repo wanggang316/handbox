@@ -318,6 +318,7 @@
       label={t("settings.hooks.field.toolPattern")}
       bind:value={formToolPattern}
       placeholder="bash"
+      literal
     />
 
     <div class="grid grid-cols-2 gap-4">
@@ -325,11 +326,13 @@
         label={t("settings.hooks.field.argField")}
         bind:value={formArgField}
         placeholder="command"
+        literal
       />
       <Input
         label={t("settings.hooks.field.argContains")}
         bind:value={formArgContains}
         placeholder="rm -rf"
+        literal
       />
     </div>
 
