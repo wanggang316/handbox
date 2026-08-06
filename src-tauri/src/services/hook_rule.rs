@@ -1,6 +1,6 @@
 //! Hook-rule service: a thin layer over [`HookRuleRepository`] that owns the
 //! write-time concerns the storage layer deliberately leaves out — timestamps
-//! and the event/action pairing check.
+//! and the command-presence check.
 
 use std::sync::Arc;
 
@@ -21,49 +21,8 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// An action only means something on one of the two events. Rejecting the
-/// mismatch here — rather than storing it and ignoring it at dispatch — keeps a
-/// rule from looking active in the UI while doing nothing at runtime.
-///
-/// [`HookAction::RunCommand`] pairs with both: before a call its output can
-/// still decide, after a call it is a side effect.
-fn validate_pairing(event: HookEvent, action: HookAction) -> Result<(), AppError> {
-    let ok = match event {
-        HookEvent::BeforeToolCall => matches!(
-            action,
-            HookAction::Deny | HookAction::Ask | HookAction::Allow | HookAction::RunCommand
-        ),
-        HookEvent::AfterToolCall => {
-            matches!(action, HookAction::Notify | HookAction::RunCommand)
-        }
-        // A prompt can be refused, observed, or rewritten by a command. Ask and
-        // allow gate a tool call, and there is no call here to gate.
-        HookEvent::UserPromptSubmit => matches!(
-            action,
-            HookAction::Deny | HookAction::Notify | HookAction::RunCommand
-        ),
-    };
-
-    if ok {
-        return Ok(());
-    }
-
-    Err(AppError::validation_error(match event {
-        HookEvent::BeforeToolCall => {
-            "A before-tool-call rule must deny, ask, allow, or run a command — notify only applies after a call"
-        }
-        HookEvent::AfterToolCall => {
-            "An after-tool-call rule can only notify or run a command — the call has already run"
-        }
-        HookEvent::UserPromptSubmit => {
-            "A prompt rule can deny, notify, or run a command — ask and allow gate a tool call"
-        }
-    }))
-}
-
-/// A `run_command` rule without a command would match and then do nothing,
-/// which is exactly the "looks active, isn't" shape the pairing check exists to
-/// prevent.
+/// A `run_command` rule without a command would match and then do nothing —
+/// a rule that looks active in the UI while doing nothing at runtime.
 fn validate_command(action: HookAction, command: Option<&str>) -> Result<(), AppError> {
     if action == HookAction::RunCommand && command.is_none_or(|c| c.trim().is_empty()) {
         return Err(AppError::validation_error(
@@ -100,7 +59,6 @@ impl HookRuleService {
     }
 
     pub async fn create(&self, request: CreateHookRuleRequest) -> Result<HookRule, AppError> {
-        validate_pairing(request.event, request.action)?;
         validate_command(request.action, request.command.as_deref())?;
         self.repository.create(request, now_ms()).await
     }
@@ -110,16 +68,15 @@ impl HookRuleService {
         id: &str,
         request: UpdateHookRuleRequest,
     ) -> Result<HookRule, AppError> {
-        // Any of the three may be omitted, so validate the resulting
-        // combination rather than whichever part was sent.
-        if request.event.is_some() || request.action.is_some() || request.command.is_some() {
+        // Either half may be omitted, so validate the resulting combination
+        // rather than whichever part was sent.
+        if request.action.is_some() || request.command.is_some() {
             let current = self
                 .repository
                 .get(id)
                 .await?
                 .ok_or_else(|| AppError::not_found(&format!("Hook rule not found: {}", id)))?;
             let action = request.action.unwrap_or(current.action);
-            validate_pairing(request.event.unwrap_or(current.event), action)?;
             let command = request
                 .command
                 .clone()
@@ -166,50 +123,47 @@ mod tests {
         }
     }
 
+    /// Both actions apply on every event — a notify can observe before a call,
+    /// after one, or on a prompt — so nothing here should reject a pairing.
     #[tokio::test]
-    async fn notify_is_rejected_before_a_call() {
+    async fn every_event_accepts_both_actions() {
+        let (service, _dir) = service().await;
+        for event in [
+            HookEvent::BeforeToolCall,
+            HookEvent::AfterToolCall,
+            HookEvent::UserPromptSubmit,
+        ] {
+            service
+                .create(request(event, HookAction::Notify))
+                .await
+                .expect("notify is valid everywhere");
+            service
+                .create(CreateHookRuleRequest {
+                    command: Some("true".to_string()),
+                    ..request(event, HookAction::RunCommand)
+                })
+                .await
+                .expect("run_command is valid everywhere");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_run_command_rule_without_a_command_is_rejected() {
         let (service, _dir) = service().await;
         let err = service
-            .create(request(HookEvent::BeforeToolCall, HookAction::Notify))
+            .create(request(HookEvent::BeforeToolCall, HookAction::RunCommand))
             .await
-            .expect_err("notify cannot decide a pending call");
+            .expect_err("a run-command rule needs a command");
         assert_eq!(err.code, "VALIDATION_ERROR");
     }
 
+    /// Switching only the action must be validated against the STORED command,
+    /// or a half-update could produce a rule that matches and then does nothing.
     #[tokio::test]
-    async fn a_decision_action_is_rejected_after_a_call() {
-        let (service, _dir) = service().await;
-        for action in [HookAction::Deny, HookAction::Ask, HookAction::Allow] {
-            let err = service
-                .create(request(HookEvent::AfterToolCall, action))
-                .await
-                .expect_err("a finished call cannot be gated");
-            assert_eq!(err.code, "VALIDATION_ERROR");
-        }
-    }
-
-    #[tokio::test]
-    async fn valid_pairings_are_accepted() {
-        let (service, _dir) = service().await;
-        for action in [HookAction::Deny, HookAction::Ask, HookAction::Allow] {
-            service
-                .create(request(HookEvent::BeforeToolCall, action))
-                .await
-                .expect("before-call decisions are valid");
-        }
-        service
-            .create(request(HookEvent::AfterToolCall, HookAction::Notify))
-            .await
-            .expect("after-call notify is valid");
-    }
-
-    /// Changing only the event must be validated against the STORED action, or a
-    /// half-update could produce a combination that never fires.
-    #[tokio::test]
-    async fn an_update_validates_the_resulting_pair() {
+    async fn an_update_validates_the_resulting_combination() {
         let (service, _dir) = service().await;
         let created = service
-            .create(request(HookEvent::BeforeToolCall, HookAction::Deny))
+            .create(request(HookEvent::BeforeToolCall, HookAction::Notify))
             .await
             .unwrap();
 
@@ -217,12 +171,12 @@ mod tests {
             .update(
                 &created.id,
                 UpdateHookRuleRequest {
-                    event: Some(HookEvent::AfterToolCall),
+                    action: Some(HookAction::RunCommand),
                     ..Default::default()
                 },
             )
             .await
-            .expect_err("deny + after-call is not a valid pair");
+            .expect_err("run_command without a stored command is invalid");
         assert_eq!(err.code, "VALIDATION_ERROR");
 
         // Moving both halves together is fine.
@@ -230,28 +184,32 @@ mod tests {
             .update(
                 &created.id,
                 UpdateHookRuleRequest {
-                    event: Some(HookEvent::AfterToolCall),
-                    action: Some(HookAction::Notify),
+                    action: Some(HookAction::RunCommand),
+                    command: Some("true".to_string()),
                     ..Default::default()
                 },
             )
             .await
-            .expect("event and action moved together");
+            .expect("action and command moved together");
     }
 
     #[tokio::test]
-    async fn list_enabled_covers_both_events() {
+    async fn list_enabled_covers_every_event() {
         let (service, _dir) = service().await;
         service
-            .create(request(HookEvent::BeforeToolCall, HookAction::Deny))
+            .create(request(HookEvent::BeforeToolCall, HookAction::Notify))
             .await
             .unwrap();
         service
             .create(request(HookEvent::AfterToolCall, HookAction::Notify))
             .await
             .unwrap();
+        service
+            .create(request(HookEvent::UserPromptSubmit, HookAction::Notify))
+            .await
+            .unwrap();
 
         let rules = service.list_enabled().await.unwrap();
-        assert_eq!(rules.len(), 2, "the session snapshot spans both events");
+        assert_eq!(rules.len(), 3, "the session snapshot spans every event");
     }
 }

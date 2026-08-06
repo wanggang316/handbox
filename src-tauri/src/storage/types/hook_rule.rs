@@ -35,25 +35,18 @@ pub enum MatchSubject<'a> {
 
 /// What a matching rule does.
 ///
-/// [`Deny`](HookAction::Deny) / [`Ask`](HookAction::Ask) /
-/// [`Allow`](HookAction::Allow) decide a pending call and only mean something on
-/// [`HookEvent::BeforeToolCall`]; [`Notify`](HookAction::Notify) observes a
-/// finished one and only means something on [`HookEvent::AfterToolCall`]. The
-/// pairing is validated at the command layer, not enforced by the schema.
+/// Hooks execute actions; they are not a permission layer. Gating what the
+/// agent may do belongs to the agent's own permission configuration, so the
+/// declarative decision actions (deny/ask/allow) were removed. A command can
+/// still veto or rewrite through its verdict — that is the dynamic escape
+/// hatch, not the feature's point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookAction {
-    /// Block the call; the model sees the rule's message as a refusal.
-    Deny,
-    /// Prompt the user through the existing approval surface.
-    Ask,
-    /// Let the call through *and* skip the approval gate for this one call.
-    Allow,
     /// Emit an event to the frontend; never changes the outcome.
     Notify,
-    /// Run the rule's command, feeding it the event on stdin. Its output can
-    /// still decide the call, so the built-in actions above are shorthands for
-    /// what a command could do — this is the general case.
+    /// Run the rule's command, feeding it the event on stdin. Its output may
+    /// contribute context, rewrite arguments or results, or deny the call.
     RunCommand,
 }
 
@@ -79,7 +72,7 @@ pub struct HookRule {
     /// pattern alone.
     pub arg_contains: Option<String>,
     pub action: HookAction,
-    /// Shown to the model on `Deny`, and to the user on `Ask` / `Notify`.
+    /// Shown to the user alongside the match notice.
     pub message: Option<String>,
     /// Shell command for [`HookAction::RunCommand`]; ignored by the others.
     pub command: Option<String>,
@@ -226,7 +219,7 @@ mod tests {
             tool_pattern: tool_pattern.to_string(),
             arg_field: arg_field.map(str::to_string),
             arg_contains: arg_contains.map(str::to_string),
-            action: HookAction::Deny,
+            action: HookAction::Notify,
             message: None,
             command: None,
             timeout_ms: None,

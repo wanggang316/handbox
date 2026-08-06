@@ -41,19 +41,9 @@
   let formToolPattern = $state("*");
   let formArgField = $state("");
   let formArgContains = $state("");
-  let formAction = $state<HookAction>("ask");
+  let formAction = $state<HookAction>("run_command");
   let formMessage = $state("");
   let formCommand = $state("");
-
-  // A decision action only applies before a call and `notify` only after, which
-  // the backend enforces; the picker follows so an invalid pair is unreachable.
-  const actionsForEvent = $derived<HookAction[]>(
-    formEvent === "before_tool_call"
-      ? ["deny", "ask", "allow", "run_command"]
-      : formEvent === "user_prompt_submit"
-        ? ["deny", "notify", "run_command"]
-        : ["notify", "run_command"],
-  );
 
   // A prompt has no tool name to glob and no arguments to inspect; showing
   // those fields would invite rules that silently never match.
@@ -70,7 +60,7 @@
   ]);
 
   const actionOptions = $derived(
-    actionsForEvent.map((action) => ({
+    (["run_command", "notify"] as HookAction[]).map((action) => ({
       value: action,
       label: actionLabel(action),
     })),
@@ -78,12 +68,6 @@
 
   function actionLabel(action: HookAction): string {
     switch (action) {
-      case "deny":
-        return t("settings.hooks.action.deny");
-      case "ask":
-        return t("settings.hooks.action.ask");
-      case "allow":
-        return t("settings.hooks.action.allow");
       case "notify":
         return t("settings.hooks.action.notify");
       case "run_command":
@@ -141,7 +125,7 @@
     formToolPattern = "*";
     formArgField = "";
     formArgContains = "";
-    formAction = "ask";
+    formAction = "run_command";
     formMessage = "";
     formCommand = "";
     saveError = null;
@@ -161,14 +145,6 @@
     saveError = null;
     editorOpen = true;
   }
-
-  // Switching the event can strand an action that is invalid for it; snap to the
-  // first legal one rather than letting the backend reject the save.
-  $effect(() => {
-    if (!actionsForEvent.includes(formAction)) {
-      formAction = actionsForEvent[0];
-    }
-  });
 
   async function handleSave() {
     if (!formName.trim()) return;

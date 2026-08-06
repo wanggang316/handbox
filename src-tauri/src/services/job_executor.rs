@@ -101,10 +101,9 @@ struct AgentServices {
     agents: Arc<AgentService>,
     sessions: Arc<AgentSessionService>,
     providers: Arc<ProviderService>,
-    /// The user's hook rules apply to unattended runs too, so a `deny` rule
-    /// covers a scheduled job as well as a foreground turn. `allow` rules stay
-    /// inert here: with no approval surface to clear, the gate keeps failing
-    /// closed — see [`RuleHookExtension`](crate::services::agent_hook_rules::RuleHookExtension).
+    /// The user's hook rules apply to unattended runs too: a command hook runs
+    /// (and its verdict can veto) in a scheduled job exactly as in a foreground
+    /// turn — see [`RuleHookExtension`](crate::services::agent_hook_rules::RuleHookExtension).
     hook_rules: Arc<HookRuleService>,
     app_data_dir: PathBuf,
 }
@@ -625,7 +624,11 @@ impl<R: Runtime> JobExecutor<R> {
 
         // 2. Load the resolved provider's row — `build_agent_session` needs the
         //    full record (type / base_url / key).
-        let provider = match services.providers.get_provider(&provider_id.to_string()).await {
+        let provider = match services
+            .providers
+            .get_provider(&provider_id.to_string())
+            .await
+        {
             Ok(provider) => provider,
             Err(e) => {
                 tracing::warn!(
@@ -707,7 +710,8 @@ impl<R: Runtime> JobExecutor<R> {
                 };
             }
         };
-        let coding_session = match build_agent_session(&config, HookEmitters::default(), Vec::new()) {
+        let coding_session = match build_agent_session(&config, HookEmitters::default(), Vec::new())
+        {
             Ok(coding_session) => coding_session,
             Err(e) => {
                 tracing::warn!(
@@ -967,7 +971,8 @@ impl<R: Runtime> JobExecutor<R> {
                 };
             }
         };
-        let coding_session = match build_agent_session(&config, HookEmitters::default(), Vec::new()) {
+        let coding_session = match build_agent_session(&config, HookEmitters::default(), Vec::new())
+        {
             Ok(coding_session) => coding_session,
             Err(e) => {
                 tracing::warn!(
@@ -2735,8 +2740,11 @@ mod tests {
         let env = with_agent_services(setup().await);
         // A model id that no provider in the (empty) catalog serves.
         let agent_id = seed_agent(&env).await;
-        let job =
-            make_job("job_a_modelgone", agent_target(&agent_id, "gone-model", "go")).await;
+        let job = make_job(
+            "job_a_modelgone",
+            agent_target(&agent_id, "gone-model", "go"),
+        )
+        .await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();

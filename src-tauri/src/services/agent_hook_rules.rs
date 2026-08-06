@@ -1,10 +1,12 @@
-//! Evaluates the user's declarative hook rules against the agent's tool calls.
+//! Evaluates the user's hook rules against the agent's tool calls.
 //!
-//! Registered BETWEEN [`SandboxExtension`](super::agent_permission::SandboxExtension)
-//! and [`PermissionExtension`](super::agent_permission::PermissionExtension):
-//! after the sandbox so a rule can never widen the working-directory boundary,
-//! before the approval gate so an `allow` rule can spare the user a prompt they
-//! have already answered in the form of a rule.
+//! Hooks execute actions (run a command, notify); they are not a permission
+//! layer — gating what the agent may do belongs to the agent's permission
+//! configuration and the [`PermissionExtension`](super::agent_permission::PermissionExtension).
+//! Registered BETWEEN the [`SandboxExtension`](super::agent_permission::SandboxExtension)
+//! and the approval gate: after the sandbox so a hook can never widen the
+//! working-directory boundary, before the gate so a command that vetoes a call
+//! spares the user a prompt for something that would be blocked anyway.
 //!
 //! Rules are a snapshot taken when the session is built. A session is
 //! constructed per turn, so an edit in settings takes effect on the next
@@ -23,7 +25,6 @@ use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
 };
 
-use crate::services::agent_permission::{clear_call_for_rule, request_approval, ApprovalEmitter};
 use crate::services::hook_command::{run_hook_command, CommandSpec, CommandVerdict};
 use crate::storage::types::{
     HookAction, HookEvent, HookRule, MatchSubject, DEFAULT_HOOK_COMMAND_TIMEOUT_MS,
@@ -38,13 +39,12 @@ const RULE_EXTENSION_NAME: &str = "handbox-hook-rules";
 /// message }`.
 pub const HOOK_RULE_NOTIFY_EVENT: &str = "agent_hook_rule_notify";
 
-/// What actually happened to the call, for the notification payload. Distinct
-/// from the rule's action because an `ask` resolves either way.
+/// What actually happened, for the notification payload. Distinct from the
+/// rule's action because a command resolves several ways.
 mod outcome {
+    /// A command's verdict blocked the call (or the prompt).
     pub const DENIED: &str = "denied";
-    pub const ALLOWED: &str = "allowed";
-    pub const APPROVED: &str = "approved";
-    pub const REJECTED: &str = "rejected";
+    /// A `notify` rule matched.
     pub const OBSERVED: &str = "observed";
     /// A `run_command` hook ran and raised no objection.
     pub const RAN: &str = "ran";
@@ -56,8 +56,8 @@ mod outcome {
     pub const INFORMED: &str = "informed";
 }
 
-/// Sink for [`HOOK_RULE_NOTIFY_EVENT`]. Same shape as [`ApprovalEmitter`] so the
-/// extension stays free of Tauri types and is testable with a plain closure.
+/// Sink for [`HOOK_RULE_NOTIFY_EVENT`]. A plain closure so the extension stays
+/// free of Tauri types and is testable without a window.
 pub type NotifyEmitter = Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 
 /// Applies the user's rules to each tool call.
@@ -66,8 +66,6 @@ pub struct RuleHookExtension {
     /// HandBox DB session id (UUID) — the same key the approval registry and
     /// `abort_run` use. See [`PermissionExtension`](super::agent_permission::PermissionExtension).
     session_id: String,
-    /// `None` makes an `ask` rule fail closed, exactly like the approval gate.
-    emitter: Option<ApprovalEmitter>,
     notifier: Option<NotifyEmitter>,
     /// Where a `run_command` hook runs. The session's working directory, so a
     /// hook can act on the files the agent is touching without absolute paths.
@@ -116,7 +114,6 @@ impl RuleHookExtension {
                 timeouts: Default::default(),
             },
             session_id,
-            emitter: None,
             notifier: None,
             working_dir: std::env::temp_dir(),
             before_rules,
@@ -132,14 +129,8 @@ impl RuleHookExtension {
         self
     }
 
-    /// Wire the approval surface an `ask` rule prompts through. Without it such
-    /// a rule denies rather than silently allowing.
-    pub fn with_approval_emitter(mut self, emitter: Option<ApprovalEmitter>) -> Self {
-        self.emitter = emitter;
-        self
-    }
-
-    /// Wire the sink for `notify` rules. Without it a `notify` rule is inert.
+    /// Wire the sink match notices are reported through. Without it matches are
+    /// only logged.
     pub fn with_notifier(mut self, notifier: Option<NotifyEmitter>) -> Self {
         self.notifier = notifier;
         self
@@ -231,16 +222,6 @@ impl RuleHookExtension {
     }
 }
 
-/// The refusal handed to the model. Uses the rule's own message when set, so the
-/// model can relay *why* rather than a generic block, and always names the rule
-/// so the user can find which one fired.
-fn rule_deny_reason(rule: &HookRule, tool_name: &str) -> String {
-    match rule.message.as_deref().filter(|m| !m.is_empty()) {
-        Some(message) => format!("{message}（hook rule: {}）", rule.name),
-        None => format!("{tool_name} 被 hook 规则「{}」拦截（denied）", rule.name),
-    }
-}
-
 #[async_trait]
 impl Extension for RuleHookExtension {
     fn manifest(&self) -> &ExtensionManifest {
@@ -265,10 +246,6 @@ impl Extension for RuleHookExtension {
         const SUBJECT: &str = "prompt";
 
         match rule.action {
-            HookAction::Deny => {
-                self.report(rule, SUBJECT, outcome::DENIED);
-                Ok(HookDecision::Cancel(rule_deny_reason(rule, SUBJECT)).into())
-            }
             HookAction::Notify => {
                 self.report(rule, SUBJECT, outcome::OBSERVED);
                 Ok(UserMessageOutcome::cont())
@@ -330,8 +307,6 @@ impl Extension for RuleHookExtension {
                     },
                 }
             }
-            // Ask/Allow gate a tool call; there is no call here to gate.
-            _ => Ok(UserMessageOutcome::cont()),
         }
     }
 
@@ -349,53 +324,9 @@ impl Extension for RuleHookExtension {
         };
 
         match rule.action {
-            HookAction::Deny => {
-                self.report(rule, &event.tool_name, outcome::DENIED);
-                Ok(HookDecision::Cancel(rule_deny_reason(
-                    rule,
-                    &event.tool_name,
-                )))
-            }
-            HookAction::Allow => {
-                // Consent for this one call, so the approval gate behind us does
-                // not prompt for what a rule already permits.
-                //
-                // Only when a consent surface exists at all. A headless run (a
-                // scheduled job) has no emitter and its gate fails closed by
-                // design; letting a rule clear that would widen what an
-                // unattended run may do, which is not what writing a rule in the
-                // settings UI asks for.
-                if self.emitter.is_some() {
-                    clear_call_for_rule(&event.call_id);
-                }
-                self.report(rule, &event.tool_name, outcome::ALLOWED);
+            HookAction::Notify => {
+                self.report(rule, &event.tool_name, outcome::OBSERVED);
                 Ok(HookDecision::Continue)
-            }
-            HookAction::Ask => {
-                let decision = request_approval(
-                    &self.session_id,
-                    self.emitter.as_ref(),
-                    &event.call_id,
-                    &event.tool_name,
-                    &event.arguments,
-                )
-                .await;
-                // The user just answered for this call; clear it so a dangerous
-                // tool does not raise a second, identical dialog.
-                let approved = matches!(decision, HookDecision::Continue);
-                if approved {
-                    clear_call_for_rule(&event.call_id);
-                }
-                self.report(
-                    rule,
-                    &event.tool_name,
-                    if approved {
-                        outcome::APPROVED
-                    } else {
-                        outcome::REJECTED
-                    },
-                );
-                Ok(decision)
             }
             HookAction::RunCommand => {
                 let verdict = self.run_command(rule, "before_tool_call", &event.tool_name, || {
@@ -428,9 +359,6 @@ impl Extension for RuleHookExtension {
                     }
                 }
             }
-            // Only meaningful after a call; a rule stored this way is inert
-            // rather than an error, so a mis-set action never blocks work.
-            HookAction::Notify => Ok(HookDecision::Continue),
         }
     }
 
@@ -493,8 +421,6 @@ impl Extension for RuleHookExtension {
                     }
                 }
             }
-            // A decision action cannot un-run a finished call.
-            _ => Ok(ResultDecision::Continue),
         }
     }
 }
@@ -502,7 +428,6 @@ impl Extension for RuleHookExtension {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::agent_permission::{respond_to_approval, ApprovalDecision};
     use serde_json::json;
     use std::sync::Mutex;
 
@@ -545,11 +470,14 @@ mod tests {
     async fn a_non_matching_call_passes_through() {
         let ext = RuleHookExtension::new(
             "s1".to_string(),
-            vec![rule(
-                "block rm",
-                HookEvent::BeforeToolCall,
-                HookAction::Deny,
-            )],
+            vec![HookRule {
+                command: Some(r#"echo '{"decision":"deny","reason":"no"}'"#.to_string()),
+                ..rule(
+                    "block rm",
+                    HookEvent::BeforeToolCall,
+                    HookAction::RunCommand,
+                )
+            }],
         );
         let decision = ext
             .on_before_tool_call(&cx(), &call("bash", json!({"command": "ls"})))
@@ -558,41 +486,28 @@ mod tests {
         assert!(matches!(decision, HookDecision::Continue));
     }
 
-    #[tokio::test]
-    async fn a_deny_rule_cancels_with_its_own_message() {
-        let mut r = rule("block rm", HookEvent::BeforeToolCall, HookAction::Deny);
-        r.message = Some("危险命令".to_string());
-        let ext = RuleHookExtension::new("s1".to_string(), vec![r]);
-
-        let decision = ext
-            .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /"})))
-            .await
-            .unwrap();
-        match decision {
-            HookDecision::Cancel(reason) => {
-                assert!(
-                    reason.contains("危险命令"),
-                    "rule message reaches the model"
-                );
-                assert!(reason.contains("block rm"), "and names the rule that fired");
-            }
-            other => panic!("expected Cancel, got {other:?}"),
-        }
-    }
-
     /// The first rule in `sort_order` decides; a later rule matching the same
     /// call never runs.
     #[tokio::test]
     async fn the_first_matching_rule_wins() {
-        let allow = HookRule {
+        let observe = HookRule {
             sort_order: 0,
-            ..rule("allow first", HookEvent::BeforeToolCall, HookAction::Allow)
+            ..rule(
+                "observe first",
+                HookEvent::BeforeToolCall,
+                HookAction::Notify,
+            )
         };
         let deny = HookRule {
             sort_order: 1,
-            ..rule("deny second", HookEvent::BeforeToolCall, HookAction::Deny)
+            command: Some(r#"echo '{"decision":"deny","reason":"no"}'"#.to_string()),
+            ..rule(
+                "deny second",
+                HookEvent::BeforeToolCall,
+                HookAction::RunCommand,
+            )
         };
-        let ext = RuleHookExtension::new("s1".to_string(), vec![allow, deny]);
+        let ext = RuleHookExtension::new("s1".to_string(), vec![observe, deny]);
 
         let decision = ext
             .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /tmp/x"})))
@@ -600,158 +515,58 @@ mod tests {
             .unwrap();
         assert!(
             matches!(decision, HookDecision::Continue),
-            "the allow rule sorted first decides the call"
+            "the notify rule sorted first decides the call"
         );
     }
 
-    /// An `allow` rule clears the call so the approval gate registered behind
-    /// this extension does not prompt for it.
+    /// `notify` on a pending call observes it: the call proceeds untouched and
+    /// the match is reported.
     #[tokio::test]
-    async fn an_allow_rule_clears_the_call_for_the_approval_gate() {
-        let ext = RuleHookExtension::new(
-            "s1".to_string(),
-            vec![rule("auto", HookEvent::BeforeToolCall, HookAction::Allow)],
-        )
-        .with_approval_emitter(Some(Arc::new(|_| {})));
-        let event = call("bash", json!({"command": "rm -rf /tmp/x"}));
-        ext.on_before_tool_call(&cx(), &event).await.unwrap();
+    async fn a_notify_rule_observes_a_pending_call() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
 
-        // The permission extension consumes the clearance; asserting through its
-        // public hook keeps this test honest about the real interaction.
-        let permission = crate::services::agent_permission::PermissionExtension::new(
-            "s1".to_string(),
-            // No emitter: without a clearance this would fail closed and Cancel.
-            None,
-        );
-        let decision = permission.on_before_tool_call(&cx(), &event).await.unwrap();
-        assert!(
-            matches!(decision, HookDecision::Continue),
-            "the cleared call skips the approval gate instead of failing closed"
-        );
-    }
-
-    /// A clearance is per call id and consumed once — it must not become
-    /// standing consent for the tool.
-    #[tokio::test]
-    async fn a_clearance_does_not_carry_to_the_next_call() {
-        let ext = RuleHookExtension::new(
-            "s2".to_string(),
-            vec![HookRule {
-                arg_contains: Some("git ".to_string()),
-                ..rule("allow git", HookEvent::BeforeToolCall, HookAction::Allow)
-            }],
-        )
-        .with_approval_emitter(Some(Arc::new(|_| {})));
-        let allowed = ToolCallEvent {
-            call_id: "call-a".to_string(),
-            ..call("bash", json!({"command": "git status"}))
-        };
-        ext.on_before_tool_call(&cx(), &allowed).await.unwrap();
-
-        let dangerous = ToolCallEvent {
-            call_id: "call-b".to_string(),
-            ..call("bash", json!({"command": "rm -rf /"}))
-        };
-        let permission =
-            crate::services::agent_permission::PermissionExtension::new("s2".to_string(), None);
-        let decision = permission
-            .on_before_tool_call(&cx(), &dangerous)
-            .await
-            .unwrap();
-        assert!(
-            matches!(decision, HookDecision::Cancel(_)),
-            "a different call must still be gated"
-        );
-    }
-
-    /// Headless runs (scheduled jobs) have no consent surface, and their approval
-    /// gate fails closed by design. An `allow` rule must not quietly widen that:
-    /// with no emitter the clearance is never granted.
-    #[tokio::test]
-    async fn an_allow_rule_does_not_widen_a_headless_run() {
-        let ext = RuleHookExtension::new(
-            "s7".to_string(),
-            vec![rule("auto", HookEvent::BeforeToolCall, HookAction::Allow)],
-        );
-        let event = call("bash", json!({"command": "rm -rf /tmp/x"}));
-
-        let decision = ext.on_before_tool_call(&cx(), &event).await.unwrap();
-        assert!(
-            matches!(decision, HookDecision::Continue),
-            "the rule itself still passes the call along"
-        );
-
-        let permission =
-            crate::services::agent_permission::PermissionExtension::new("s7".to_string(), None);
-        let gated = permission.on_before_tool_call(&cx(), &event).await.unwrap();
-        assert!(
-            matches!(gated, HookDecision::Cancel(_)),
-            "but the gate still fails closed without a consent surface"
-        );
-    }
-
-    /// With no approval surface an `ask` rule denies rather than allowing.
-    #[tokio::test]
-    async fn an_ask_rule_without_an_emitter_fails_closed() {
         let ext = RuleHookExtension::new(
             "s3".to_string(),
-            vec![rule("confirm", HookEvent::BeforeToolCall, HookAction::Ask)],
-        );
+            vec![rule(
+                "watch rm",
+                HookEvent::BeforeToolCall,
+                HookAction::Notify,
+            )],
+        )
+        .with_notifier(Some(notifier));
+
         let decision = ext
             .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /"})))
             .await
             .unwrap();
-        assert!(matches!(decision, HookDecision::Cancel(_)));
-    }
 
-    /// An `ask` rule prompts through the shared approval registry, so the
-    /// existing `agent_approval_respond` IPC answers it unchanged.
-    #[tokio::test]
-    async fn an_ask_rule_prompts_and_honors_the_answer() {
-        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let sink = captured.clone();
-        let emitter: ApprovalEmitter = Arc::new(move |payload: serde_json::Value| {
-            *sink.lock().unwrap() = payload["requestId"].as_str().map(str::to_string);
-        });
-
-        let ext = RuleHookExtension::new(
-            "s4".to_string(),
-            vec![rule("confirm", HookEvent::BeforeToolCall, HookAction::Ask)],
-        )
-        .with_approval_emitter(Some(emitter));
-
-        let event = call("bash", json!({"command": "rm -rf /tmp/x"}));
-        let hook = tokio::spawn(async move { ext.on_before_tool_call(&cx(), &event).await });
-
-        // Wait for the request to be registered, then answer it.
-        let request_id = loop {
-            if let Some(id) = captured.lock().unwrap().clone() {
-                break id;
-            }
-            tokio::task::yield_now().await;
-        };
-        respond_to_approval(&request_id, ApprovalDecision::AllowOnce);
-
-        let decision = hook.await.unwrap().unwrap();
         assert!(matches!(decision, HookDecision::Continue));
+        let events = seen.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["outcome"], "observed");
     }
 
     /// A block must announce itself. Without this the user cannot tell a rule
     /// firing apart from no rule matching — the failure that made the feature
     /// look broken in real use.
     #[tokio::test]
-    async fn a_deny_rule_reports_the_block() {
+    async fn a_command_deny_reports_the_block() {
         let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
         let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
 
         let ext = RuleHookExtension::new(
             "s8".to_string(),
-            vec![rule(
-                "block rm",
-                HookEvent::BeforeToolCall,
-                HookAction::Deny,
-            )],
+            vec![HookRule {
+                command: Some(r#"echo '{"decision":"deny","reason":"no"}'"#.to_string()),
+                ..rule(
+                    "block rm",
+                    HookEvent::BeforeToolCall,
+                    HookAction::RunCommand,
+                )
+            }],
         )
         .with_notifier(Some(notifier));
 
@@ -776,9 +591,9 @@ mod tests {
         let ext = RuleHookExtension::new(
             "s9".to_string(),
             vec![rule(
-                "block rm",
+                "watch rm",
                 HookEvent::BeforeToolCall,
-                HookAction::Deny,
+                HookAction::Notify,
             )],
         )
         .with_notifier(Some(notifier));
@@ -800,6 +615,7 @@ mod tests {
     /// so a rule written for prompts must not be filtered out by the pattern.
     #[tokio::test]
     async fn a_prompt_rule_matches_the_prompt_text() {
+        let dir = tempfile::TempDir::new().unwrap();
         let ext = RuleHookExtension::new(
             "s15".to_string(),
             vec![HookRule {
@@ -807,11 +623,12 @@ mod tests {
                 tool_pattern: "bash".to_string(), // deliberately irrelevant
                 arg_field: None,
                 arg_contains: Some("deploy to prod".to_string()),
-                action: HookAction::Deny,
-                message: Some("not from here".to_string()),
-                ..rule("guard", HookEvent::UserPromptSubmit, HookAction::Deny)
+                action: HookAction::RunCommand,
+                command: Some(r#"echo '{"decision":"deny","reason":"not from here"}'"#.to_string()),
+                ..rule("guard", HookEvent::UserPromptSubmit, HookAction::RunCommand)
             }],
-        );
+        )
+        .with_working_dir(dir.path().to_path_buf());
 
         let blocked = ext
             .on_user_message(&cx(), &prompt("please deploy to prod now"))
@@ -835,7 +652,7 @@ mod tests {
     fn the_user_message_capability_tracks_whether_prompt_rules_exist() {
         let without = RuleHookExtension::new(
             "s16".to_string(),
-            vec![rule("tool", HookEvent::BeforeToolCall, HookAction::Deny)],
+            vec![rule("tool", HookEvent::BeforeToolCall, HookAction::Notify)],
         );
         assert!(!without.manifest().capabilities.on_user_message);
 
@@ -844,7 +661,7 @@ mod tests {
             vec![rule(
                 "prompt",
                 HookEvent::UserPromptSubmit,
-                HookAction::Deny,
+                HookAction::Notify,
             )],
         );
         assert!(with.manifest().capabilities.on_user_message);
@@ -920,8 +737,8 @@ mod tests {
         assert_eq!(seen["arguments"]["command"], "rm -rf /tmp/x");
     }
 
-    /// A command can still decide, which is what makes the built-in actions a
-    /// special case of this one.
+    /// A command can veto a pending call through its verdict — the dynamic
+    /// escape hatch that replaced the declarative deny action.
     #[tokio::test]
     async fn a_run_command_rule_can_deny() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1218,11 +1035,14 @@ mod tests {
     async fn rules_only_fire_on_their_own_event() {
         let ext = RuleHookExtension::new(
             "s6".to_string(),
-            vec![rule(
-                "after only",
-                HookEvent::AfterToolCall,
-                HookAction::Deny,
-            )],
+            vec![HookRule {
+                command: Some(r#"echo '{"decision":"deny","reason":"no"}'"#.to_string()),
+                ..rule(
+                    "after only",
+                    HookEvent::AfterToolCall,
+                    HookAction::RunCommand,
+                )
+            }],
         );
         let decision = ext
             .on_before_tool_call(&cx(), &call("bash", json!({"command": "rm -rf /"})))

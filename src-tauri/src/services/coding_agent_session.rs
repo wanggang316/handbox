@@ -86,13 +86,13 @@ pub struct HandBoxAgentSessionConfig {
 /// not churn every [`build_agent_session`] call site.
 ///
 /// Both default to `None`, which is the headless shape (jobs, tests): approvals
-/// then fail closed and `notify` rules are inert.
+/// then fail closed and hook-match notices are only logged.
 #[derive(Clone, Default)]
 pub struct HookEmitters {
-    /// Approval prompts — dangerous built-ins, manual MCP tools, and `ask`
-    /// rules. `None` denies rather than prompting.
+    /// Approval prompts — dangerous built-ins and manual MCP tools. `None`
+    /// denies rather than prompting.
     pub approval: Option<ApprovalEmitter>,
-    /// Notifications raised by `notify` rules.
+    /// Match notices raised by hook rules.
     pub notify: Option<NotifyEmitter>,
 }
 
@@ -191,12 +191,12 @@ pub fn build_agent_session(
     // out-of-sandbox path from the outside via this before_tool_call extension.
     session.register_extension(Arc::new(SandboxExtension::new(config.working_dir.clone())));
 
-    // The user's declarative rules sit between the sandbox and the approval gate:
-    // behind the sandbox so no rule can widen the working-directory boundary, and
-    // ahead of the gate so an `allow` rule can spare a prompt the user already
-    // answered by writing the rule. Skipped entirely when no rule is configured.
+    // The user's hook rules sit between the sandbox and the approval gate:
+    // behind the sandbox so no hook can widen the working-directory boundary,
+    // and ahead of the gate so a command that vetoes a call spares the user a
+    // prompt for something that would be blocked anyway. Skipped entirely when
+    // no rule is configured.
     let rules = RuleHookExtension::new(config.session_id.clone(), config.hook_rules.clone())
-        .with_approval_emitter(emitters.approval.clone())
         .with_notifier(emitters.notify.clone())
         .with_working_dir(config.working_dir.clone());
     // Logged unconditionally: "did my rule load?" is the first question when a
@@ -1536,7 +1536,7 @@ mod tests {
             tool_pattern: "bash".to_string(),
             arg_field: Some("command".to_string()),
             arg_contains: Some("rm -rf".to_string()),
-            action: crate::storage::types::HookAction::Deny,
+            action: crate::storage::types::HookAction::Notify,
             message: None,
             command: None,
             timeout_ms: None,

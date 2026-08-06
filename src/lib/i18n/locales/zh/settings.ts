@@ -51,10 +51,12 @@ export const settingsZh = {
   "settings.quicktools.translationAgentDefault": "内置翻译",
   "settings.quicktools.quickActionGroup": "Quick Action",
   "settings.quicktools.enableQuickAction": "启用 Quick Action",
-  "settings.quicktools.enableQuickActionDesc": "通过全局快捷键 {shortcut} 唤起快捷动作浮层",
+  "settings.quicktools.enableQuickActionDesc":
+    "通过全局快捷键 {shortcut} 唤起快捷动作浮层",
   "settings.quicktools.permissionRequired": "需要辅助功能权限",
   "settings.quicktools.disabledApps": "禁用的应用",
-  "settings.quicktools.disabledAppsEmpty": "禁止使用划词工具的应用将显示在这里。",
+  "settings.quicktools.disabledAppsEmpty":
+    "禁止使用划词工具的应用将显示在这里。",
   "settings.quicktools.permissionGuide":
     '启用此功能需要授予辅助功能权限。请前往"系统设置 > 隐私与安全性 > 辅助功能"，并启用 HandBox 的权限。',
   "settings.quicktools.openSystemSettings": "打开系统设置",
@@ -62,7 +64,8 @@ export const settingsZh = {
 
   // Agent Tools page
   "settings.agentTools.title": "Agent 工具",
-  "settings.agentTools.description": "新建 Agent 会话默认启用的工具。已存在的会话不受影响。",
+  "settings.agentTools.description":
+    "新建 Agent 会话默认启用的工具。已存在的会话不受影响。",
   "settings.agentTools.webSearch.title": "网络搜索",
   "settings.agentTools.webSearch.provider": "搜索服务商",
   "settings.agentTools.webSearch.apiKey": "API Key",
@@ -71,12 +74,14 @@ export const settingsZh = {
   "settings.agentTools.uiExtensions.title": "UI",
   "settings.agentTools.skill.title": "Skill",
   "settings.agentTools.renderCardDesc": "在会话中内联渲染交互式 HTML 卡片",
-  "settings.agentTools.renderAppDesc": "在侧边面板生成完整的 HTML 应用（预览 + 源码）",
+  "settings.agentTools.renderAppDesc":
+    "在侧边面板生成完整的 HTML 应用（预览 + 源码）",
   "settings.agentTools.skillDesc": "允许模型发现并按需加载 Skill",
 
   // Skills page
   "settings.skills.title": "技能",
-  "settings.skills.description": "将 SKILL.md 放入技能目录后会在此处展示，可启停有效的技能",
+  "settings.skills.description":
+    "将 SKILL.md 放入技能目录后会在此处展示，可启停有效的技能",
   "settings.skills.loading": "正在加载技能...",
   "settings.skills.scope.user": "用户",
   "settings.skills.scope.project": "项目",
@@ -85,29 +90,27 @@ export const settingsZh = {
   "settings.skills.collapseBody": "收起内容",
   "settings.skills.expandBody": "查看内容",
   "settings.skills.empty": "暂无技能",
-  "settings.skills.emptyHint": "在技能目录中放入 SKILL.md 文件，然后点击「刷新」即可在此处看到。",
+  "settings.skills.emptyHint":
+    "在技能目录中放入 SKILL.md 文件，然后点击「刷新」即可在此处看到。",
 
   // Hook rules page
   "settings.hooks.description":
-    "在 Agent 调用工具前后自动应用的规则，按顺序匹配，命中的第一条生效",
+    "在 Agent 调用工具前后或提交提示词时自动执行动作，按顺序匹配，命中的第一条生效",
   "settings.hooks.add": "添加规则",
   "settings.hooks.addTitle": "添加规则",
   "settings.hooks.editTitle": "编辑规则",
   "settings.hooks.empty": "暂无规则",
   "settings.hooks.emptyHint":
-    "添加规则可以拦截危险命令、对特定操作二次确认，或在工具返回特定内容时收到提醒。",
+    "添加规则可在工具调用前后自动执行命令（格式化、提交、注入上下文等），或在命中特定操作时收到提醒。",
   "settings.hooks.anyArgument": "任意参数",
   "settings.hooks.promptSubject": "提示词",
   "settings.hooks.event.before": "调用前",
   "settings.hooks.event.after": "调用后",
   "settings.hooks.event.prompt": "提交提示词时",
-  "settings.hooks.action.deny": "拒绝",
-  "settings.hooks.action.ask": "询问",
-  "settings.hooks.action.allow": "放行",
   "settings.hooks.action.notify": "提醒",
   "settings.hooks.action.runCommand": "执行命令",
   "settings.hooks.field.name": "名称",
-  "settings.hooks.field.namePlaceholder": "例如：拦截 rm -rf",
+  "settings.hooks.field.namePlaceholder": "例如：写入后自动格式化",
   "settings.hooks.field.event": "触发时机",
   "settings.hooks.field.action": "动作",
   "settings.hooks.field.toolPattern": "工具名",
@@ -117,19 +120,16 @@ export const settingsZh = {
   "settings.hooks.field.promptContainsPlaceholder": "留空则每次提交都触发",
   "settings.hooks.field.command": "命令",
   "settings.hooks.field.commandHint":
-    "事件以 JSON 从标准输入传入，可用 $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME。命令在会话工作目录下执行，默认 10 秒超时。输出 {\"decision\":\"deny\",\"reason\":\"…\"} 可拦截调用，输出 {\"updatedInput\":{…}} 可改写参数（调用后则改写结果，可用于脱敏）；非零退出码视为拦截。提交提示词时，命令的普通输出会作为上下文交给模型（也可用 {\"additionalContext\":\"…\"} 明确指定）。",
+    '事件以 JSON 从标准输入传入，可用 $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME。命令在会话工作目录下执行，默认 10 秒超时。输出 {"decision":"deny","reason":"…"} 可拦截调用，输出 {"updatedInput":{…}} 可改写参数（调用后则改写结果，可用于脱敏）；非零退出码视为拦截。提交提示词时，命令的普通输出会作为上下文交给模型（也可用 {"additionalContext":"…"} 明确指定）。',
   "settings.hooks.field.message": "说明（可选）",
-  "settings.hooks.field.messagePlaceholder": "拒绝时会作为理由告诉模型",
+  "settings.hooks.field.messagePlaceholder": "命中时随提醒一起展示",
   "settings.hooks.field.hint":
     "工具名支持 * 通配，如 mcp__* 或 *。留空参数名则在全部参数中查找；参数条件留空表示只按工具名匹配。",
   "settings.hooks.deleteTitle": "删除规则",
   "settings.hooks.deleteMessage": "确定要删除「{name}」吗？",
   // Runtime notices — shown when a rule matches a tool call
-  "settings.hooks.notice.denied": "规则「{rule}」拦截了 {tool}",
-  "settings.hooks.notice.allowed": "规则「{rule}」放行了 {tool}",
-  "settings.hooks.notice.approved": "规则「{rule}」要求确认 {tool}，已允许",
-  "settings.hooks.notice.rejected": "规则「{rule}」要求确认 {tool}，已拒绝",
-  "settings.hooks.notice.observed": "规则「{rule}」匹配了 {tool} 的结果",
+  "settings.hooks.notice.denied": "规则「{rule}」的命令拦截了 {tool}",
+  "settings.hooks.notice.observed": "规则「{rule}」匹配了 {tool}",
   "settings.hooks.notice.ran": "规则「{rule}」在 {tool} 上执行了命令",
   "settings.hooks.notice.rewrote": "规则「{rule}」改写了 {tool} 的参数",
   "settings.hooks.notice.failed": "规则「{rule}」的命令执行失败（{tool}）",

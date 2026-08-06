@@ -12,13 +12,13 @@ export type HookEvent =
   | "user_prompt_submit";
 
 /**
- * What a matching rule does. `deny` / `ask` / `allow` decide a pending call and
- * are only valid on `before_tool_call`; `notify` observes a finished one and is
- * only valid on `after_tool_call`. `run_command` pairs with both — before a
- * call its output can still decide, after one it is a side effect. The backend
- * rejects the other combinations.
+ * What a matching rule does. Hooks execute actions rather than gate calls —
+ * permission control lives in the agent's own configuration. `notify` observes
+ * and reports; `run_command` runs the rule's command, whose output may still
+ * contribute context, rewrite arguments/results, or veto the call. Both are
+ * valid on every event.
  */
-export type HookAction = "deny" | "ask" | "allow" | "notify" | "run_command";
+export type HookAction = "notify" | "run_command";
 
 export interface HookRule {
   id: string;
@@ -31,9 +31,9 @@ export interface HookRule {
   /** Substring the argument must contain; null matches on the tool pattern alone. */
   argContains: string | null;
   action: HookAction;
-  /** Shown to the model on `deny`, and to the user on `ask` / `notify`. */
+  /** Shown to the user alongside the match notice. */
   message: string | null;
-  /** Shell command for `run_command`; ignored by the other actions. */
+  /** Shell command for `run_command`; ignored by `notify`. */
   command: string | null;
   /** Budget for the command in ms; null uses the backend default (10s). */
   timeoutMs: number | null;
@@ -75,12 +75,11 @@ export interface UpdateHookRuleRequest {
   sortOrder?: number;
 }
 
-/** What actually happened to the call; an `ask` resolves either way. */
+/** What actually happened; a command resolves several ways. */
 export type HookRuleOutcome =
+  /** A command's verdict blocked the call (or the prompt). */
   | "denied"
-  | "allowed"
-  | "approved"
-  | "rejected"
+  /** A `notify` rule matched. */
   | "observed"
   /** A `run_command` hook ran and raised no objection. */
   | "ran"

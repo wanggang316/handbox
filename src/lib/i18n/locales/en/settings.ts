@@ -13,7 +13,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.section": "General",
   "settings.general.appearanceDesc": "Choose the light or dark color scheme",
   "settings.general.languageDesc": "Interface display language",
-  "settings.general.autoScrollDesc": "Auto-scroll to the bottom on new messages",
+  "settings.general.autoScrollDesc":
+    "Auto-scroll to the bottom on new messages",
 
   // Sidebar
   "settings.sidebar.backToApp": "Back to app",
@@ -46,7 +47,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
 
   // Quick Tools page
   "settings.quicktools.selectionToolbarGroup": "Text Selection Toolbar",
-  "settings.quicktools.showToolbarOnSelection": "Show toolbar on text selection",
+  "settings.quicktools.showToolbarOnSelection":
+    "Show toolbar on text selection",
   "settings.quicktools.translationAgent": "Selection translate Agent",
   "settings.quicktools.translationAgentDesc":
     "Agent used by the toolbar Translate button; falls back to the built-in translator when unset",
@@ -75,9 +77,12 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.agentTools.system.title": "System",
   "settings.agentTools.uiExtensions.title": "UI",
   "settings.agentTools.skill.title": "Skill",
-  "settings.agentTools.renderCardDesc": "Render interactive HTML cards inline in the conversation",
-  "settings.agentTools.renderAppDesc": "Build full HTML apps in a side panel (preview + source)",
-  "settings.agentTools.skillDesc": "Let the model discover and load skills on demand",
+  "settings.agentTools.renderCardDesc":
+    "Render interactive HTML cards inline in the conversation",
+  "settings.agentTools.renderAppDesc":
+    "Build full HTML apps in a side panel (preview + source)",
+  "settings.agentTools.skillDesc":
+    "Let the model discover and load skills on demand",
 
   // Skills page
   "settings.skills.title": "Skills",
@@ -96,51 +101,48 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
 
   // Hook rules page
   "settings.hooks.description":
-    "Rules applied automatically around the agent's tool calls, matched in order — the first hit decides",
+    "Actions run automatically around the agent's tool calls and prompts, matched in order — the first hit decides",
   "settings.hooks.add": "Add rule",
   "settings.hooks.addTitle": "Add rule",
   "settings.hooks.editTitle": "Edit rule",
   "settings.hooks.empty": "No rules yet",
   "settings.hooks.emptyHint":
-    "Add a rule to block dangerous commands, confirm specific operations, or get notified when a tool returns something you care about.",
+    "Add a rule to run a command around tool calls (format, commit, inject context), or get notified when an operation you care about happens.",
   "settings.hooks.anyArgument": "any argument",
   "settings.hooks.promptSubject": "prompt",
   "settings.hooks.event.before": "Before call",
   "settings.hooks.event.after": "After call",
   "settings.hooks.event.prompt": "On prompt submit",
-  "settings.hooks.action.deny": "Deny",
-  "settings.hooks.action.ask": "Ask",
-  "settings.hooks.action.allow": "Allow",
   "settings.hooks.action.notify": "Notify",
   "settings.hooks.action.runCommand": "Run command",
   "settings.hooks.field.name": "Name",
-  "settings.hooks.field.namePlaceholder": "e.g. Block rm -rf",
+  "settings.hooks.field.namePlaceholder": "e.g. Format after write",
   "settings.hooks.field.event": "When",
   "settings.hooks.field.action": "Action",
   "settings.hooks.field.toolPattern": "Tool name",
   "settings.hooks.field.argField": "Argument (optional)",
   "settings.hooks.field.argContains": "Argument contains (optional)",
   "settings.hooks.field.promptContains": "Prompt contains (optional)",
-  "settings.hooks.field.promptContainsPlaceholder": "Leave empty to fire on every prompt",
+  "settings.hooks.field.promptContainsPlaceholder":
+    "Leave empty to fire on every prompt",
   "settings.hooks.field.command": "Command",
   "settings.hooks.field.commandHint":
-    "The event arrives as JSON on stdin; $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME are set. Runs in the session's working directory, 10s timeout by default. Print {\"decision\":\"deny\",\"reason\":\"…\"} to block or {\"updatedInput\":{…}} to rewrite the arguments (after a call this rewrites the result, which is how redaction works); a non-zero exit blocks it. On prompt submission, plain output becomes context for the model — or set it explicitly with {\"additionalContext\":\"…\"}.",
+    'The event arrives as JSON on stdin; $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME are set. Runs in the session\'s working directory, 10s timeout by default. Print {"decision":"deny","reason":"…"} to block or {"updatedInput":{…}} to rewrite the arguments (after a call this rewrites the result, which is how redaction works); a non-zero exit blocks it. On prompt submission, plain output becomes context for the model — or set it explicitly with {"additionalContext":"…"}.',
   "settings.hooks.field.message": "Message (optional)",
-  "settings.hooks.field.messagePlaceholder": "Given to the model as the reason when denied",
+  "settings.hooks.field.messagePlaceholder":
+    "Shown alongside the notice when the rule fires",
   "settings.hooks.field.hint":
     "Tool name accepts * as a wildcard, e.g. mcp__* or *. Leave the argument name empty to search all arguments; leave the condition empty to match on the tool name alone.",
   "settings.hooks.deleteTitle": "Delete rule",
-  "settings.hooks.deleteMessage": "Delete \"{name}\"?",
+  "settings.hooks.deleteMessage": 'Delete "{name}"?',
   // Runtime notices — shown when a rule matches a tool call
-  "settings.hooks.notice.denied": "Rule \"{rule}\" blocked {tool}",
-  "settings.hooks.notice.allowed": "Rule \"{rule}\" allowed {tool}",
-  "settings.hooks.notice.approved": "Rule \"{rule}\" asked about {tool} — allowed",
-  "settings.hooks.notice.rejected": "Rule \"{rule}\" asked about {tool} — denied",
-  "settings.hooks.notice.observed": "Rule \"{rule}\" matched the result of {tool}",
-  "settings.hooks.notice.ran": "Rule \"{rule}\" ran its command on {tool}",
-  "settings.hooks.notice.rewrote": "Rule \"{rule}\" rewrote the arguments to {tool}",
-  "settings.hooks.notice.failed": "Rule \"{rule}\" command failed on {tool}",
-  "settings.hooks.notice.informed": "Rule \"{rule}\" added context for this turn",
+  "settings.hooks.notice.denied": 'Rule "{rule}" command blocked {tool}',
+  "settings.hooks.notice.observed": 'Rule "{rule}" matched {tool}',
+  "settings.hooks.notice.ran": 'Rule "{rule}" ran its command on {tool}',
+  "settings.hooks.notice.rewrote":
+    'Rule "{rule}" rewrote the arguments to {tool}',
+  "settings.hooks.notice.failed": 'Rule "{rule}" command failed on {tool}',
+  "settings.hooks.notice.informed": 'Rule "{rule}" added context for this turn',
 
   // Account page
   "settings.account.editProfile": "Edit Profile",

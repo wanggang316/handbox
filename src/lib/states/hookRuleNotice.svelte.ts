@@ -44,7 +44,7 @@ class HookRuleNoticeStore {
 
     const detail = payload.message ? `${text} — ${payload.message}` : text;
 
-    if (payload.outcome === "denied" || payload.outcome === "rejected") {
+    if (payload.outcome === "denied") {
       toastActions.warning(detail);
     } else {
       toastActions.info(detail);

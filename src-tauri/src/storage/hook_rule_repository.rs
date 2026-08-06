@@ -37,19 +37,15 @@ fn event_from_str(value: &str) -> Result<HookEvent, AppError> {
 
 fn action_as_str(action: HookAction) -> &'static str {
     match action {
-        HookAction::Deny => "deny",
-        HookAction::Ask => "ask",
-        HookAction::Allow => "allow",
         HookAction::Notify => "notify",
         HookAction::RunCommand => "run_command",
     }
 }
 
+// The removed decision actions ("deny"/"ask"/"allow") are deleted by migration
+// 065, so a row carrying one here is corruption, not legacy data.
 fn action_from_str(value: &str) -> Result<HookAction, AppError> {
     match value {
-        "deny" => Ok(HookAction::Deny),
-        "ask" => Ok(HookAction::Ask),
-        "allow" => Ok(HookAction::Allow),
         "notify" => Ok(HookAction::Notify),
         "run_command" => Ok(HookAction::RunCommand),
         other => Err(AppError::internal_error(&format!(
@@ -339,7 +335,7 @@ mod tests {
         let (repo, _dir) = repo().await;
         let created = repo
             .create(
-                create_request("no rm", HookEvent::BeforeToolCall, HookAction::Deny),
+                create_request("no rm", HookEvent::BeforeToolCall, HookAction::RunCommand),
                 1_700_000_000_000,
             )
             .await
@@ -347,7 +343,7 @@ mod tests {
 
         let fetched = repo.get(&created.id).await.unwrap().expect("stored rule");
         assert_eq!(fetched, created);
-        assert_eq!(fetched.action, HookAction::Deny);
+        assert_eq!(fetched.action, HookAction::RunCommand);
         assert_eq!(fetched.event, HookEvent::BeforeToolCall);
         assert!(fetched.enabled, "a new rule is enabled");
     }
@@ -363,7 +359,7 @@ mod tests {
                     arg_field: Some(String::new()),
                     arg_contains: Some(String::new()),
                     message: Some(String::new()),
-                    ..create_request("bare", HookEvent::BeforeToolCall, HookAction::Ask)
+                    ..create_request("bare", HookEvent::BeforeToolCall, HookAction::Notify)
                 },
                 1,
             )
@@ -380,7 +376,7 @@ mod tests {
         let (repo, _dir) = repo().await;
         let before = repo
             .create(
-                create_request("before", HookEvent::BeforeToolCall, HookAction::Deny),
+                create_request("before", HookEvent::BeforeToolCall, HookAction::RunCommand),
                 1,
             )
             .await
@@ -393,7 +389,7 @@ mod tests {
         .unwrap();
         let disabled = repo
             .create(
-                create_request("off", HookEvent::BeforeToolCall, HookAction::Deny),
+                create_request("off", HookEvent::BeforeToolCall, HookAction::RunCommand),
                 3,
             )
             .await
@@ -426,7 +422,7 @@ mod tests {
             repo.create(
                 CreateHookRuleRequest {
                     sort_order: Some(order),
-                    ..create_request(name, HookEvent::BeforeToolCall, HookAction::Deny)
+                    ..create_request(name, HookEvent::BeforeToolCall, HookAction::RunCommand)
                 },
                 1,
             )
@@ -450,7 +446,11 @@ mod tests {
         repo.create(
             CreateHookRuleRequest {
                 sort_order: Some(5),
-                ..create_request("existing", HookEvent::BeforeToolCall, HookAction::Deny)
+                ..create_request(
+                    "existing",
+                    HookEvent::BeforeToolCall,
+                    HookAction::RunCommand,
+                )
             },
             1,
         )
@@ -459,7 +459,7 @@ mod tests {
 
         let appended = repo
             .create(
-                create_request("new", HookEvent::BeforeToolCall, HookAction::Deny),
+                create_request("new", HookEvent::BeforeToolCall, HookAction::RunCommand),
                 2,
             )
             .await
@@ -472,7 +472,7 @@ mod tests {
         let (repo, _dir) = repo().await;
         let created = repo
             .create(
-                create_request("rule", HookEvent::BeforeToolCall, HookAction::Deny),
+                create_request("rule", HookEvent::BeforeToolCall, HookAction::RunCommand),
                 1,
             )
             .await
@@ -507,7 +507,7 @@ mod tests {
         let (repo, _dir) = repo().await;
         let created = repo
             .create(
-                create_request("rule", HookEvent::BeforeToolCall, HookAction::Deny),
+                create_request("rule", HookEvent::BeforeToolCall, HookAction::RunCommand),
                 1,
             )
             .await
@@ -533,7 +533,7 @@ mod tests {
         let (repo, _dir) = repo().await;
         let created = repo
             .create(
-                create_request("rule", HookEvent::BeforeToolCall, HookAction::Deny),
+                create_request("rule", HookEvent::BeforeToolCall, HookAction::RunCommand),
                 1,
             )
             .await
