@@ -103,6 +103,7 @@ export const settingsZh = {
   "settings.hooks.action.ask": "询问",
   "settings.hooks.action.allow": "放行",
   "settings.hooks.action.notify": "提醒",
+  "settings.hooks.action.runCommand": "执行命令",
   "settings.hooks.field.name": "名称",
   "settings.hooks.field.namePlaceholder": "例如：拦截 rm -rf",
   "settings.hooks.field.event": "触发时机",
@@ -110,6 +111,9 @@ export const settingsZh = {
   "settings.hooks.field.toolPattern": "工具名",
   "settings.hooks.field.argField": "参数名（可选）",
   "settings.hooks.field.argContains": "参数包含（可选）",
+  "settings.hooks.field.command": "命令",
+  "settings.hooks.field.commandHint":
+    "事件以 JSON 从标准输入传入，可用 $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME。命令在会话工作目录下执行，默认 10 秒超时。输出 {\"decision\":\"deny\",\"reason\":\"…\"} 可拦截调用，输出 {\"updatedInput\":{…}} 可改写参数；不输出即放行，非零退出码视为拦截。",
   "settings.hooks.field.message": "说明（可选）",
   "settings.hooks.field.messagePlaceholder": "拒绝时会作为理由告诉模型",
   "settings.hooks.field.hint":
@@ -122,6 +126,9 @@ export const settingsZh = {
   "settings.hooks.notice.approved": "规则「{rule}」要求确认 {tool}，已允许",
   "settings.hooks.notice.rejected": "规则「{rule}」要求确认 {tool}，已拒绝",
   "settings.hooks.notice.observed": "规则「{rule}」匹配了 {tool} 的结果",
+  "settings.hooks.notice.ran": "规则「{rule}」在 {tool} 上执行了命令",
+  "settings.hooks.notice.rewrote": "规则「{rule}」改写了 {tool} 的参数",
+  "settings.hooks.notice.failed": "规则「{rule}」的命令执行失败（{tool}）",
 
   // Account page
   "settings.account.editProfile": "编辑资料",

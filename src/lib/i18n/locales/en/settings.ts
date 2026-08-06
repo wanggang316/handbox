@@ -110,6 +110,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.action.ask": "Ask",
   "settings.hooks.action.allow": "Allow",
   "settings.hooks.action.notify": "Notify",
+  "settings.hooks.action.runCommand": "Run command",
   "settings.hooks.field.name": "Name",
   "settings.hooks.field.namePlaceholder": "e.g. Block rm -rf",
   "settings.hooks.field.event": "When",
@@ -117,6 +118,9 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.field.toolPattern": "Tool name",
   "settings.hooks.field.argField": "Argument (optional)",
   "settings.hooks.field.argContains": "Argument contains (optional)",
+  "settings.hooks.field.command": "Command",
+  "settings.hooks.field.commandHint":
+    "The event arrives as JSON on stdin; $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME are set. Runs in the session's working directory, 10s timeout by default. Print {\"decision\":\"deny\",\"reason\":\"…\"} to block or {\"updatedInput\":{…}} to rewrite the arguments; printing nothing lets the call through, and a non-zero exit blocks it.",
   "settings.hooks.field.message": "Message (optional)",
   "settings.hooks.field.messagePlaceholder": "Given to the model as the reason when denied",
   "settings.hooks.field.hint":
@@ -129,6 +133,9 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.notice.approved": "Rule \"{rule}\" asked about {tool} — allowed",
   "settings.hooks.notice.rejected": "Rule \"{rule}\" asked about {tool} — denied",
   "settings.hooks.notice.observed": "Rule \"{rule}\" matched the result of {tool}",
+  "settings.hooks.notice.ran": "Rule \"{rule}\" ran its command on {tool}",
+  "settings.hooks.notice.rewrote": "Rule \"{rule}\" rewrote the arguments to {tool}",
+  "settings.hooks.notice.failed": "Rule \"{rule}\" command failed on {tool}",
 
   // Account page
   "settings.account.editProfile": "Edit Profile",

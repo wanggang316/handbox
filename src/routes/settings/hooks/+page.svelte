@@ -43,12 +43,19 @@
   let formArgContains = $state("");
   let formAction = $state<HookAction>("ask");
   let formMessage = $state("");
+  let formCommand = $state("");
 
   // A decision action only applies before a call and `notify` only after, which
   // the backend enforces; the picker follows so an invalid pair is unreachable.
   const actionsForEvent = $derived<HookAction[]>(
-    formEvent === "before_tool_call" ? ["deny", "ask", "allow"] : ["notify"],
+    formEvent === "before_tool_call"
+      ? ["deny", "ask", "allow", "run_command"]
+      : ["notify", "run_command"],
   );
+
+  // The command field only means something for run_command, and leaving a
+  // stale command visible under another action reads as if it would still run.
+  const needsCommand = $derived(formAction === "run_command");
 
   const eventOptions = $derived([
     { value: "before_tool_call", label: t("settings.hooks.event.before") },
@@ -72,6 +79,8 @@
         return t("settings.hooks.action.allow");
       case "notify":
         return t("settings.hooks.action.notify");
+      case "run_command":
+        return t("settings.hooks.action.runCommand");
       default:
         return action;
     }
@@ -115,6 +124,7 @@
     formArgContains = "";
     formAction = "ask";
     formMessage = "";
+    formCommand = "";
     saveError = null;
     editorOpen = true;
   }
@@ -128,6 +138,7 @@
     formArgContains = rule.argContains ?? "";
     formAction = rule.action;
     formMessage = rule.message ?? "";
+    formCommand = rule.command ?? "";
     saveError = null;
     editorOpen = true;
   }
@@ -142,6 +153,7 @@
 
   async function handleSave() {
     if (!formName.trim() || !formToolPattern.trim()) return;
+    if (needsCommand && !formCommand.trim()) return;
     saving = true;
     saveError = null;
     try {
@@ -156,6 +168,7 @@
           argContains: formArgContains.trim(),
           action: formAction,
           message: formMessage.trim(),
+          command: formCommand.trim(),
         });
       } else {
         const request: CreateHookRuleRequest = {
@@ -166,6 +179,7 @@
           argContains: formArgContains.trim() || null,
           action: formAction,
           message: formMessage.trim() || null,
+          command: formCommand.trim() || null,
         };
         await createHookRule(request);
       }
@@ -253,6 +267,11 @@
                 <p class="mt-1 text-xs text-base-content/60 font-mono truncate">
                   {conditionSummary(rule)}
                 </p>
+                {#if rule.command}
+                  <p class="mt-1 text-xs text-base-content/50 font-mono truncate">
+                    $ {rule.command}
+                  </p>
+                {/if}
                 {#if rule.message}
                   <p class="mt-1 text-xs text-base-content/50 truncate">
                     {rule.message}
@@ -335,6 +354,18 @@
         literal
       />
     </div>
+
+    {#if needsCommand}
+      <Input
+        label={t("settings.hooks.field.command")}
+        bind:value={formCommand}
+        placeholder="prettier --write $HANDBOX_TOOL_NAME"
+        literal
+      />
+      <p class="text-xs text-base-content/50 -mt-2">
+        {t("settings.hooks.field.commandHint")}
+      </p>
+    {/if}
 
     <Input
       label={t("settings.hooks.field.message")}

@@ -9,9 +9,11 @@ export type HookEvent = "before_tool_call" | "after_tool_call";
 /**
  * What a matching rule does. `deny` / `ask` / `allow` decide a pending call and
  * are only valid on `before_tool_call`; `notify` observes a finished one and is
- * only valid on `after_tool_call`. The backend rejects the other combinations.
+ * only valid on `after_tool_call`. `run_command` pairs with both — before a
+ * call its output can still decide, after one it is a side effect. The backend
+ * rejects the other combinations.
  */
-export type HookAction = "deny" | "ask" | "allow" | "notify";
+export type HookAction = "deny" | "ask" | "allow" | "notify" | "run_command";
 
 export interface HookRule {
   id: string;
@@ -26,6 +28,10 @@ export interface HookRule {
   action: HookAction;
   /** Shown to the model on `deny`, and to the user on `ask` / `notify`. */
   message: string | null;
+  /** Shell command for `run_command`; ignored by the other actions. */
+  command: string | null;
+  /** Budget for the command in ms; null uses the backend default (10s). */
+  timeoutMs: number | null;
   enabled: boolean;
   /** Evaluation order; the first matching rule decides the call. */
   sortOrder: number;
@@ -41,6 +47,8 @@ export interface CreateHookRuleRequest {
   argContains?: string | null;
   action: HookAction;
   message?: string | null;
+  command?: string | null;
+  timeoutMs?: number | null;
   sortOrder?: number | null;
 }
 
@@ -56,6 +64,8 @@ export interface UpdateHookRuleRequest {
   argContains?: string;
   action?: HookAction;
   message?: string;
+  command?: string;
+  timeoutMs?: number;
   enabled?: boolean;
   sortOrder?: number;
 }
@@ -66,7 +76,13 @@ export type HookRuleOutcome =
   | "allowed"
   | "approved"
   | "rejected"
-  | "observed";
+  | "observed"
+  /** A `run_command` hook ran and raised no objection. */
+  | "ran"
+  /** Its command rewrote the tool's arguments. */
+  | "rewrote"
+  /** It failed after the call had run, so nothing could be undone. */
+  | "failed";
 
 /**
  * Payload of `agent_hook_rule_notify`, emitted on **every** rule match, not
