@@ -201,6 +201,12 @@ code,
   --bg-page: var(--color-base-200);
   --bg-card: var(--color-base-100);
 
+  /* Sidebar backdrop. Normally --bg-page; with macOS vibrancy on (the
+     `sidebar-vibrancy` class on <html>, macOS + Tauri only) it goes
+     transparent so the NSVisualEffectView behind the window shows through.
+     The content card stays opaque either way. */
+  --bg-sidebar: var(--bg-page);
+
   /* List/form page layer pair: canvas = page canvas, panel = the list/form panel
      on it. In light mode both are content white (Codex-style: hierarchy comes from
      hairline borders and row dividers, not background tint); in dark mode the
@@ -302,6 +308,14 @@ code,
   /* Dark: page takes the canvas (deepest), card rises one step */
   --bg-page: var(--color-base-100-dark);
   --bg-card: var(--color-base-200-dark);
+}
+
+/* macOS sidebar vibrancy (set by uiState.setSidebarVibrancy, macOS + Tauri
+   only): the sidebar backdrop goes transparent to reveal the behind-window
+   NSVisualEffectView. The native Sidebar material carries the light/dark tint
+   itself and follows the window appearance, which setTheme keeps in sync. */
+html.sidebar-vibrancy {
+  --bg-sidebar: transparent;
 }
 
 [data-theme="dark"] .shadow-2xl {

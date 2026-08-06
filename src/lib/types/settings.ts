@@ -15,6 +15,8 @@ export interface GeneralSettings {
   theme: Theme;
   language: Language;
   autoScroll: boolean;
+  /** macOS frosted-glass sidebar (window vibrancy); ignored elsewhere. */
+  sidebarVibrancy: boolean;
   shortcuts: ShortcutConfig;
 }
 

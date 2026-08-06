@@ -3,7 +3,11 @@
   import { TableGroup, SwitchRow, SelectRow } from "$lib/components/ui/table";
   import { settingsState, uiState } from "$lib/states";
   import { t } from "$lib/i18n";
+  import { isMacOS } from "$lib/utils/tauri";
   import type { Theme, Language } from "$lib/types/settings";
+
+  // Vibrancy is a macOS-only effect; the row is hidden elsewhere.
+  const showSidebarVibrancy = isMacOS();
 
   // Derived so labels recompute on language change
   const themeOptions = $derived([
@@ -21,15 +25,18 @@
   let theme = $state<Theme>("system");
   let language = $state<Language>("zh-CN");
   let autoScroll = $state<boolean>(true);
+  let sidebarVibrancy = $state<boolean>(true);
 
   function syncFromSettings(): void {
     if (!settingsState.settings?.general) return;
     theme = settingsState.settings.general.theme;
     language = settingsState.settings.general.language;
     autoScroll = settingsState.settings.general.autoScroll;
+    sidebarVibrancy = settingsState.settings.general.sidebarVibrancy ?? true;
 
     uiState.setTheme(theme);
     uiState.setLanguage(language);
+    uiState.setSidebarVibrancy(sidebarVibrancy);
   }
 
   // Root layout preloaded settings: sync backfill so the first frame shows real
@@ -74,6 +81,12 @@
     updateGeneralSetting("autoScroll", autoScroll);
   }
 
+  function handleSidebarVibrancyChange(checked: boolean) {
+    sidebarVibrancy = checked;
+    uiState.setSidebarVibrancy(sidebarVibrancy);
+    updateGeneralSetting("sidebarVibrancy", sidebarVibrancy);
+  }
+
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
@@ -93,6 +106,15 @@
       bind:selectedValue={language}
       onSelect={(value) => handleLanguageChange(value)}
     />
+
+    {#if showSidebarVibrancy}
+      <SwitchRow
+        label={t("settings.general.sidebarVibrancy")}
+        description={t("settings.general.sidebarVibrancyDesc")}
+        bind:checked={sidebarVibrancy}
+        onChange={handleSidebarVibrancyChange}
+      />
+    {/if}
 
     <SwitchRow
       label={t("settings.general.autoScroll")}

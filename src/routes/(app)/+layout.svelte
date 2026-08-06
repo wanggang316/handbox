@@ -190,7 +190,9 @@
     display: flex;
     height: 100vh;
     width: 100vw;
-    background-color: var(--bg-page);
+    /* Sidebar backdrop: opaque --bg-page normally, transparent under macOS
+       vibrancy (html.sidebar-vibrancy) — see app.css. */
+    background-color: var(--bg-sidebar);
     color: var(--base-content);
     position: relative;
     overflow: hidden;

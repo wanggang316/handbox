@@ -230,6 +230,7 @@ fn default_settings() -> AppSettings {
             theme_color: ThemeColor::System,
             language: Language::ZhCN,
             auto_scroll: true,
+            sidebar_vibrancy: true,
             shortcuts: ShortcutConfig {
                 send_message: "Enter".to_string(),
                 new_line: "Shift+Enter".to_string(),

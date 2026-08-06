@@ -14,6 +14,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.appearanceDesc": "Choose the light or dark color scheme",
   "settings.general.languageDesc": "Interface display language",
   "settings.general.autoScrollDesc": "Auto-scroll to the bottom on new messages",
+  "settings.general.sidebarVibrancy": "Translucent sidebar",
+  "settings.general.sidebarVibrancyDesc": "Give the sidebar the native macOS frosted-glass look",
 
   // Sidebar
   "settings.sidebar.backToApp": "Back to app",
