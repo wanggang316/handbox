@@ -120,11 +120,11 @@ export const settingsZh = {
   "settings.hooks.field.promptContainsPlaceholder": "留空则每次提交都触发",
   "settings.hooks.field.command": "命令",
   "settings.hooks.field.commandHint":
-    '事件以 JSON 从标准输入传入，可用 $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME。命令在会话工作目录下执行，默认 10 秒超时。输出 {"decision":"deny","reason":"…"} 可拦截调用，输出 {"updatedInput":{…}} 可改写参数（调用后则改写结果，可用于脱敏）；非零退出码视为拦截。提交提示词时，命令的普通输出会作为上下文交给模型（也可用 {"additionalContext":"…"} 明确指定）。',
+    '脚本通过 /bin/sh 在会话工作目录执行，事件 JSON 从标准输入传入，默认 10 秒超时。\n\n可用环境变量\n· $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME\n· $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME\n\n输出的含义\n· 普通输出：提交提示词时作为上下文交给模型\n· {"decision":"deny","reason":"…"}：拦截本次调用\n· {"updatedInput":{…}}：改写参数；调用后则改写结果（可脱敏）\n· 非零退出码：视为拦截',
   "settings.hooks.field.message": "说明（可选）",
   "settings.hooks.field.messagePlaceholder": "命中时随提醒一起展示",
   "settings.hooks.field.hint":
-    "工具名支持 * 通配，如 mcp__* 或 *。留空参数名则在全部参数中查找；参数条件留空表示只按工具名匹配。",
+    "填写要匹配的工具名，* 是通配符：\n· write — 精确匹配\n· mcp__* — 前缀匹配\n· * — 匹配全部工具\n\n参数名留空：在全部参数中查找\n参数包含留空：只按工具名匹配",
   "settings.hooks.deleteTitle": "删除规则",
   "settings.hooks.deleteMessage": "确定要删除「{name}」吗？",
   // Runtime notices — shown when a rule matches a tool call

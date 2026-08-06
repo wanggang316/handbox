@@ -127,12 +127,12 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
     "Leave empty to fire on every prompt",
   "settings.hooks.field.command": "Command",
   "settings.hooks.field.commandHint":
-    'The event arrives as JSON on stdin; $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME / $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME are set. Runs in the session\'s working directory, 10s timeout by default. Print {"decision":"deny","reason":"…"} to block or {"updatedInput":{…}} to rewrite the arguments (after a call this rewrites the result, which is how redaction works); a non-zero exit blocks it. On prompt submission, plain output becomes context for the model — or set it explicitly with {"additionalContext":"…"}.',
+    'The script runs via /bin/sh in the session\'s working directory; the event arrives as JSON on stdin, 10s timeout by default.\n\nEnvironment variables\n· $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME\n· $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME\n\nWhat the output means\n· Plain output: becomes context for the model on prompt submit\n· {"decision":"deny","reason":"…"}: blocks this call\n· {"updatedInput":{…}}: rewrites the arguments; after a call, the result (redaction)\n· Non-zero exit: treated as a block',
   "settings.hooks.field.message": "Message (optional)",
   "settings.hooks.field.messagePlaceholder":
     "Shown alongside the notice when the rule fires",
   "settings.hooks.field.hint":
-    "Tool name accepts * as a wildcard, e.g. mcp__* or *. Leave the argument name empty to search all arguments; leave the condition empty to match on the tool name alone.",
+    "Tool name to match; * is a wildcard:\n· write — exact match\n· mcp__* — prefix match\n· * — every tool\n\nEmpty argument name: search all arguments\nEmpty contains: match on the tool name alone",
   "settings.hooks.deleteTitle": "Delete rule",
   "settings.hooks.deleteMessage": 'Delete "{name}"?',
   // Runtime notices — shown when a rule matches a tool call

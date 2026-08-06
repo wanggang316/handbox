@@ -6,9 +6,11 @@
   interface Props {
     content: string;
     size?: number;
+    /** Tailwind width class for the popover; longer content reads better wider. */
+    width?: string;
   }
 
-  let { content, size = 14 }: Props = $props();
+  let { content, size = 14, width = "w-64" }: Props = $props();
 
   let isOpen = $state(false);
   let buttonElement: HTMLButtonElement | undefined = $state();
@@ -55,7 +57,7 @@
     onmouseenter={show}
     onmouseleave={hide}
     style={tooltipStyle}
-    class="fixed z-[var(--z-popover)] w-64 bg-base-100 border border-base-300 rounded-lg shadow-lg p-3 transform -translate-x-1/2 -translate-y-full"
+    class="fixed z-[var(--z-popover)] {width} bg-base-100 border border-base-300 rounded-lg shadow-lg p-3 transform -translate-x-1/2 -translate-y-full"
     transition:fly={{ y: 8, duration: 200, opacity: 0 }}
   >
     <p class="text-xs text-base-content/80 leading-relaxed whitespace-pre-wrap">

@@ -5,6 +5,8 @@
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import Input from "$lib/components/ui/Input.svelte";
+  import Textarea from "$lib/components/ui/Textarea.svelte";
+  import InfoTooltip from "$lib/components/ui/InfoTooltip.svelte";
   import Select from "$lib/components/ui/Select.svelte";
   import FormModal from "$lib/components/ui/FormModal.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
@@ -330,24 +332,26 @@
     </div>
 
     {#if matchesTool}
-      <Input
-        label={t("settings.hooks.field.toolPattern")}
-        bind:value={formToolPattern}
-        placeholder="bash"
-        literal
-      />
+      <div>
+        {@render labelWithHelp(
+          t("settings.hooks.field.toolPattern"),
+          t("settings.hooks.field.hint"),
+          "w-64",
+        )}
+        <Input bind:value={formToolPattern} placeholder="write" literal />
+      </div>
 
       <div class="grid grid-cols-2 gap-4">
         <Input
           label={t("settings.hooks.field.argField")}
           bind:value={formArgField}
-          placeholder="command"
+          placeholder="path"
           literal
         />
         <Input
           label={t("settings.hooks.field.argContains")}
           bind:value={formArgContains}
-          placeholder="rm -rf"
+          placeholder=".md"
           literal
         />
       </div>
@@ -361,15 +365,19 @@
     {/if}
 
     {#if needsCommand}
-      <Input
-        label={t("settings.hooks.field.command")}
-        bind:value={formCommand}
-        placeholder="prettier --write $HANDBOX_TOOL_NAME"
-        literal
-      />
-      <p class="text-xs text-base-content/50 -mt-2">
-        {t("settings.hooks.field.commandHint")}
-      </p>
+      <div>
+        {@render labelWithHelp(
+          t("settings.hooks.field.command"),
+          t("settings.hooks.field.commandHint"),
+          "w-80",
+        )}
+        <Textarea
+          bind:value={formCommand}
+          rows={3}
+          placeholder={"npx prettier --write ."}
+          literal
+        />
+      </div>
     {/if}
 
     <Input
@@ -377,12 +385,15 @@
       bind:value={formMessage}
       placeholder={t("settings.hooks.field.messagePlaceholder")}
     />
-
-    <p class="text-xs text-base-content/50">
-      {t("settings.hooks.field.hint")}
-    </p>
   </div>
 </FormModal>
+
+{#snippet labelWithHelp(label: string, help: string, helpWidth: string)}
+  <div class="mb-2 flex items-center gap-1.5">
+    <span class="text-sm font-medium">{label}</span>
+    <InfoTooltip content={help} width={helpWidth} />
+  </div>
+{/snippet}
 
 <ConfirmModal
   open={deleteTarget !== null}
