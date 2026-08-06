@@ -9,6 +9,7 @@
   import {
     Bot,
     Settings,
+    SquarePen,
     User,
     LogIn,
     LogOut,
@@ -17,6 +18,13 @@
   } from "@lucide/svelte";
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateState } from "$lib/states/update.svelte";
+  import {
+    agentSessionState,
+    agentSessionActions,
+  } from "$lib/states/agentSession.svelte";
+  import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { toastActions } from "$lib/states/toast.svelte";
+  import { normalizeError } from "$lib/utils/error";
 
   let currentRoute = $derived(browser && $page.url ? $page.url.pathname : "");
 
@@ -30,6 +38,37 @@
 
   function handleJobsClick() {
     goto(`/jobs`);
+  }
+
+  // Seeded general-chat AgentDefinition (working_dir_mode "none": pure dialog).
+  const BUILTIN_CHAT_AGENT_ID = "builtin-chat";
+
+  // New Chat is idempotent, Claude-style: an existing empty general-chat
+  // session (no project, no persisted turns, no active run) is reopened
+  // instead of stacking up blank sessions on repeated clicks.
+  async function handleNewChatClick() {
+    const reusable = agentSessionState.sessions.find(
+      (session) =>
+        session.agentDefinitionId === BUILTIN_CHAT_AGENT_ID &&
+        !session.projectId &&
+        session.messageCount === 0 &&
+        !agentRunStore.runStateFor(session.id).isRunning &&
+        agentRunStore.runStateFor(session.id).messages.length === 0,
+    );
+    if (reusable) {
+      goto(`/agent?id=${reusable.id}`);
+      return;
+    }
+    try {
+      const session = await agentSessionActions.createSessionFromDefinition(
+        BUILTIN_CHAT_AGENT_ID,
+      );
+      goto(`/agent?id=${session.id}`);
+    } catch (error) {
+      console.error("Failed to create chat session:", error);
+      const normalized = normalizeError(error, t("agent.list.createSessionFailed"));
+      toastActions.error(normalized.hint ?? normalized.message);
+    }
   }
 
   const currentUser = $derived({
@@ -110,6 +149,13 @@
   class="h-full flex flex-col p-0 pt-12 overflow-hidden"
 >
   <div class="flex-shrink-0 flex flex-col px-2 space-y-0.5 mb-3">
+    <MenuButton
+      title={t("sidebar.newChat")}
+      icon={SquarePen}
+      iconSize={16}
+      buttonClass="px-2 py-1 text-[12px] leading-[18px] text-base-content font-normal"
+      onclick={() => handleNewChatClick()}
+    />
     <MenuButton
       title={t("sidebar.jobs")}
       icon={Clock}
