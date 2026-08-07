@@ -18,6 +18,7 @@
  */
 
 import type { UUID } from "$lib/types";
+import type { HookRuleNotification } from "$lib/types";
 import type {
   AgentMessage,
   AgentSessionMessage,
@@ -60,6 +61,18 @@ export interface ToolCallView {
 }
 
 /**
+ * One hook-rule firing, anchored into the timeline. `anchor` is the index of
+ * the last committed message at arrival time (-1 before any message), so the
+ * timeline renders the entry right after the message it chronologically
+ * followed — a hook on a tool call lands under the assistant turn that issued
+ * the call. Ephemeral view state: not persisted, cleared on transcript restore.
+ */
+export interface HookNoticeEntry {
+  anchor: number;
+  notice: HookRuleNotification;
+}
+
+/**
  * Per-session run view-model.
  *
  * `messages` is the committed (finalized) message sequence; `streamingText` /
@@ -86,6 +99,11 @@ export interface AgentRunState {
    */
   isCompacting: boolean;
   /**
+   * Hook-rule firings for this session, in arrival order. Rendered inline in
+   * the timeline (a transient toast proved too easy to miss).
+   */
+  hookNotices: HookNoticeEntry[];
+  /**
    * Whether this session's committed transcript has been restored at least
    * once (`loadTranscript`). The session page uses it to tell "not yet loaded
    * (centered spinner)" from "genuinely empty session (onboarding empty
@@ -105,6 +123,7 @@ function createEmptyRunState(): AgentRunState {
     error: null,
     toolCalls: {},
     isCompacting: false,
+    hookNotices: [],
     hydrated: false,
   };
 }
@@ -167,6 +186,7 @@ class AgentRunStore {
         onError: (payload) => this.handleStreamError(payload),
         onClosed: (payload) => this.handleStreamClosed(payload),
         onLifecycle: (payload) => this.handleLifecycle(payload),
+        onHookRuleMatch: (payload) => this.addHookNotice(payload),
       });
     } catch (error) {
       console.error("Failed to init agent stream listener:", error);
@@ -179,6 +199,23 @@ class AgentRunStore {
       this.states[sessionId] = createEmptyRunState();
     }
     return this.states[sessionId];
+  }
+
+  /**
+   * A hook rule fired: anchor it after the message committed most recently, so
+   * the timeline shows it where it happened (under the assistant turn whose
+   * tool call it ran on). Reported on every match — a hook that silently acts
+   * is indistinguishable from one that never fired.
+   */
+  private addHookNotice(notice: HookRuleNotification): void {
+    if (this.deletedSessions.has(notice.sessionId)) {
+      return;
+    }
+    const state = this.ensureState(notice.sessionId);
+    state.hookNotices = [
+      ...state.hookNotices,
+      { anchor: state.messages.length - 1, notice },
+    ];
   }
 
   /**
@@ -674,6 +711,9 @@ class AgentRunStore {
       }
       const state = this.ensureState(sessionId);
       state.messages = messages;
+      // Notices anchor to live message indices; a wholesale restore renumbers
+      // them, so stale entries are dropped rather than mis-anchored.
+      state.hookNotices = [];
       // First restore complete: the session page switches from the spinner to
       // real content (or the empty state for an empty session).
       state.hydrated = true;

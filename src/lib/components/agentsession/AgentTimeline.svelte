@@ -2,10 +2,12 @@
   import { renderMarkdown, markdownInteractions } from "$lib/utils";
   import { t } from "$lib/i18n";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import type { HookRuleNotification } from "$lib/types";
   import type {
     AgentMessage,
     ToolResultContent,
   } from "$lib/types/agentSession";
+  import { Webhook } from "@lucide/svelte";
   import AgentThinkingBlock from "./AgentThinkingBlock.svelte";
   import AgentToolCallCard from "./AgentToolCallCard.svelte";
   import HtmlCard from "./HtmlCard.svelte";
@@ -112,6 +114,21 @@
     );
   }
 
+  // Hook-rule firings render inline where they happened: entries anchored to
+  // message index i appear right after that message (-1 = before the first).
+  function hookNoticesAfter(anchor: number) {
+    return runState.hookNotices.filter((entry) => entry.anchor === anchor);
+  }
+
+  // The notice line reuses the settings-page notice strings; the rule's own
+  // message rides along so a bare "rule matched" never needs decoding.
+  function hookNoticeText(notice: HookRuleNotification): string {
+    const text = t(`settings.hooks.notice.${notice.outcome}`)
+      .replace("{rule}", notice.ruleName)
+      .replace("{tool}", notice.toolName);
+    return notice.message ? `${text} — ${notice.message}` : text;
+  }
+
   // Index of the in-progress assistant skeleton: the reducer appends the
   // assistant message at message_start (empty content, zero usage) while
   // deltas flow through streamingText/thinkingText, so the committed loop must
@@ -187,12 +204,36 @@
       setTimeout(scrollToBottom, 50);
     }
   });
+
+  // A hook notice appended at the bottom must not land below the fold.
+  $effect(() => {
+    if (runState.hookNotices.length > 0) {
+      setTimeout(scrollToBottom, 50);
+    }
+  });
 </script>
+
+{#snippet hookNoticeRow(notice: HookRuleNotification)}
+  <div
+    class="flex items-center gap-2 px-3 py-1.5 text-xs {notice.outcome ===
+      'denied' || notice.outcome === 'failed'
+      ? 'text-warning'
+      : 'text-base-content/60'}"
+  >
+    <Webhook size={12} class="shrink-0" />
+    <span class="break-words">{hookNoticeText(notice)}</span>
+  </div>
+{/snippet}
 
 <!-- The message stream is content: bubbles, markdown replies, tool-card bodies
      and error text must all be selectable (buttons stay unselectable globally). -->
 <div bind:this={messagesContainer} class="flex-1 overflow-y-auto select-text">
   <div class="w-full mx-auto max-w-[800px] py-4 px-1 space-y-6">
+    <!-- Hook firings that preceded every message (a prompt rule on the first turn). -->
+    {#each hookNoticesAfter(-1) as entry}
+      {@render hookNoticeRow(entry.notice)}
+    {/each}
+
     <!-- Committed messages. messages is append-only (the reducer only appends
          or finalizes in place, never reorders), so index keys reuse DOM safely;
          cards key by toolCallId so their state never shifts with the index. -->
@@ -291,6 +332,11 @@
       <!-- toolResult messages are not rendered standalone: the paired toolcall
            card presents them inside the assistant turn, avoiding a detached
            tool-result block. -->
+
+      <!-- Hook firings anchored right after this message, in arrival order. -->
+      {#each hookNoticesAfter(i) as entry}
+        {@render hookNoticeRow(entry.notice)}
+      {/each}
     {/each}
 
     <!-- LIVE streaming view: growing thinking block + streaming text. -->
