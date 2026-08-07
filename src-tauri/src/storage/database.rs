@@ -55,7 +55,13 @@ impl Database {
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to set busy timeout: {}", e)))?;
 
-        sqlx::migrate!("./migrations")
+        // ignore_missing: the local DB may carry migrations from a newer build
+        // (parallel dev worktrees share one DB; users can downgrade the app).
+        // Older code must tolerate the newer schema instead of refusing to
+        // start — the unknown migrations' tables are simply left untouched.
+        let mut migrator = sqlx::migrate!("./migrations");
+        migrator.set_ignore_missing(true);
+        migrator
             .run(&pool)
             .await
             .map_err(|e| AppError::internal_error(&format!("Failed to run migrations: {}", e)))?;
@@ -120,6 +126,36 @@ mod tests {
         assert!(db_service.is_ok());
 
         let service = db_service.unwrap();
+        assert!(service.health_check().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_tolerates_migrations_from_newer_build() {
+        let temp_dir = tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_newer_build.db");
+
+        // First boot applies the full local migration set.
+        Database::new(&db_path).await.unwrap();
+
+        // A newer build (parallel worktree or pre-downgrade install) records a
+        // migration this build does not ship.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", db_path.display()))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations \
+             (version, description, installed_on, success, checksum, execution_time) \
+             VALUES (9999, 'from the future', 0, 1, x'00', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        // Reopening must not refuse to start over the unknown migration.
+        let service = Database::new(&db_path).await.unwrap();
         assert!(service.health_check().await.is_ok());
     }
 
@@ -455,7 +491,10 @@ mod tests {
             .fetch_optional(pool)
             .await
             .unwrap();
-            assert_eq!(exists, None, "table {table} should be dropped by migration 060");
+            assert_eq!(
+                exists, None,
+                "table {table} should be dropped by migration 060"
+            );
         }
         let user_agents: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM agents WHERE COALESCE(builtin, 0) = 0")

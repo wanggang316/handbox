@@ -186,7 +186,7 @@ export const agentZh = {
   "agent.form.genuiNone": "未关联",
 
   // Agent session landing page (agent/+page.svelte)
-  "agent.page.startConversation": "开始与 {name} 对话",
+  "agent.page.emptyGreeting": "今天有什么可以帮你？",
   "agent.page.landingWithProjects": "在左侧选择一个会话，或在项目上点 + 新建",
   "agent.page.landingNoProjects": "先在左侧点 + 选择项目目录",
 

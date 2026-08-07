@@ -157,6 +157,15 @@
         !runState.isRunning),
   );
 
+  // Claude-style new-chat layout: greeting + composer vertically centered.
+  // messageCount === 0 means there are no persisted turns to restore, so a
+  // fresh session renders it immediately — no spinner phase; sessions with
+  // history keep the bottom-anchored composer while the transcript loads.
+  const showCenteredComposer = $derived(
+    isEmpty &&
+      ((currentSession?.messageCount ?? 0) === 0 || runState?.hydrated === true),
+  );
+
   // Pending approval for the current session (a dangerous tool call pauses the run)
   const pendingApproval = $derived(
     sessionId ? agentApprovalStore.pendingFor(sessionId) : null,
@@ -219,21 +228,18 @@
     <!-- Left column (timeline + input) plus the optional render_app panel. -->
     <div class="flex-1 flex min-h-0">
       <div class="flex-1 flex flex-col min-w-0">
-        {#if isEmpty && !runState?.hydrated}
+        {#if isEmpty && !showCenteredComposer}
           <!-- First open with no cache: transcript restore in flight. Revisits are
                served from the per-session cache and skip this branch. -->
           <div class="flex-1 flex items-center justify-center">
             <Spinner size={28} />
           </div>
-        {:else if isEmpty}
-          <div
-            class="flex-1 flex flex-col items-center justify-center text-base-content/40"
-          >
-            <Bot size={40} class="mb-3 opacity-20" />
-            <p class="text-sm">
-              {t("agent.page.startConversation", {
-                name: currentSession?.name ?? "Agent",
-              })}
+        {:else if showCenteredComposer}
+          <!-- Greeting sits right above the composer; the spacer below the
+               composer keeps the pair vertically centered. -->
+          <div class="flex-1 flex flex-col items-center justify-end">
+            <p class="mb-6 text-xl font-medium text-base-content/80">
+              {t("agent.page.emptyGreeting")}
             </p>
           </div>
         {:else if timelineReady}
@@ -256,6 +262,13 @@
             {/key}
           {/if}
         </div>
+
+        {#if showCenteredComposer}
+          <!-- Bottom half of the centered layout. The composer div above stays in
+               place across the empty → active transition, so AgentInput never
+               remounts (focus and IME state survive the first send). -->
+          <div class="flex-1"></div>
+        {/if}
       </div>
 
       {#if showAppPanel && appArtifact}

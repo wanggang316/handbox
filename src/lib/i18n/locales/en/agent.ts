@@ -196,7 +196,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.mcpComingSoon": "MCP server configuration is coming soon...",
 
   // Agent session landing page (agent/+page.svelte)
-  "agent.page.startConversation": "Start a conversation with {name}",
+  "agent.page.emptyGreeting": "What can I help you with today?",
   "agent.page.landingWithProjects":
     "Pick a session on the left, or click + on a project to create one",
   "agent.page.landingNoProjects":
