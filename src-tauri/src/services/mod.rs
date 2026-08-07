@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_hook_rules;
 pub mod agent_jsonl_store;
 pub mod agent_migration;
 pub mod agent_permission;
@@ -12,6 +13,8 @@ pub mod coding_agent_session;
 pub mod extensions;
 pub mod genui;
 pub mod hand_ai_catalog;
+pub mod hook_command;
+pub mod hook_rule;
 pub mod job;
 pub mod job_executor;
 pub mod job_scheduler;
@@ -43,6 +46,7 @@ pub use coding_agent_runtime::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, CodingRunSink, RunDriveHandles,
 };
 pub use genui::GenUiService;
+pub use hook_rule::HookRuleService;
 pub use job::{JobCreateRequest, JobService, JobUpdateRequest};
 pub use job_executor::JobExecutor;
 pub use job_scheduler::JobScheduler;

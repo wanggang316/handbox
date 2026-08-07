@@ -15,10 +15,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::models::AppError;
-use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
+use crate::services::coding_agent_session::{build_agent_session, config_from_rows, HookEmitters};
 use crate::services::{
     agent_jsonl_store, drive_agent_run, AgentService, AgentSessionService, CodingRunSink,
-    ProviderService,
+    HookRuleService, ProviderService,
 };
 use crate::storage::job_repository::{FailureCountUpdate, DEFAULT_EXECUTION_HISTORY_LIMIT};
 use crate::storage::types::{
@@ -101,6 +101,10 @@ struct AgentServices {
     agents: Arc<AgentService>,
     sessions: Arc<AgentSessionService>,
     providers: Arc<ProviderService>,
+    /// The user's hook rules apply to unattended runs too: a command hook runs
+    /// (and its verdict can veto) in a scheduled job exactly as in a foreground
+    /// turn — see [`RuleHookExtension`](crate::services::agent_hook_rules::RuleHookExtension).
+    hook_rules: Arc<HookRuleService>,
     app_data_dir: PathBuf,
 }
 
@@ -162,12 +166,14 @@ impl<R: Runtime> JobExecutor<R> {
         agents: Arc<AgentService>,
         sessions: Arc<AgentSessionService>,
         providers: Arc<ProviderService>,
+        hook_rules: Arc<HookRuleService>,
         app_data_dir: PathBuf,
     ) -> Self {
         self.agent_services = Some(AgentServices {
             agents,
             sessions,
             providers,
+            hook_rules,
             app_data_dir,
         });
         self
@@ -618,7 +624,11 @@ impl<R: Runtime> JobExecutor<R> {
 
         // 2. Load the resolved provider's row — `build_agent_session` needs the
         //    full record (type / base_url / key).
-        let provider = match services.providers.get_provider(&provider_id.to_string()).await {
+        let provider = match services
+            .providers
+            .get_provider(&provider_id.to_string())
+            .await
+        {
             Ok(provider) => provider,
             Err(e) => {
                 tracing::warn!(
@@ -669,7 +679,21 @@ impl<R: Runtime> JobExecutor<R> {
         //    CLOSED — the safe default for an unattended job run. Pure-dialog
         //    has no tools, so the gate is never reached.
         let config = match config_from_rows(&session, &provider, services.app_data_dir.clone()) {
-            Ok(config) => config,
+            Ok(mut config) => {
+                // Snapshot the rules for this run. A read failure degrades to
+                // "no rules" rather than failing the job: the sandbox and the
+                // fail-closed gate are the guardrails that must hold, and both
+                // are independent of this.
+                config.hook_rules = services
+                    .hook_rules
+                    .list_enabled()
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::warn!("[job_executor] failed to load hook rules: {}", e);
+                        Vec::new()
+                    });
+                config
+            }
             Err(e) => {
                 tracing::warn!(
                     "[job_executor] prompt session config assembly failed (session={}): {}",
@@ -686,7 +710,8 @@ impl<R: Runtime> JobExecutor<R> {
                 };
             }
         };
-        let coding_session = match build_agent_session(&config, None, Vec::new()) {
+        let coding_session = match build_agent_session(&config, HookEmitters::default(), Vec::new())
+        {
             Ok(coding_session) => coding_session,
             Err(e) => {
                 tracing::warn!(
@@ -914,7 +939,21 @@ impl<R: Runtime> JobExecutor<R> {
         //    CLOSED (write/edit/bash denied without prompting) — the safe default
         //    for an unattended scheduled run.
         let config = match config_from_rows(&session, &provider, services.app_data_dir.clone()) {
-            Ok(config) => config,
+            Ok(mut config) => {
+                // Snapshot the rules for this run. A read failure degrades to
+                // "no rules" rather than failing the job: the sandbox and the
+                // fail-closed gate are the guardrails that must hold, and both
+                // are independent of this.
+                config.hook_rules = services
+                    .hook_rules
+                    .list_enabled()
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::warn!("[job_executor] failed to load hook rules: {}", e);
+                        Vec::new()
+                    });
+                config
+            }
             Err(e) => {
                 tracing::warn!(
                     "[job_executor] agent session config assembly failed (session={}, agent={}): {}",
@@ -932,7 +971,8 @@ impl<R: Runtime> JobExecutor<R> {
                 };
             }
         };
-        let coding_session = match build_agent_session(&config, None, Vec::new()) {
+        let coding_session = match build_agent_session(&config, HookEmitters::default(), Vec::new())
+        {
             Ok(coding_session) => coding_session,
             Err(e) => {
                 tracing::warn!(
@@ -2566,6 +2606,7 @@ mod tests {
             agent_service,
             agent_session_service,
             provider_service,
+            Arc::new(HookRuleService::new(env.db.clone())),
             app_data_dir,
         );
 
@@ -2699,8 +2740,11 @@ mod tests {
         let env = with_agent_services(setup().await);
         // A model id that no provider in the (empty) catalog serves.
         let agent_id = seed_agent(&env).await;
-        let job =
-            make_job("job_a_modelgone", agent_target(&agent_id, "gone-model", "go")).await;
+        let job = make_job(
+            "job_a_modelgone",
+            agent_target(&agent_id, "gone-model", "go"),
+        )
+        .await;
         seed_job(&env, &job).await;
 
         let exec = env.executor.execute(&job, Trigger::Schedule).await.unwrap();

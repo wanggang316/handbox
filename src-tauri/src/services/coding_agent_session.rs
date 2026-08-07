@@ -14,10 +14,11 @@ use hand_coding_agent::tools::create_default_tools;
 use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
+use crate::services::agent_hook_rules::{NotifyEmitter, RuleHookExtension};
 use crate::services::agent_permission::{ApprovalEmitter, PermissionExtension, SandboxExtension};
 use crate::services::extensions;
 use crate::services::model_runtime::{self, ChatOptions};
-use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, Provider};
+use crate::storage::types::{AgentSession as HandBoxAgentSessionRow, HookRule, Provider};
 
 /// HandBox-side inputs needed to construct a coding-agent session; field names
 /// mirror the HandBox agent-session storage row.
@@ -74,6 +75,25 @@ pub struct HandBoxAgentSessionConfig {
     /// of manual-execution MCP servers. Populated by agent_run; empty default =
     /// no MCP approval gating (the jobs/tests path).
     pub mcp_approval_tools: HashSet<String>,
+    /// The user's enabled hook rules, as a snapshot taken when this config is
+    /// assembled. Empty = no rule extension is registered at all. Populated by
+    /// the callers that have a database handle; see
+    /// [`RuleHookExtension`](crate::services::agent_hook_rules::RuleHookExtension).
+    pub hook_rules: Vec<HookRule>,
+}
+
+/// Frontend sinks the hook chain emits through. Grouped so wiring a new one does
+/// not churn every [`build_agent_session`] call site.
+///
+/// Both default to `None`, which is the headless shape (jobs, tests): approvals
+/// then fail closed and hook-match notices are only logged.
+#[derive(Clone, Default)]
+pub struct HookEmitters {
+    /// Approval prompts — dangerous built-ins and manual MCP tools. `None`
+    /// denies rather than prompting.
+    pub approval: Option<ApprovalEmitter>,
+    /// Match notices raised by hook rules.
+    pub notify: Option<NotifyEmitter>,
 }
 
 /// Construct a coding-agent [`AgentSession`] from a HandBox configuration.
@@ -82,12 +102,12 @@ pub struct HandBoxAgentSessionConfig {
 /// host's real `~/.hand/skills/` (project-scope `<cwd>/.hand/skills` still
 /// applies), and `base_dir` is `app_data_dir` so persistence stays in the sandbox.
 ///
-/// `approval_emitter` wires the [`PermissionExtension`]'s approval-request
+/// `emitters.approval` wires the [`PermissionExtension`]'s approval-request
 /// channel; `None` makes it fail CLOSED — every dangerous tool (write/edit/bash)
 /// is denied without prompting, the safe default for headless construction.
 pub fn build_agent_session(
     config: &HandBoxAgentSessionConfig,
-    approval_emitter: Option<ApprovalEmitter>,
+    emitters: HookEmitters,
     extra_tools: Vec<AgentTool>,
 ) -> Result<AgentSession, AppError> {
     let model =
@@ -171,6 +191,24 @@ pub fn build_agent_session(
     // out-of-sandbox path from the outside via this before_tool_call extension.
     session.register_extension(Arc::new(SandboxExtension::new(config.working_dir.clone())));
 
+    // The user's hook rules sit between the sandbox and the approval gate:
+    // behind the sandbox so no hook can widen the working-directory boundary,
+    // and ahead of the gate so a command that vetoes a call spares the user a
+    // prompt for something that would be blocked anyway. Skipped entirely when
+    // no rule is configured.
+    let rules = RuleHookExtension::new(config.session_id.clone(), config.hook_rules.clone())
+        .with_notifier(emitters.notify.clone())
+        .with_working_dir(config.working_dir.clone());
+    // Logged unconditionally: "did my rule load?" is the first question when a
+    // rule appears not to fire, and a zero here answers it immediately.
+    tracing::info!(
+        hook_rules = config.hook_rules.len(),
+        "[build_agent_session] hook rules loaded"
+    );
+    if !rules.is_empty() {
+        session.register_extension(Arc::new(rules));
+    }
+
     // Approval gate for write/edit/bash: emits `agent_approval_request` and awaits
     // the decision (allow → Continue, deny → Cancel); no emitter means fail CLOSED.
     // Registered after the sandbox because extensions run in order and the first
@@ -179,7 +217,7 @@ pub fn build_agent_session(
     // `abort_run` / `deny_pending_for_session` can unblock a parked approval await
     // and always-allow consent persists across turns.
     session.register_extension(Arc::new(
-        PermissionExtension::new(config.session_id.clone(), approval_emitter)
+        PermissionExtension::new(config.session_id.clone(), emitters.approval)
             .with_approval_tools(config.mcp_approval_tools.clone()),
     ));
 
@@ -286,6 +324,9 @@ pub fn config_from_rows(
         enabled_tools: session.enabled_tools.clone(),
         // agent_run fills this from manual-server MCP bindings; empty otherwise.
         mcp_approval_tools: HashSet::new(),
+        // Filled by callers holding a database handle; empty here so a config
+        // built for a test or a probe carries no rules.
+        hook_rules: Vec::new(),
     })
 }
 
@@ -318,6 +359,7 @@ mod tests {
             thinking_level: None,
             enabled_tools: vec![],
             mcp_approval_tools: HashSet::new(),
+            hook_rules: Vec::new(),
         }
     }
 
@@ -327,8 +369,8 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session =
-            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
 
         assert_eq!(session.cwd(), cwd.path());
         // Model id is not silently substituted.
@@ -346,7 +388,8 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
         // Turn 1: construction creates the JSONL at the path the reader expects.
-        let session = build_agent_session(&config, None, Vec::new()).expect("turn 1 constructs");
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("turn 1 constructs");
         // Not an in-memory session: it has a real on-disk file.
         let file = session
             .session_file()
@@ -363,7 +406,8 @@ mod tests {
 
         // Turn 2: a fresh build for the same id resumes the SAME file (idempotent
         // ensure → resume), so there is exactly one JSONL for this session.
-        let session2 = build_agent_session(&config, None, Vec::new()).expect("turn 2 resumes");
+        let session2 = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("turn 2 resumes");
         assert_eq!(session2.session_file().unwrap(), expected);
 
         let dir = crate::services::agent_jsonl_store::session_dir(data.path(), cwd.path());
@@ -390,8 +434,8 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
         // Construct (turn 1) — this is the single place the JSONL is seeded.
-        let _session =
-            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let _session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
 
         let path = crate::services::agent_jsonl_store::session_path(
             data.path(),
@@ -411,7 +455,8 @@ mod tests {
     /// Helper: the registered tool-name set a config produces, sorted for
     /// order-independent comparison.
     fn registered_tool_names(config: &HandBoxAgentSessionConfig) -> Vec<String> {
-        let session = build_agent_session(config, None, Vec::new()).expect("construction succeeds");
+        let session = build_agent_session(config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
         let mut names: Vec<String> = session.tools().iter().map(|t| t.name.clone()).collect();
         names.sort();
         names
@@ -481,8 +526,8 @@ mod tests {
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
         // sample_config already sets enabled_tools = vec![].
 
-        let session =
-            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
         assert!(
             session.tools().is_empty(),
             "an empty enabled_tools list must register no tools"
@@ -608,8 +653,8 @@ mod tests {
         let data = TempDir::new().unwrap();
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session =
-            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
 
         // Stream options' base.api_key is the only place this path puts the key.
         assert_eq!(
@@ -630,8 +675,8 @@ mod tests {
         config.max_tokens = Some(1000);
         config.thinking_level = Some("high".to_string());
 
-        let session =
-            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
         let opts = session.stream_options();
 
         // The default is None, so a concrete value proves the config threaded in.
@@ -662,8 +707,8 @@ mod tests {
         // sample_config sets temperature/max_tokens/thinking_level to None.
         let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
 
-        let session =
-            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
         let opts = session.stream_options();
 
         assert_eq!(opts.base.temperature, None);
@@ -687,7 +732,7 @@ mod tests {
         );
 
         // Construction with a custom prompt succeeds (it feeds build_system_prompt).
-        build_agent_session(&config, None, Vec::new())
+        build_agent_session(&config, HookEmitters::default(), Vec::new())
             .expect("construction with a custom system prompt succeeds");
     }
 
@@ -700,7 +745,7 @@ mod tests {
 
         // `AgentSession` is not `Debug`, so `expect_err` (which needs `T: Debug`)
         // is unavailable — match on the Result instead.
-        match build_agent_session(&config, None, Vec::new()) {
+        match build_agent_session(&config, HookEmitters::default(), Vec::new()) {
             Ok(_) => panic!("unknown model under a fixed-catalog provider must error"),
             Err(err) => assert!(
                 format!("{err}").contains("not registered under provider"),
@@ -720,8 +765,8 @@ mod tests {
         config.model_id = "my-local-llm".to_string();
         config.base_url = "http://localhost:1234/v1".to_string();
 
-        let session =
-            build_agent_session(&config, None, Vec::new()).expect("construction succeeds");
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
         assert_eq!(session.model().id, "my-local-llm");
         assert_eq!(session.model().base_url, "http://localhost:1234/v1");
     }
@@ -1463,6 +1508,87 @@ mod tests {
             std::fs::read_to_string(&target).unwrap(),
             body2,
             "an overwrite must replace the file with the new content"
+        );
+    }
+
+    /// Names of the extensions registered on a built session, in dispatch order.
+    fn registered_extensions(session: &AgentSession) -> Vec<String> {
+        session
+            .extensions()
+            .iter()
+            .map(|e| e.manifest().name.clone())
+            .collect()
+    }
+
+    /// A configured rule reaches the chain, and lands BETWEEN the sandbox and the
+    /// approval gate. Order is the security contract: behind the sandbox so no
+    /// rule can widen the working-directory boundary, ahead of the gate so an
+    /// `allow` rule can clear a call before it prompts.
+    #[test]
+    fn hook_rules_register_between_the_sandbox_and_the_approval_gate() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let mut config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        config.hook_rules = vec![crate::storage::types::HookRule {
+            id: "r1".to_string(),
+            name: "block rm".to_string(),
+            event: crate::storage::types::HookEvent::BeforeToolCall,
+            tool_pattern: "bash".to_string(),
+            arg_field: Some("command".to_string()),
+            arg_contains: Some("rm -rf".to_string()),
+            action: crate::storage::types::HookAction::Notify,
+            message: None,
+            command: None,
+            timeout_ms: None,
+            enabled: true,
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }];
+
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
+        let names = registered_extensions(&session);
+
+        let sandbox = names
+            .iter()
+            .position(|n| n == "handbox-sandbox")
+            .expect("sandbox registered");
+        let rules = names
+            .iter()
+            .position(|n| n == "handbox-hook-rules")
+            .expect("rule engine registered when rules are configured");
+        let permission = names
+            .iter()
+            .position(|n| n == "handbox-permission")
+            .expect("approval gate registered");
+
+        assert!(
+            sandbox < rules && rules < permission,
+            "expected sandbox → rules → permission, got {names:?}"
+        );
+    }
+
+    /// With no rules configured the extension is left out entirely, so a session
+    /// pays nothing for a feature the user has not used.
+    #[test]
+    fn no_hook_rules_means_no_rule_extension() {
+        let cwd = TempDir::new().unwrap();
+        let data = TempDir::new().unwrap();
+        let config = sample_config(cwd.path().to_path_buf(), data.path().to_path_buf());
+        assert!(config.hook_rules.is_empty(), "precondition");
+
+        let session = build_agent_session(&config, HookEmitters::default(), Vec::new())
+            .expect("construction succeeds");
+        let names = registered_extensions(&session);
+
+        assert!(
+            !names.iter().any(|n| n == "handbox-hook-rules"),
+            "no rules configured, so the extension should be absent: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n == "handbox-sandbox"),
+            "the sandbox is unconditional: {names:?}"
         );
     }
 }

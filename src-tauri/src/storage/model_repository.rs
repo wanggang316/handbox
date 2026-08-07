@@ -400,7 +400,9 @@ impl ModelRepository {
             placeholders
         );
 
-        let mut query_builder = sqlx::query(&query);
+        // Safe to assert: `placeholders` is built from indices alone (`$1, $2, …`);
+        // the provider ids themselves are bound below.
+        let mut query_builder = sqlx::query(sqlx::AssertSqlSafe(query));
         for provider_id in provider_ids {
             query_builder = query_builder.bind(provider_id);
         }

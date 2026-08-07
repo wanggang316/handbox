@@ -143,7 +143,7 @@ impl JobRepository {
             JOB_SELECT_COLUMNS
         );
 
-        let rows = sqlx::query(&query)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(query))
             .bind(limit)
             .bind(offset)
             .fetch_all(self.db.pool())
@@ -268,7 +268,9 @@ impl JobRepository {
         "#
         );
 
-        let result = sqlx::query(&query)
+        // Safe to assert: the only interpolated fragment is `failure_count_expr`,
+        // one of three fixed literals above; every value is bound.
+        let result = sqlx::query(sqlx::AssertSqlSafe(query))
             .bind(last_run_at)
             .bind(execution_status_as_str(last_status))
             .bind(next_run_at)
@@ -321,7 +323,7 @@ impl JobRepository {
             JOB_SELECT_COLUMNS
         );
 
-        let rows = sqlx::query(&query)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(query))
             .bind(now)
             .fetch_all(self.db.pool())
             .await
@@ -536,7 +538,7 @@ impl JobExecutionRepository {
             EXECUTION_SELECT_COLUMNS
         );
 
-        let rows = sqlx::query(&query)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(query))
             .bind(job_id)
             .bind(limit)
             .bind(offset)

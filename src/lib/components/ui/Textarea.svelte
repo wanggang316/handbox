@@ -13,6 +13,13 @@
     required?: boolean;
     id?: string;
     name?: string;
+    /**
+     * Identifier-style input: turns off the platform's autocapitalize /
+     * autocorrect / spellcheck so the value is stored exactly as typed. Needed
+     * for anything executed or matched literally — a script, a path — where
+     * macOS would otherwise capitalize the first letter and silently break it.
+     */
+    literal?: boolean;
 
     showCharCount?: boolean;
   }
@@ -28,6 +35,7 @@
     required = false,
     id,
     name,
+    literal = false,
 
     showCharCount = false,
   }: Props = $props();
@@ -59,6 +67,9 @@
     oninput={handleInput}
     aria-invalid={invalid ? "true" : undefined}
     aria-describedby={describedby}
+    autocapitalize={literal ? "off" : undefined}
+    spellcheck={literal ? false : undefined}
+    {...literal ? { autocorrect: "off" } : {}}
     class="field w-full px-3 py-2 resize-none font-mono text-sm
            scrollbar-thin scrollbar-thumb-base-300 scrollbar-track-base-200
            hover:scrollbar-thumb-base-300/80

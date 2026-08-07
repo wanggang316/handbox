@@ -342,7 +342,12 @@ export const agentSessionActions = {
       }
       // Auto-generate a title after the first run (background, silent on
       // failure, never overwrites a manual title).
-      void maybeAutoGenerateTitle(id, wasFirstRun, updated.name, agentDefinitionId);
+      void maybeAutoGenerateTitle(
+        id,
+        wasFirstRun,
+        updated.name,
+        agentDefinitionId,
+      );
     } catch (error) {
       if (normalizeError(error).code === "NOT_FOUND") {
         // Session deleted while refreshing (abort-closed raced the delete IPC):

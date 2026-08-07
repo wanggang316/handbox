@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use hand_coding_agent::core::extensions::api::{
-    ExtensionCapabilities, ToolCallEvent, ToolResultEvent,
+    ExtensionCapabilities, ResultDecision, ToolCallEvent, ToolResultEvent,
 };
 use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
@@ -79,6 +79,8 @@ impl SandboxExtension {
                 env: Default::default(),
                 slash_commands: Vec::new(),
                 custom_tools: Vec::new(),
+                // Tier 1 runs in-process; the host applies these to subprocess RPC only.
+                timeouts: Default::default(),
             },
             working_dir,
         }
@@ -128,8 +130,10 @@ impl Extension for SandboxExtension {
         &self,
         _cx: &ExtensionContext,
         _event: &ToolResultEvent,
-    ) -> Result<(), ExtensionError> {
-        Ok(())
+    ) -> Result<ResultDecision, ExtensionError> {
+        // Permission is decided before the call; the result is none of its
+        // business.
+        Ok(ResultDecision::Continue)
     }
 }
 
@@ -159,6 +163,8 @@ impl DangerousDenyExtension {
                 env: Default::default(),
                 slash_commands: Vec::new(),
                 custom_tools: Vec::new(),
+                // Tier 1 runs in-process; the host applies these to subprocess RPC only.
+                timeouts: Default::default(),
             },
         }
     }
@@ -198,8 +204,10 @@ impl Extension for DangerousDenyExtension {
         &self,
         _cx: &ExtensionContext,
         _event: &ToolResultEvent,
-    ) -> Result<(), ExtensionError> {
-        Ok(())
+    ) -> Result<ResultDecision, ExtensionError> {
+        // Permission is decided before the call; the result is none of its
+        // business.
+        Ok(ResultDecision::Continue)
     }
 }
 
@@ -356,6 +364,8 @@ impl PermissionExtension {
                 env: Default::default(),
                 slash_commands: Vec::new(),
                 custom_tools: Vec::new(),
+                // Tier 1 runs in-process; the host applies these to subprocess RPC only.
+                timeouts: Default::default(),
             },
             session_id,
             emitter,
@@ -369,62 +379,62 @@ impl PermissionExtension {
         self.approval_tools = approval_tools;
         self
     }
+}
 
-    /// Request approval for one dangerous tool call and await the decision:
-    /// `Continue` on allow, `Cancel` on deny or fail-closed. A tool already on
-    /// the session always-allow set short-circuits without emitting or awaiting.
-    /// Keyed off `self.session_id`, never the per-event `cx.session_id`.
-    async fn request_approval(
-        &self,
-        call_id: &str,
-        tool_name: &str,
-        arguments: &serde_json::Value,
-    ) -> HookDecision {
-        let session_id = self.session_id.as_str();
+/// Request approval for one tool call and await the decision: `Continue` on
+/// allow, `Cancel` on deny or fail-closed. A tool already on the session
+/// always-allow set short-circuits without emitting or awaiting.
+///
+/// `session_id` MUST be the HandBox UUID, never the per-event `cx.session_id`.
+async fn request_approval(
+    session_id: &str,
+    emitter: Option<&ApprovalEmitter>,
+    call_id: &str,
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> HookDecision {
+    // A remembered tool runs without prompting — no event emitted, no await.
+    if is_session_allow_always(session_id, tool_name) {
+        return HookDecision::Continue;
+    }
 
-        // A remembered tool runs without prompting — no event emitted, no await.
-        if is_session_allow_always(session_id, tool_name) {
-            return HookDecision::Continue;
+    // No approval surface → fail closed. Never await, never run the tool.
+    let Some(emitter) = emitter else {
+        return HookDecision::Cancel(deny_reason(tool_name));
+    };
+
+    // Register the wake channel BEFORE emitting, so a response that races
+    // back the instant the event lands still finds a live entry to resolve.
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let (tx, rx) = oneshot::channel::<ApprovalDecision>();
+    pending_approvals().lock().unwrap().insert(
+        request_id.clone(),
+        PendingApproval {
+            session_id: session_id.to_string(),
+            tool_name: tool_name.to_string(),
+            sender: tx,
+        },
+    );
+
+    emitter(serde_json::json!({
+        "sessionId": session_id,
+        "callId": call_id,
+        "toolName": tool_name,
+        "args": arguments,
+        "requestId": request_id,
+    }));
+
+    // A dropped sender (`Err`) denies, so a lost response can never hang the
+    // turn.
+    match rx.await {
+        Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowAlways) => {
+            HookDecision::Continue
         }
-
-        // No approval surface → fail closed. Never await, never run the tool.
-        let Some(emitter) = &self.emitter else {
-            return HookDecision::Cancel(deny_reason(tool_name));
-        };
-
-        // Register the wake channel BEFORE emitting, so a response that races
-        // back the instant the event lands still finds a live entry to resolve.
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel::<ApprovalDecision>();
-        pending_approvals().lock().unwrap().insert(
-            request_id.clone(),
-            PendingApproval {
-                session_id: session_id.to_string(),
-                tool_name: tool_name.to_string(),
-                sender: tx,
-            },
-        );
-
-        emitter(serde_json::json!({
-            "sessionId": session_id,
-            "callId": call_id,
-            "toolName": tool_name,
-            "args": arguments,
-            "requestId": request_id,
-        }));
-
-        // A dropped sender (`Err`) denies, so a lost response can never hang the
-        // turn.
-        match rx.await {
-            Ok(ApprovalDecision::AllowOnce) | Ok(ApprovalDecision::AllowAlways) => {
-                HookDecision::Continue
-            }
-            Ok(ApprovalDecision::Deny) => HookDecision::Cancel(deny_reason(tool_name)),
-            Err(_) => {
-                // Run aborted: clean up any lingering entry and deny.
-                pending_approvals().lock().unwrap().remove(&request_id);
-                HookDecision::Cancel(deny_reason(tool_name))
-            }
+        Ok(ApprovalDecision::Deny) => HookDecision::Cancel(deny_reason(tool_name)),
+        Err(_) => {
+            // Run aborted: clean up any lingering entry and deny.
+            pending_approvals().lock().unwrap().remove(&request_id);
+            HookDecision::Cancel(deny_reason(tool_name))
         }
     }
 }
@@ -454,17 +464,24 @@ impl Extension for PermissionExtension {
         {
             return Ok(HookDecision::Continue);
         }
-        Ok(self
-            .request_approval(&event.call_id, &event.tool_name, &event.arguments)
-            .await)
+        Ok(request_approval(
+            &self.session_id,
+            self.emitter.as_ref(),
+            &event.call_id,
+            &event.tool_name,
+            &event.arguments,
+        )
+        .await)
     }
 
     async fn on_after_tool_call(
         &self,
         _cx: &ExtensionContext,
         _event: &ToolResultEvent,
-    ) -> Result<(), ExtensionError> {
-        Ok(())
+    ) -> Result<ResultDecision, ExtensionError> {
+        // Permission is decided before the call; the result is none of its
+        // business.
+        Ok(ResultDecision::Continue)
     }
 }
 
@@ -1036,7 +1053,9 @@ mod tests {
                         "{tool} cancel reason should name the denied tool, got: {reason:?}"
                     );
                 }
-                other => panic!("{tool} must be Cancelled by the dangerous-deny ext, got {other:?}"),
+                other => {
+                    panic!("{tool} must be Cancelled by the dangerous-deny ext, got {other:?}")
+                }
             }
         }
     }

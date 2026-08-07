@@ -13,6 +13,7 @@ import {
   MousePointerClick,
   LayoutGrid,
   Wrench,
+  Anchor,
   MessagesSquare,
 } from "@lucide/svelte";
 import type { Icon as IconType } from "@lucide/svelte";
@@ -38,29 +39,85 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
       id: "personal",
       title: t("settings.sidebar.group.personal"),
       items: [
-        { id: "account", title: t("settings.sidebar.account"), icon: User, url: "/settings/account" },
-        { id: "general", title: t("settings.sidebar.general"), icon: Palette, url: "/settings/general" },
-        { id: "shortcuts", title: t("settings.sidebar.shortcuts"), icon: Keyboard, url: "/settings/shortcuts" },
+        {
+          id: "account",
+          title: t("settings.sidebar.account"),
+          icon: User,
+          url: "/settings/account",
+        },
+        {
+          id: "general",
+          title: t("settings.sidebar.general"),
+          icon: Palette,
+          url: "/settings/general",
+        },
+        {
+          id: "shortcuts",
+          title: t("settings.sidebar.shortcuts"),
+          icon: Keyboard,
+          url: "/settings/shortcuts",
+        },
       ],
     },
     {
       id: "features",
       title: t("settings.sidebar.group.features"),
       items: [
-        { id: "session", title: t("settings.sidebar.session"), icon: MessagesSquare, url: "/settings/session" },
-        { id: "quicktools", title: t("settings.sidebar.quicktools"), icon: MousePointerClick, url: "/settings/quicktools" },
-        { id: "models", title: t("settings.sidebar.models"), icon: Brain, url: "/settings/models" },
-        { id: "agent-tools", title: t("settings.sidebar.agentTools"), icon: Wrench, url: "/settings/agent-tools" },
+        {
+          id: "session",
+          title: t("settings.sidebar.session"),
+          icon: MessagesSquare,
+          url: "/settings/session",
+        },
+        {
+          id: "quicktools",
+          title: t("settings.sidebar.quicktools"),
+          icon: MousePointerClick,
+          url: "/settings/quicktools",
+        },
+        {
+          id: "models",
+          title: t("settings.sidebar.models"),
+          icon: Brain,
+          url: "/settings/models",
+        },
+        {
+          id: "agent-tools",
+          title: t("settings.sidebar.agentTools"),
+          icon: Wrench,
+          url: "/settings/agent-tools",
+        },
         { id: "mcp", title: "MCP", icon: Zap, url: "/settings/mcp" },
-        { id: "skills", title: t("settings.sidebar.skills"), icon: Sparkles, url: "/settings/skills" },
+        {
+          id: "hooks",
+          title: t("settings.sidebar.hooks"),
+          icon: Anchor,
+          url: "/settings/hooks",
+        },
+        {
+          id: "skills",
+          title: t("settings.sidebar.skills"),
+          icon: Sparkles,
+          url: "/settings/skills",
+        },
       ],
     },
     {
       id: "other",
       title: t("settings.sidebar.group.other"),
       items: [
-        { id: "components", title: t("settings.sidebar.components"), icon: LayoutGrid, url: "/settings/components" },
-        { id: "about", title: t("settings.sidebar.about"), icon: Info, url: "/settings/about" },
+        {
+          id: "components",
+          title: t("settings.sidebar.components"),
+          icon: LayoutGrid,
+          url: "/settings/components",
+        },
+        {
+          id: "about",
+          title: t("settings.sidebar.about"),
+          icon: Info,
+          url: "/settings/about",
+        },
       ],
     },
   ];

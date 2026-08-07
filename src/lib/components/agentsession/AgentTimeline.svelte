@@ -9,10 +9,12 @@
   import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import type { HookRuleNotification } from "$lib/types";
   import type {
     AgentMessage,
     ToolResultContent,
   } from "$lib/types/agentSession";
+  import { Anchor, ChevronDown } from "@lucide/svelte";
   import AgentThinkingBlock from "./AgentThinkingBlock.svelte";
   import AgentToolCallCard from "./AgentToolCallCard.svelte";
   import HtmlCard from "./HtmlCard.svelte";
@@ -144,6 +146,52 @@
     );
   }
 
+  // Hook-rule firings render inline where they happened. Firings that carry a
+  // callId attach to that tool card (before-hooks above it, after-hooks below);
+  // the rest (prompt rules) anchor by message index: entries anchored to index
+  // i appear right after that message (-1 = before the first).
+  function hookNoticesAfter(anchor: number) {
+    return runState.hookNotices.filter(
+      (entry) => entry.notice.callId === null && entry.anchor === anchor,
+    );
+  }
+
+  function hookNoticesForCall(
+    callId: string,
+    event: "before_tool_call" | "after_tool_call",
+  ) {
+    return runState.hookNotices.filter(
+      (entry) =>
+        entry.notice.callId === callId && entry.notice.event === event,
+    );
+  }
+
+  // Labels mirror the settings page so a hook reads the same in both places.
+  function hookEventLabel(event: HookRuleNotification["event"]): string {
+    switch (event) {
+      case "before_tool_call":
+        return t("settings.hooks.event.before");
+      case "after_tool_call":
+        return t("settings.hooks.event.after");
+      case "user_prompt_submit":
+        return t("settings.hooks.event.prompt");
+      default:
+        return event;
+    }
+  }
+
+  function hookActionLabel(action: HookRuleNotification["action"]): string {
+    switch (action) {
+      case "notify":
+        return t("settings.hooks.action.notify");
+      case "run_command":
+        return t("settings.hooks.action.runCommand");
+      default:
+        return action;
+    }
+  }
+
+
   // Index of the in-progress assistant skeleton: the reducer appends the
   // assistant message at message_start (empty content, zero usage) while
   // deltas flow through streamingText/thinkingText, so the committed loop must
@@ -219,7 +267,57 @@
       setTimeout(scrollToBottom, 50);
     }
   });
+
+  // A hook notice appended at the bottom must not land below the fold.
+  $effect(() => {
+    if (runState.hookNotices.length > 0) {
+      setTimeout(scrollToBottom, 50);
+    }
+  });
 </script>
+
+{#snippet hookIdentity(notice: HookRuleNotification)}
+  <Anchor size={12} class="shrink-0" />
+  <span class="shrink-0 text-base-content/50">Hooks</span>
+  <span class="shrink-0 font-medium">{notice.ruleName}</span>
+  <span
+    class="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-base-content/10 text-base-content/70"
+  >
+    {hookEventLabel(notice.event)} · {hookActionLabel(notice.action)}
+  </span>
+  {#if notice.message}
+    <span class="truncate text-base-content/50">{notice.message}</span>
+  {/if}
+{/snippet}
+
+{#snippet hookNoticeRow(notice: HookRuleNotification)}
+  {@const tone =
+    notice.outcome === "denied" || notice.outcome === "failed"
+      ? "text-warning"
+      : "text-base-content/70"}
+  <!-- The row carries the hook's identity — name, kind, message. A command
+       firing keeps its execution capture behind the native disclosure; a row
+       with nothing more to show stays a plain line. -->
+  {#if notice.detail}
+    <details class="hook-notice group px-3 py-1.5">
+      <summary
+        class="flex cursor-pointer list-none items-center gap-2 text-xs {tone}"
+      >
+        {@render hookIdentity(notice)}
+        <ChevronDown
+          size={12}
+          class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <pre
+        class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{notice.detail}</pre>
+    </details>
+  {:else}
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs {tone}">
+      {@render hookIdentity(notice)}
+    </div>
+  {/if}
+{/snippet}
 
 <!-- The message stream is content: bubbles, markdown replies, tool-card bodies
      and error text must all be selectable (buttons stay unselectable globally). -->
@@ -228,6 +326,11 @@
   class="flex-1 overflow-y-auto select-text scroll-column"
 >
   <div class="chat-column py-4 space-y-6">
+    <!-- Hook firings that preceded every message (a prompt rule on the first turn). -->
+    {#each hookNoticesAfter(-1) as entry}
+      {@render hookNoticeRow(entry.notice)}
+    {/each}
+
     <!-- Committed messages. messages is append-only (the reducer only appends
          or finalizes in place, never reorders), so index keys reuse DOM safely;
          cards key by toolCallId so their state never shifts with the index. -->
@@ -280,6 +383,11 @@
             {#if assistantToolCalls(message).length}
               <div class="mt-2 space-y-2">
                 {#each assistantToolCalls(message) as block (block.id)}
+                  <!-- A before-hook fires before its call runs, so it reads
+                       above the card; an after-hook reads below it. -->
+                  {#each hookNoticesForCall(block.id, "before_tool_call") as entry}
+                    {@render hookNoticeRow(entry.notice)}
+                  {/each}
                   {#if block.name === RENDER_CARD_TOOL_NAME}
                     <!-- render_card is purely presentational: its arguments are
                          the card, so it renders as an inline sandbox card
@@ -296,6 +404,9 @@
                   {:else}
                     <AgentToolCallCard toolCall={toolCallView(block)} />
                   {/if}
+                  {#each hookNoticesForCall(block.id, "after_tool_call") as entry}
+                    {@render hookNoticeRow(entry.notice)}
+                  {/each}
                 {/each}
               </div>
             {/if}
@@ -358,6 +469,11 @@
       <!-- toolResult messages are not rendered standalone: the paired toolcall
            card presents them inside the assistant turn, avoiding a detached
            tool-result block. -->
+
+      <!-- Hook firings anchored right after this message, in arrival order. -->
+      {#each hookNoticesAfter(i) as entry}
+        {@render hookNoticeRow(entry.notice)}
+      {/each}
     {/each}
 
     <!-- LIVE streaming view: growing thinking block + streaming text. -->
@@ -427,6 +543,12 @@
 </div>
 
 <style>
+  /* WebKit draws its own disclosure marker on <summary>; the row supplies its
+     own chevron instead. */
+  .hook-notice summary::-webkit-details-marker {
+    display: none;
+  }
+
   /* Classic (space-taking) scrollbars would otherwise eat width on the right
      only, shifting the centred column off the composer's axis; a stable gutter
      on both edges keeps the two aligned. No-op under overlay scrollbars. */

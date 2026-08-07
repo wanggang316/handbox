@@ -22,16 +22,18 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, Manager, State, Window};
 
 use crate::models::AppError;
+use crate::services::agent_hook_rules::{NotifyEmitter, HOOK_RULE_NOTIFY_EVENT};
 use crate::services::agent_permission::{
     respond_to_approval, ApprovalDecision, ApprovalEmitter, APPROVAL_REQUEST_EVENT,
 };
+use crate::services::coding_agent_session::HookEmitters;
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
 use crate::services::extensions::{render_app, render_card, web_search};
 use crate::services::skills::Skill;
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest, AgentService,
-    AgentSessionService, CodingRunSink, GenUiService, McpService, ProviderService, SettingsService,
-    SkillService,
+    AgentSessionService, CodingRunSink, GenUiService, HookRuleService, McpService, ProviderService,
+    SettingsService, SkillService,
 };
 use crate::storage::types::UUID;
 use hand_ai_model::Message;
@@ -180,6 +182,7 @@ pub async fn agent_run_stream(
     mcp: State<'_, McpService>,
     agents: State<'_, AgentService>,
     genui: State<'_, GenUiService>,
+    hook_rules: State<'_, HookRuleService>,
 ) -> Result<(), AppError> {
     let session_id = request.session_id.clone();
 
@@ -197,7 +200,16 @@ pub async fn agent_run_stream(
 
     // From here on, every early return must remove the placeholder first.
     match assemble_and_drive(
-        request, &window, &sessions, &providers, &skills, &settings, &mcp, &agents, &genui,
+        request,
+        &window,
+        &sessions,
+        &providers,
+        &skills,
+        &settings,
+        &mcp,
+        &agents,
+        &genui,
+        &hook_rules,
     )
     .await
     {
@@ -235,6 +247,7 @@ async fn assemble_and_drive(
     mcp: &McpService,
     agents: &AgentService,
     genui: &GenUiService,
+    hook_rules: &HookRuleService,
 ) -> Result<crate::services::RunDriveHandles, AppError> {
     let session_id = request.session_id.clone();
 
@@ -336,6 +349,31 @@ async fn assemble_and_drive(
         }
     });
 
+    // Same shape for `notify` hook rules, which report a matching tool result
+    // rather than gating anything.
+    let notify_window = window.clone();
+    let notify_emitter: NotifyEmitter = Arc::new(move |payload| {
+        if let Err(e) = notify_window.emit(HOOK_RULE_NOTIFY_EVENT, payload) {
+            tracing::warn!(
+                "[agent_run_stream] failed to emit {}: {}",
+                HOOK_RULE_NOTIFY_EVENT,
+                e
+            );
+        }
+    });
+
+    // The user's enabled rules, snapshotted for this turn. A failure to read them
+    // degrades to "no rules" rather than blocking the run: the sandbox and the
+    // approval gate are the guardrails that must never be skipped, and both are
+    // independent of this.
+    config.hook_rules = match hook_rules.list_enabled().await {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::warn!("[agent_run_stream] failed to load hook rules: {}", e);
+            Vec::new()
+        }
+    };
+
     // Resolve this session's MCP server bindings into AgentTools and inject them
     // into the loop. Per-binding `enabled_tools` overrides the server's global
     // selection; failures degrade to no MCP tools rather than aborting the run.
@@ -421,7 +459,14 @@ async fn assemble_and_drive(
         extra_tools.push(render_app::make_render_app_tool());
     }
 
-    let mut session = build_agent_session(&config, Some(approval_emitter), extra_tools)?;
+    let mut session = build_agent_session(
+        &config,
+        HookEmitters {
+            approval: Some(approval_emitter),
+            notify: Some(notify_emitter),
+        },
+        extra_tools,
+    )?;
 
     // Resume context: the JSONL is the source of truth. `build_agent_session`
     // constructs with `resume_session = <session_id>`, so the coding-agent has

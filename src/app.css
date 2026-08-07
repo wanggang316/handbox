@@ -9,8 +9,12 @@
 /* base-100 = Linear "canvas", base-200 = "surface-1", base-300 = "surface-2". */
 @theme {
   /* Linear font stack: Geist Variable in place of Inter, covering display + body */
-  --font-sans: "Geist Variable", -apple-system, system-ui, "SF Pro Display", "Helvetica Neue", sans-serif;
-  --font-mono: "Geist Mono Variable", "Fira Code", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-sans:
+    "Geist Variable", -apple-system, system-ui, "SF Pro Display",
+    "Helvetica Neue", sans-serif;
+  --font-mono:
+    "Geist Mono Variable", "Fira Code", ui-monospace, "SF Mono", Menlo,
+    monospace;
 
   /* Radii: use Tailwind rounded-md=6 / rounded-lg=8 / rounded-xl=12 as-is; --radius-* is not overridden */
 
@@ -106,6 +110,11 @@ body {
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Inherited text must follow the theme variables, not the UA color-scheme
+     default — content portaled to <body> (dialogs, tooltips) has no themed
+     ancestor to inherit from, and unclassed text (form labels) would otherwise
+     flip with color-scheme instead of data-theme. */
+  color: var(--base-content);
 }
 
 /* The chat column: the transcript and the composer are laid out by different
@@ -232,7 +241,11 @@ code,
   --field-focus: var(--primary);
   --field-error: var(--error);
   --field-text: var(--base-content);
-  --field-placeholder: color-mix(in oklch, var(--base-content) 35%, transparent);
+  --field-placeholder: color-mix(
+    in oklch,
+    var(--base-content) 35%,
+    transparent
+  );
 }
 
 /* Dark theme */
@@ -319,16 +332,13 @@ html.sidebar-vibrancy {
 }
 
 [data-theme="dark"] .shadow-2xl {
-  --tw-shadow: 0 32px 64px -28px color-mix(in oklch, var(--overlay) 10%, var(
-          --base-100
-        )
-        5%);
-  --tw-shadow-colored: 0 32px 64px -28px color-mix(in oklch, var(--overlay) 10%, var(
-          --base-100
-        )
-        5%);
-  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000),
-    var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  --tw-shadow: 0 32px 64px -28px
+    color-mix(in oklch, var(--overlay) 10%, var(--base-100) 5%);
+  --tw-shadow-colored: 0 32px 64px -28px
+    color-mix(in oklch, var(--overlay) 10%, var(--base-100) 5%);
+  box-shadow:
+    var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
+    var(--tw-shadow);
 }
 
 .markdown-content {
@@ -714,24 +724,46 @@ pre.code-block--compact {
   animation: dlgContentOut 0.18s ease-in forwards;
 }
 @keyframes dlgFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 @keyframes dlgFadeOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 @keyframes dlgContentIn {
-  from { opacity: 0; transform: translate(-50%, calc(-50% - 24px)); }
-  to { opacity: 1; transform: translate(-50%, -50%); }
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 24px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
 }
 @keyframes dlgContentOut {
-  from { opacity: 1; transform: translate(-50%, -50%); }
-  to { opacity: 0; transform: translate(-50%, calc(-50% - 24px)); }
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 24px));
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .dlg-overlay[data-state],
-  .dlg-content[data-state] { animation: none; }
+  .dlg-content[data-state] {
+    animation: none;
+  }
 }
 
 /* Base form-control skin: input / textarea / select share .field, so appearance

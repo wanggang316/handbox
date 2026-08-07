@@ -29,6 +29,7 @@ export * from "./llm";
 export * from "./provider";
 export * from "./settings";
 export * from "./mcp";
+export * from "./hookRule";
 export * from "./skill";
 export * from "./user";
 export * from "./agentSession";
