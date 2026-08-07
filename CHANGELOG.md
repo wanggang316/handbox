@@ -16,6 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.5.0] - 2026-08-07
+
+### Added
+- Hooks: Settings → Hooks lets you run your own command when the agent submits
+  a prompt or calls a tool. A hook can hand extra context to the model, rewrite
+  what a tool is about to do, block the call outright, or simply do its job
+  quietly — like formatting a file right after it's written.
+- Every hook that fires now shows up in the conversation beside the tool call it
+  belongs to, and command hooks expand to reveal what the command printed.
+- Settings → Session decides when a session gets an automatic title: after the
+  first message, after every message, or never. Titles generated later read the
+  whole conversation, and sessions you renamed by hand are left alone.
+- Copy an assistant reply to the clipboard with one click.
+- The sidebar can wear the macOS frosted-glass look — on by default, switchable
+  in Settings → General.
+
+### Changed
+- Reasoning stays out of the way: thinking blocks start collapsed, and long
+  reasoning is clipped behind a "show more" toggle once opened.
+- Token counts moved off the permanent line under every reply into a tooltip on
+  a small chart icon.
+- The update dialog is wider, with more room to read release notes.
+
+### Fixed
+- Switching the theme mid-session no longer leaves stray text in the previous
+  theme's colors, such as white labels on a now-light dialog.
+- The message column lines up with the input box instead of running slightly
+  wider and off-center.
+- Help tooltips inside dialogs appeared away from the icon they belong to.
+
+
 ## [0.4.4] - 2026-07-30
 
 ### Added
