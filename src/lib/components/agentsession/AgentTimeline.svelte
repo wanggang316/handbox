@@ -159,14 +159,6 @@
     }
   }
 
-  // What the firing did, shown in the expanded body — the row itself carries
-  // the hook's identity (name, kind, message).
-  function hookOutcomeText(notice: HookRuleNotification): string {
-    return t(`settings.hooks.notice.${notice.outcome}`).replace(
-      "{tool}",
-      notice.toolName,
-    );
-  }
 
   // Index of the in-progress assistant skeleton: the reducer appends the
   // assistant message at message_start (empty content, zero usage) while
@@ -252,41 +244,47 @@
   });
 </script>
 
+{#snippet hookIdentity(notice: HookRuleNotification)}
+  <Anchor size={12} class="shrink-0" />
+  <span class="shrink-0 text-base-content/50">Hooks</span>
+  <span class="shrink-0 font-medium">{notice.ruleName}</span>
+  <span
+    class="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-base-content/10 text-base-content/70"
+  >
+    {hookEventLabel(notice.event)} · {hookActionLabel(notice.action)}
+  </span>
+  {#if notice.message}
+    <span class="truncate text-base-content/50">{notice.message}</span>
+  {/if}
+{/snippet}
+
 {#snippet hookNoticeRow(notice: HookRuleNotification)}
   {@const tone =
     notice.outcome === "denied" || notice.outcome === "failed"
       ? "text-warning"
       : "text-base-content/70"}
-  <!-- The row carries the hook's identity — name, kind, message — and stays one
-       line; what the firing did (outcome, execution capture) lives behind the
-       native disclosure. -->
-  <details class="hook-notice group px-3 py-1.5">
-    <summary
-      class="flex cursor-pointer list-none items-center gap-2 text-xs {tone}"
-    >
-      <Anchor size={12} class="shrink-0" />
-      <span class="shrink-0 font-medium">{notice.ruleName}</span>
-      <span
-        class="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-base-content/10 text-base-content/70"
+  <!-- The row carries the hook's identity — name, kind, message. A command
+       firing keeps its execution capture behind the native disclosure; a row
+       with nothing more to show stays a plain line. -->
+  {#if notice.detail}
+    <details class="hook-notice group px-3 py-1.5">
+      <summary
+        class="flex cursor-pointer list-none items-center gap-2 text-xs {tone}"
       >
-        {hookEventLabel(notice.event)} · {hookActionLabel(notice.action)}
-      </span>
-      {#if notice.message}
-        <span class="truncate text-base-content/50">{notice.message}</span>
-      {/if}
-      <ChevronDown
-        size={12}
-        class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
-      />
-    </summary>
-    <div class="mt-1.5 ml-5 flex flex-col gap-1.5 text-xs text-base-content/70">
-      <span>{hookOutcomeText(notice)}</span>
-      {#if notice.detail}
-        <pre
-          class="max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 leading-relaxed whitespace-pre-wrap break-words">{notice.detail}</pre>
-      {/if}
+        {@render hookIdentity(notice)}
+        <ChevronDown
+          size={12}
+          class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <pre
+        class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{notice.detail}</pre>
+    </details>
+  {:else}
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs {tone}">
+      {@render hookIdentity(notice)}
     </div>
-  </details>
+  {/if}
 {/snippet}
 
 <!-- The message stream is content: bubbles, markdown replies, tool-card bodies

@@ -135,14 +135,6 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
     "Tool name to match; * is a wildcard:\n· write — exact match\n· mcp__* — prefix match\n· * — every tool\n\nEmpty argument name: search all arguments\nEmpty contains: match on the tool name alone",
   "settings.hooks.deleteTitle": "Delete rule",
   "settings.hooks.deleteMessage": 'Delete "{name}"?',
-  // Runtime outcomes — the hook's name renders on the timeline row itself, so
-  // these describe only what happened
-  "settings.hooks.notice.denied": "Command blocked this {tool} call",
-  "settings.hooks.notice.observed": "Matched {tool}",
-  "settings.hooks.notice.ran": "Ran its command on {tool}",
-  "settings.hooks.notice.rewrote": "Rewrote the arguments to {tool}",
-  "settings.hooks.notice.failed": "Command failed on {tool}",
-  "settings.hooks.notice.informed": "Added context for this turn",
 
   // Account page
   "settings.account.editProfile": "Edit Profile",
