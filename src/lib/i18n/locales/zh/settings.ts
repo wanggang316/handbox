@@ -24,7 +24,7 @@ export const settingsZh = {
   "settings.sidebar.quicktools": "快捷工具",
   "settings.sidebar.models": "模型",
   "settings.sidebar.agentTools": "Agent 工具",
-  "settings.sidebar.hooks": "钩子规则",
+  "settings.sidebar.hooks": "Hooks",
   "settings.sidebar.skills": "技能",
   "settings.sidebar.components": "组件",
   "settings.sidebar.shortcuts": "快捷键",
@@ -127,13 +127,14 @@ export const settingsZh = {
     "填写要匹配的工具名，* 是通配符：\n· write — 精确匹配\n· mcp__* — 前缀匹配\n· * — 匹配全部工具\n\n参数名留空：在全部参数中查找\n参数包含留空：只按工具名匹配",
   "settings.hooks.deleteTitle": "删除规则",
   "settings.hooks.deleteMessage": "确定要删除「{name}」吗？",
-  // Runtime notices — shown when a rule matches a tool call
-  "settings.hooks.notice.denied": "规则「{rule}」的命令拦截了 {tool}",
-  "settings.hooks.notice.observed": "规则「{rule}」匹配了 {tool}",
-  "settings.hooks.notice.ran": "规则「{rule}」在 {tool} 上执行了命令",
-  "settings.hooks.notice.rewrote": "规则「{rule}」改写了 {tool} 的参数",
-  "settings.hooks.notice.failed": "规则「{rule}」的命令执行失败（{tool}）",
-  "settings.hooks.notice.informed": "规则「{rule}」为本轮补充了上下文",
+  // Runtime outcomes — the hook's name renders on the timeline row itself, so
+  // these describe only what happened
+  "settings.hooks.notice.denied": "命令拦截了本次 {tool} 调用",
+  "settings.hooks.notice.observed": "命中了 {tool}",
+  "settings.hooks.notice.ran": "在 {tool} 上执行了命令",
+  "settings.hooks.notice.rewrote": "改写了 {tool} 的参数",
+  "settings.hooks.notice.failed": "命令执行失败（{tool}）",
+  "settings.hooks.notice.informed": "为本轮对话补充了上下文",
 
   // Account page
   "settings.account.editProfile": "编辑资料",

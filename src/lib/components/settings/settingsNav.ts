@@ -13,7 +13,7 @@ import {
   MousePointerClick,
   LayoutGrid,
   Wrench,
-  Filter,
+  Anchor,
 } from "@lucide/svelte";
 import type { Icon as IconType } from "@lucide/svelte";
 import { t } from "$lib/i18n";
@@ -51,7 +51,7 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
         { id: "models", title: t("settings.sidebar.models"), icon: Brain, url: "/settings/models" },
         { id: "agent-tools", title: t("settings.sidebar.agentTools"), icon: Wrench, url: "/settings/agent-tools" },
         { id: "mcp", title: "MCP", icon: Zap, url: "/settings/mcp" },
-        { id: "hooks", title: t("settings.sidebar.hooks"), icon: Filter, url: "/settings/hooks" },
+        { id: "hooks", title: t("settings.sidebar.hooks"), icon: Anchor, url: "/settings/hooks" },
         { id: "skills", title: t("settings.sidebar.skills"), icon: Sparkles, url: "/settings/skills" },
       ],
     },

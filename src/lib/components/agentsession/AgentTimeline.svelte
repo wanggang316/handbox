@@ -134,13 +134,38 @@
     );
   }
 
-  // The notice line reuses the settings-page notice strings; the rule's own
-  // message rides along so a bare "rule matched" never needs decoding.
-  function hookNoticeText(notice: HookRuleNotification): string {
-    const text = t(`settings.hooks.notice.${notice.outcome}`)
-      .replace("{rule}", notice.ruleName)
-      .replace("{tool}", notice.toolName);
-    return notice.message ? `${text} — ${notice.message}` : text;
+  // Labels mirror the settings page so a hook reads the same in both places.
+  function hookEventLabel(event: HookRuleNotification["event"]): string {
+    switch (event) {
+      case "before_tool_call":
+        return t("settings.hooks.event.before");
+      case "after_tool_call":
+        return t("settings.hooks.event.after");
+      case "user_prompt_submit":
+        return t("settings.hooks.event.prompt");
+      default:
+        return event;
+    }
+  }
+
+  function hookActionLabel(action: HookRuleNotification["action"]): string {
+    switch (action) {
+      case "notify":
+        return t("settings.hooks.action.notify");
+      case "run_command":
+        return t("settings.hooks.action.runCommand");
+      default:
+        return action;
+    }
+  }
+
+  // What the firing did, shown in the expanded body — the row itself carries
+  // the hook's identity (name, kind, message).
+  function hookOutcomeText(notice: HookRuleNotification): string {
+    return t(`settings.hooks.notice.${notice.outcome}`).replace(
+      "{tool}",
+      notice.toolName,
+    );
   }
 
   // Index of the in-progress assistant skeleton: the reducer appends the
@@ -231,30 +256,37 @@
   {@const tone =
     notice.outcome === "denied" || notice.outcome === "failed"
       ? "text-warning"
-      : "text-base-content/60"}
-  {#if notice.detail}
-    <!-- A command firing carries its execution capture; a native disclosure
-         keeps the row one line until the user asks for the output. -->
-    <details class="hook-notice group px-3 py-1.5">
-      <summary
-        class="flex cursor-pointer list-none items-center gap-2 text-xs {tone}"
-      >
-        <Anchor size={12} class="shrink-0" />
-        <span class="break-words">{hookNoticeText(notice)}</span>
-        <ChevronDown
-          size={12}
-          class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
-        />
-      </summary>
-      <pre
-        class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{notice.detail}</pre>
-    </details>
-  {:else}
-    <div class="flex items-center gap-2 px-3 py-1.5 text-xs {tone}">
+      : "text-base-content/70"}
+  <!-- The row carries the hook's identity — name, kind, message — and stays one
+       line; what the firing did (outcome, execution capture) lives behind the
+       native disclosure. -->
+  <details class="hook-notice group px-3 py-1.5">
+    <summary
+      class="flex cursor-pointer list-none items-center gap-2 text-xs {tone}"
+    >
       <Anchor size={12} class="shrink-0" />
-      <span class="break-words">{hookNoticeText(notice)}</span>
+      <span class="shrink-0 font-medium">{notice.ruleName}</span>
+      <span
+        class="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-base-content/10 text-base-content/70"
+      >
+        {hookEventLabel(notice.event)} · {hookActionLabel(notice.action)}
+      </span>
+      {#if notice.message}
+        <span class="truncate text-base-content/50">{notice.message}</span>
+      {/if}
+      <ChevronDown
+        size={12}
+        class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
+      />
+    </summary>
+    <div class="mt-1.5 ml-5 flex flex-col gap-1.5 text-xs text-base-content/70">
+      <span>{hookOutcomeText(notice)}</span>
+      {#if notice.detail}
+        <pre
+          class="max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 leading-relaxed whitespace-pre-wrap break-words">{notice.detail}</pre>
+      {/if}
     </div>
-  {/if}
+  </details>
 {/snippet}
 
 <!-- The message stream is content: bubbles, markdown replies, tool-card bodies
