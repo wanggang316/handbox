@@ -341,19 +341,25 @@
         <Input bind:value={formToolPattern} placeholder="write" literal />
       </div>
 
+      <!-- Input renders its label and control as siblings, so each needs a
+           wrapper to occupy a single grid cell — bare, they split into four. -->
       <div class="grid grid-cols-2 gap-4">
-        <Input
-          label={t("settings.hooks.field.argField")}
-          bind:value={formArgField}
-          placeholder="path"
-          literal
-        />
-        <Input
-          label={t("settings.hooks.field.argContains")}
-          bind:value={formArgContains}
-          placeholder=".md"
-          literal
-        />
+        <div>
+          <Input
+            label={t("settings.hooks.field.argField")}
+            bind:value={formArgField}
+            placeholder="path"
+            literal
+          />
+        </div>
+        <div>
+          <Input
+            label={t("settings.hooks.field.argContains")}
+            bind:value={formArgContains}
+            placeholder=".md"
+            literal
+          />
+        </div>
       </div>
     {:else}
       <Input

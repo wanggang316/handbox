@@ -203,17 +203,17 @@ class UIState {
 
     // Update the HTML data-theme attribute to match the CSS selectors.
     if (typeof document !== "undefined") {
-      if (newTheme === "system") {
-        const systemIsDark = window.matchMedia(
-          "(prefers-color-scheme: dark)",
-        ).matches;
-        document.documentElement.setAttribute(
-          "data-theme",
-          systemIsDark ? "dark" : "light",
-        );
-      } else {
-        document.documentElement.setAttribute("data-theme", newTheme);
-      }
+      const resolved =
+        newTheme === "system"
+          ? window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light"
+          : newTheme;
+      document.documentElement.setAttribute("data-theme", resolved);
+      // Keep the UA color-scheme in step with data-theme. app.html sets it at
+      // boot; without this re-sync, a mid-session switch leaves UA-default
+      // text, form controls, and scrollbars rendering for the previous theme.
+      document.documentElement.style.colorScheme = resolved;
     }
 
     // Sync the native window appearance: data-theme only affects webview
