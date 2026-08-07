@@ -46,7 +46,16 @@ pub struct GeneralSettings {
     pub theme_color: ThemeColor,
     pub language: Language,
     pub auto_scroll: bool,
+    /// macOS frosted-glass sidebar (behind-window vibrancy). Ignored on
+    /// platforms without the effect; default on so configs written before the
+    /// field existed pick up the native look.
+    #[serde(default = "default_sidebar_vibrancy")]
+    pub sidebar_vibrancy: bool,
     pub shortcuts: ShortcutConfig,
+}
+
+fn default_sidebar_vibrancy() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +216,28 @@ fn default_agent_enabled_tools() -> Vec<String> {
     .collect()
 }
 
+/// When a session's title is regenerated automatically. The manual
+/// "generate title" action is unaffected by this rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TitleGenerationRule {
+    /// Once, right after the session's first message.
+    #[default]
+    FirstMessage,
+    /// After every message, re-titled from the conversation so far.
+    EveryMessage,
+    /// Never automatically.
+    Off,
+}
+
+/// Session-level behaviour shared by every agent session.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSettings {
+    #[serde(default)]
+    pub title_generation: TitleGenerationRule,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickActionSettings {
@@ -259,6 +290,8 @@ pub struct AppSettings {
     pub agent: AgentSettings,
     #[serde(default)]
     pub quick_action: QuickActionSettings,
+    #[serde(default)]
+    pub session: SessionSettings,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -428,6 +461,80 @@ mod tests {
                 "render_app",
                 "skill"
             ]
+        );
+    }
+
+    // Title generation defaults to the historical behaviour (once, after the
+    // first message), both via Default and when the field is absent from a
+    // persisted section.
+    #[test]
+    fn session_title_generation_defaults_to_first_message() {
+        assert_eq!(
+            SessionSettings::default().title_generation,
+            TitleGenerationRule::FirstMessage
+        );
+
+        let parsed: SessionSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(parsed.title_generation, TitleGenerationRule::FirstMessage);
+    }
+
+    // The rule round-trips under its camelCase JSON key and variant names.
+    #[test]
+    fn session_title_generation_round_trips() {
+        for (json, rule) in [
+            ("firstMessage", TitleGenerationRule::FirstMessage),
+            ("everyMessage", TitleGenerationRule::EveryMessage),
+            ("off", TitleGenerationRule::Off),
+        ] {
+            let parsed: SessionSettings =
+                serde_json::from_value(serde_json::json!({ "titleGeneration": json })).unwrap();
+            assert_eq!(parsed.title_generation, rule);
+
+            let value = serde_json::to_value(&parsed).unwrap();
+            assert_eq!(value["titleGeneration"], json);
+        }
+    }
+
+    // An old config.json with no `session` section upgrades cleanly.
+    #[test]
+    fn app_settings_missing_session_section_uses_default() {
+        let mut value = serde_json::to_value(AppSettings {
+            general: GeneralSettings {
+                theme: Theme::System,
+                theme_color: ThemeColor::System,
+                language: Language::ZhCN,
+                auto_scroll: true,
+                sidebar_vibrancy: true,
+                shortcuts: ShortcutConfig {
+                    send_message: "Enter".to_string(),
+                    new_line: "Shift+Enter".to_string(),
+                    switch_model: None,
+                },
+            },
+            mcp: MCPSettings {
+                servers: Vec::new(),
+            },
+            account: AccountSettings {
+                user: None,
+                is_logged_in: false,
+            },
+            translation: TranslationSettings {
+                session_id: None,
+                agent_id: None,
+            },
+            quick_tools: QuickToolsSettings::default(),
+            skills: SkillSettings::default(),
+            agent: AgentSettings::default(),
+            quick_action: QuickActionSettings::default(),
+            session: SessionSettings::default(),
+        })
+        .unwrap();
+        value.as_object_mut().unwrap().remove("session");
+
+        let parsed: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            parsed.session.title_generation,
+            TitleGenerationRule::FirstMessage
         );
     }
 

@@ -13,10 +13,12 @@ import type {
   InstantiateAgentSessionRequest,
 } from "../types";
 import type { McpServerConfig } from "../types/llm";
-import type { AgentSessionField } from "../api/agentSession";
+import type { AgentSessionField, TitleScope } from "../api/agentSession";
+import type { TitleGenerationRule } from "../types/settings";
 import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
 import { agentState } from "./agent.svelte";
+import { settingsState } from "./settings.svelte";
 
 let sessions = $state<AgentSession[]>([]);
 let currentSession = $state<AgentSession | null>(null);
@@ -26,12 +28,27 @@ let isLoading = $state(false);
 // failure to allow a retry).
 const autoTitledSessions = new Set<string>();
 
+// Session ids the user renamed by hand. Under the "every message" rule their
+// title is left alone. In-memory only: after a restart such a session resumes
+// auto-titling, which is what that rule promises.
+const manuallyRenamedSessions = new Set<string>();
+
+/** Falls back to the historical behaviour while settings are still loading. */
+function titleGenerationRule(): TitleGenerationRule {
+  return settingsState.settings?.session?.titleGeneration ?? "firstMessage";
+}
+
 /**
- * Auto-generate a title after a session's first run, only when: it is the
- * first run, no auto-generation happened yet, and the current name still
- * equals the source agent's default name (i.e. the user has not renamed it).
+ * Auto-generate a title after a run, per the `session.titleGeneration` rule:
+ *
+ * - `off`: never.
+ * - `firstMessage`: once, after the first run, and only while the name still
+ *   equals the source agent's default name (i.e. the user has not renamed it).
+ * - `everyMessage`: after every run, re-titled from the conversation so far,
+ *   unless the user renamed the session by hand.
+ *
  * Runs in the background and fails silently — the user can always generate
- * manually via the context menu. A manually set title is never overwritten.
+ * manually via the context menu.
  */
 async function maybeAutoGenerateTitle(
   id: string,
@@ -39,17 +56,28 @@ async function maybeAutoGenerateTitle(
   currentName: string,
   agentDefinitionId?: string,
 ): Promise<void> {
-  if (!wasFirstRun || autoTitledSessions.has(id)) return;
-  const agent = agentDefinitionId
-    ? agentState.agents.find((a) => a.id === agentDefinitionId)
-    : undefined;
-  // Source agent unresolvable (missing / dangling agentDefinitionId), or the
-  // name is no longer the default: do not auto-rename.
-  if (!agent || agent.name !== currentName) return;
+  const rule = titleGenerationRule();
+  if (rule === "off") return;
+
+  let scope: TitleScope = "firstMessage";
+  if (rule === "firstMessage") {
+    if (!wasFirstRun || autoTitledSessions.has(id)) return;
+    const agent = agentDefinitionId
+      ? agentState.agents.find((a) => a.id === agentDefinitionId)
+      : undefined;
+    // Source agent unresolvable (missing / dangling agentDefinitionId), or the
+    // name is no longer the default: do not auto-rename.
+    if (!agent || agent.name !== currentName) return;
+  } else {
+    if (manuallyRenamedSessions.has(id)) return;
+    // A single message can only be read as the whole conversation, so the
+    // first run stays on the cheaper first-message prompt.
+    scope = wasFirstRun ? "firstMessage" : "conversation";
+  }
 
   autoTitledSessions.add(id);
   try {
-    await agentSessionActions.generateTitle(id);
+    await agentSessionActions.generateTitle(id, scope);
   } catch (error) {
     autoTitledSessions.delete(id);
     console.warn("Auto title generation failed:", error);
@@ -171,8 +199,10 @@ export const agentSessionActions = {
     return updated;
   },
 
+  /** Manual rename: also opts the session out of "every message" auto-titling. */
   async renameSession(id: UUID, name: string): Promise<void> {
     const updated = await agentSessionApi.renameAgentSession(id, name);
+    manuallyRenamedSessions.add(id);
     const index = sessions.findIndex((session) => session.id === id);
     if (index !== -1) {
       sessions[index] = updated;
@@ -188,8 +218,8 @@ export const agentSessionActions = {
    * propagate so callers decide whether to notify (auto path stays silent,
    * manual path may toast).
    */
-  async generateTitle(id: UUID): Promise<AgentSession> {
-    const updated = await agentSessionApi.generateAgentSessionTitle(id);
+  async generateTitle(id: UUID, scope?: TitleScope): Promise<AgentSession> {
+    const updated = await agentSessionApi.generateAgentSessionTitle(id, scope);
     const index = sessions.findIndex((session) => session.id === id);
     if (index !== -1) {
       sessions[index] = updated;
@@ -312,7 +342,12 @@ export const agentSessionActions = {
       }
       // Auto-generate a title after the first run (background, silent on
       // failure, never overwrites a manual title).
-      void maybeAutoGenerateTitle(id, wasFirstRun, updated.name, agentDefinitionId);
+      void maybeAutoGenerateTitle(
+        id,
+        wasFirstRun,
+        updated.name,
+        agentDefinitionId,
+      );
     } catch (error) {
       if (normalizeError(error).code === "NOT_FOUND") {
         // Session deleted while refreshing (abort-closed raced the delete IPC):

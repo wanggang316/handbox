@@ -174,20 +174,25 @@ pub async fn agent_session_rename(
     Ok(session)
 }
 
-/// Generates a session title: one LLM completion over the first user message,
-/// using the session's own model/provider, then the same persistence path as
-/// rename (SQLite name + JSONL label + overlaid return). Shared by the automatic
-/// (after the first message) and manual (context menu) paths.
+/// Generates a session title: one LLM completion using the session's own
+/// model/provider, then the same persistence path as rename (SQLite name +
+/// JSONL label + overlaid return). Shared by the automatic (per the
+/// `session.titleGeneration` rule) and manual (context menu) paths.
+///
+/// `scope` picks the source text — the first user message (default) or the
+/// conversation so far, for re-titling a session as its topic evolves.
 ///
 /// Failures (no provider/model, no user message, model error / empty result)
 /// return an AppError; the frontend surfaces it and does **not** rename.
 #[tauri::command]
 pub async fn agent_session_generate_title(
     session_id: UUID,
+    scope: Option<title_gen::TitleScope>,
     app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
     provider_service: State<'_, ProviderService>,
 ) -> Result<AgentSession, AppError> {
+    let scope = scope.unwrap_or_default();
     let session = agent_session_service.get_session(session_id.clone()).await?;
     let provider_id = session
         .provider_id
@@ -199,15 +204,26 @@ pub async fn agent_session_generate_title(
         .ok_or_else(|| AppError::validation_error("会话未选择模型，无法生成标题"))?;
     let provider = provider_service.get_provider(&provider_id).await?;
 
-    // First user message text (the JSONL is the transcript authority).
+    // User message text (the JSONL is the transcript authority). Messages
+    // carrying no text at all (image-only turns) are skipped rather than
+    // aborting the whole generation.
     let app_data_dir = resolve_app_data_dir(&app_handle)?;
     let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
-    let source_text = agent_jsonl_store::load_transcript(&app_data_dir, &cwd, &session.id)?
-        .unwrap_or_default()
-        .into_iter()
-        .find(|m| m.role == "user")
-        .and_then(|m| extract_user_text(&m.payload))
-        .ok_or_else(|| AppError::validation_error("该会话还没有可用于生成标题的消息"))?;
+    let user_texts: Vec<String> =
+        agent_jsonl_store::load_transcript(&app_data_dir, &cwd, &session.id)?
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|m| m.role == "user")
+            .filter_map(|m| extract_user_text(&m.payload))
+            .collect();
+    let source_text = match scope {
+        title_gen::TitleScope::FirstMessage => user_texts.into_iter().next(),
+        title_gen::TitleScope::Conversation => {
+            let joined = build_conversation_source(user_texts);
+            (!joined.is_empty()).then_some(joined)
+        }
+    }
+    .ok_or_else(|| AppError::validation_error("该会话还没有可用于生成标题的消息"))?;
 
     let title = title_gen::generate_title(
         &provider.provider_type,
@@ -215,6 +231,7 @@ pub async fn agent_session_generate_title(
         &provider.base_url,
         &provider.api_key,
         &source_text,
+        scope,
     )
     .await
     .map_err(|e| {
@@ -242,6 +259,20 @@ pub async fn agent_session_generate_title(
     }
     overlay_jsonl_activity(&mut session, &app_data_dir);
     Ok(session)
+}
+
+/// Trailing user messages fed to a conversation-scope title. Older turns are
+/// dropped: the recent ones decide what the session is about now, and the char
+/// cap inside `title_gen` is the final size guard.
+const MAX_CONVERSATION_MESSAGES: usize = 12;
+
+/// Joins the last [`MAX_CONVERSATION_MESSAGES`] user messages, oldest to
+/// newest, into one blank-line-separated block for a conversation-scope title.
+fn build_conversation_source(mut texts: Vec<String>) -> String {
+    if texts.len() > MAX_CONVERSATION_MESSAGES {
+        texts.drain(..texts.len() - MAX_CONVERSATION_MESSAGES);
+    }
+    texts.join("\n\n")
 }
 
 /// Extracts plain text from a persisted user-message payload (a serialized
@@ -497,6 +528,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A conversation source keeps only the newest `MAX_CONVERSATION_MESSAGES`
+    /// turns, in chronological order, separated by a blank line.
+    #[test]
+    fn conversation_source_keeps_the_newest_turns_in_order() {
+        let texts: Vec<String> = (0..MAX_CONVERSATION_MESSAGES + 3)
+            .map(|i| format!("m{i}"))
+            .collect();
+        let source = build_conversation_source(texts);
+
+        assert!(!source.contains("m2"), "the oldest turns are dropped");
+        assert!(source.starts_with("m3"), "the window starts at the cut");
+        assert!(
+            source.ends_with(&format!("m{}", MAX_CONVERSATION_MESSAGES + 2)),
+            "the newest turn is last"
+        );
+        assert_eq!(
+            source.split("\n\n").count(),
+            MAX_CONVERSATION_MESSAGES,
+            "exactly the window size survives"
+        );
+    }
+
+    /// Short conversations pass through whole; an empty transcript yields an
+    /// empty source, which the caller turns into a VALIDATION_ERROR.
+    #[test]
+    fn conversation_source_handles_short_and_empty_input() {
+        assert_eq!(
+            build_conversation_source(vec!["a".to_string(), "b".to_string()]),
+            "a\n\nb"
+        );
+        assert_eq!(build_conversation_source(Vec::new()), "");
     }
 
     /// The other field mappings — thinkingLevel / enabledTools / workingDir /

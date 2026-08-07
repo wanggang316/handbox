@@ -84,14 +84,22 @@ export async function renameAgentSession(
   return apiCall<AgentSession>("agent_session_rename", { sessionId, name });
 }
 
+/** What a generated title is distilled from (backend `TitleScope`). */
+export type TitleScope = "firstMessage" | "conversation";
+
 /**
- * One-shot LLM completion over the first user message, using the session's own
- * model/provider; the backend persists the new name.
+ * One-shot LLM completion using the session's own model/provider; the backend
+ * persists the new name. `scope` picks the source text — the first user message
+ * (default) or the conversation so far, for re-titling an evolving session.
  */
 export async function generateAgentSessionTitle(
   sessionId: UUID,
+  scope?: TitleScope,
 ): Promise<AgentSession> {
-  return apiCall<AgentSession>("agent_session_generate_title", { sessionId });
+  return apiCall<AgentSession>("agent_session_generate_title", {
+    sessionId,
+    scope,
+  });
 }
 
 /** Field names accepted by `agent_session_update_field` (matched verbatim by the backend). */

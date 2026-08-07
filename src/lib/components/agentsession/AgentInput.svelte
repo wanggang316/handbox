@@ -639,7 +639,7 @@
 
 <!-- Working-dir picker above the composer; shown unless workingDirMode is "none". -->
 {#if showWorkingDir}
-  <div class="mx-auto flex w-full max-w-[800px] pb-1">
+  <div class="flex w-full pb-1">
     <button
       type="button"
       class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-base-content/55 hover:bg-base-300/50 hover:text-base-content transition-colors"
@@ -660,7 +660,7 @@
 {/if}
 
 <div
-  class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] mx-auto w-full max-w-[800px]"
+  class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] w-full"
 >
   <!-- Relative container anchors the popover, which opens upward (bottom-full) to stay on-screen. -->
   <div class="relative">

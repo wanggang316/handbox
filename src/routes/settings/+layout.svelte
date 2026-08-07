@@ -19,7 +19,8 @@
   }
 </script>
 
-<div class="flex h-screen bg-[color:var(--bg-page)]">
+<!-- bg-sidebar: opaque --bg-page normally, transparent under macOS vibrancy -->
+<div class="flex h-screen bg-[color:var(--bg-sidebar)]">
   <TitleBar sidebarOpen={false} showToggleButton={false} onToggle={handleToggle} />
 
   <div class="my-2 ml-2 w-56">

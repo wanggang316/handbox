@@ -61,6 +61,10 @@
       uiState.setTheme("system");
     }
 
+    // Apply the persisted vibrancy snapshot to <html> (the constructor only
+    // loads state); the authoritative backend value backfills below.
+    uiState.setSidebarVibrancy(uiState.sidebarVibrancy);
+
     // Only sync the already-initialized language to document.lang here. Never
     // write localStorage from this startup snapshot — the backend backfill below
     // is the sole passive writer; otherwise multi-window reloads overwrite each
@@ -120,6 +124,10 @@
         const lang = settingsState.settings?.general.language;
         if (lang && allowedLanguages.has(lang)) {
           uiState.setLanguage(lang);
+        }
+        const vibrancy = settingsState.settings?.general.sidebarVibrancy;
+        if (typeof vibrancy === "boolean") {
+          uiState.setSidebarVibrancy(vibrancy);
         }
       })
       .catch((error) => {

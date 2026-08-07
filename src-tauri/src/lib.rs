@@ -82,6 +82,24 @@ pub fn run() {
                 // thread because to_panel relies on the quick_action window
                 // pre-declared in tauri.conf.json.
                 crate::services::selection::quick_action_panel::init_panel(app.handle());
+
+                // Sidebar vibrancy: a behind-window NSVisualEffectView spanning the
+                // whole (transparent) main window. The frontend keeps the content
+                // card opaque, so only the sidebar column reads as translucent, and
+                // it paints the sidebar opaque too when `general.sidebarVibrancy`
+                // is off — the view is harmless behind opaque backgrounds, so it is
+                // applied unconditionally here (settings are not yet loaded).
+                if let Some(window) = app.get_webview_window("main") {
+                    if let Err(e) = window_vibrancy::apply_vibrancy(
+                        &window,
+                        window_vibrancy::NSVisualEffectMaterial::Sidebar,
+                        None,
+                        None,
+                    ) {
+                        tracing::warn!("Failed to apply sidebar vibrancy: {e}");
+                    }
+
+                }
             }
 
             let app_handle = app.handle().clone();
