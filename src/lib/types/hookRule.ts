@@ -100,7 +100,13 @@ export interface HookRuleNotification {
   ruleId: string;
   ruleName: string;
   action: HookAction;
+  /** Which lifecycle point fired — placement in the timeline follows it. */
+  event: HookEvent;
   toolName: string;
+  /** Tool call this firing belongs to; null for prompt rules. */
+  callId: string | null;
   outcome: HookRuleOutcome;
   message: string | null;
+  /** A command's execution capture: command line, exit status, output. */
+  detail: string | null;
 }

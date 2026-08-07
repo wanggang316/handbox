@@ -25,7 +25,7 @@ use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
 };
 
-use crate::services::hook_command::{run_hook_command, CommandSpec, CommandVerdict};
+use crate::services::hook_command::{run_hook_command, CommandRun, CommandSpec, CommandVerdict};
 use crate::storage::types::{
     HookAction, HookEvent, HookRule, MatchSubject, DEFAULT_HOOK_COMMAND_TIMEOUT_MS,
 };
@@ -35,8 +35,9 @@ const RULE_EXTENSION_NAME: &str = "handbox-hook-rules";
 /// Tauri event emitted whenever a rule matches — not only for the `notify`
 /// action. A rule that silently changes what the agent may do is worse than no
 /// rule: the user cannot tell "no rule matched" from "a rule fired and I missed
-/// it". Carries `{ sessionId, ruleId, ruleName, action, toolName, outcome,
-/// message }`.
+/// it". Carries `{ sessionId, ruleId, ruleName, action, event, toolName,
+/// callId, outcome, message, detail }` — `callId` lets the timeline attach the
+/// entry to its tool card, `detail` is a command's execution capture.
 pub const HOOK_RULE_NOTIFY_EVENT: &str = "agent_hook_rule_notify";
 
 /// What actually happened, for the notification payload. Distinct from the
@@ -154,15 +155,18 @@ impl RuleHookExtension {
         event_name: &str,
         tool_name: &str,
         payload: F,
-    ) -> CommandVerdict
+    ) -> CommandRun
     where
         F: FnOnce() -> serde_json::Value,
     {
         let Some(command) = rule.command.as_deref().filter(|c| !c.trim().is_empty()) else {
-            return CommandVerdict::Deny(format!(
-                "hook rule \"{}\" is set to run a command but has none",
-                rule.name
-            ));
+            return CommandRun {
+                verdict: CommandVerdict::Deny(format!(
+                    "hook rule \"{}\" is set to run a command but has none",
+                    rule.name
+                )),
+                detail: None,
+            };
         };
 
         let timeout = Duration::from_millis(
@@ -198,7 +202,17 @@ impl RuleHookExtension {
     /// waves through a tool call leaves the user unable to tell it apart from no
     /// rule matching at all. The log line carries the same facts for the
     /// headless paths, which have no emitter.
-    fn report(&self, rule: &HookRule, tool_name: &str, outcome: &str) {
+    ///
+    /// `call_id` ties a tool-call firing to its card in the timeline (`None`
+    /// for prompt rules); `detail` is a command's execution capture.
+    fn report(
+        &self,
+        rule: &HookRule,
+        tool_name: &str,
+        outcome: &str,
+        call_id: Option<&str>,
+        detail: Option<&str>,
+    ) {
         tracing::info!(
             rule = %rule.name,
             rule_id = %rule.id,
@@ -214,9 +228,12 @@ impl RuleHookExtension {
                 "ruleId": rule.id,
                 "ruleName": rule.name,
                 "action": rule.action,
+                "event": rule.event,
                 "toolName": tool_name,
+                "callId": call_id,
                 "outcome": outcome,
                 "message": rule.message,
+                "detail": detail,
             }));
         }
     }
@@ -247,11 +264,11 @@ impl Extension for RuleHookExtension {
 
         match rule.action {
             HookAction::Notify => {
-                self.report(rule, SUBJECT, outcome::OBSERVED);
+                self.report(rule, SUBJECT, outcome::OBSERVED, None, None);
                 Ok(UserMessageOutcome::cont())
             }
             HookAction::RunCommand => {
-                let verdict = self
+                let run = self
                     .run_command(rule, "user_prompt_submit", SUBJECT, || {
                         serde_json::json!({
                             "event": "user_prompt_submit",
@@ -262,8 +279,9 @@ impl Extension for RuleHookExtension {
                         })
                     })
                     .await;
+                let detail = run.detail.as_deref();
 
-                match verdict {
+                match run.verdict {
                     // The command's non-decision output becomes context the
                     // model reads for this turn. Upstream attributes it to this
                     // extension and records it as its own message, so it never
@@ -277,6 +295,8 @@ impl Extension for RuleHookExtension {
                             } else {
                                 outcome::RAN
                             },
+                            None,
+                            detail,
                         );
                         Ok(match context {
                             Some(text) => UserMessageOutcome::context(text),
@@ -284,14 +304,14 @@ impl Extension for RuleHookExtension {
                         })
                     }
                     CommandVerdict::Deny(reason) => {
-                        self.report(rule, SUBJECT, outcome::DENIED);
+                        self.report(rule, SUBJECT, outcome::DENIED, None, detail);
                         Ok(HookDecision::Cancel(reason).into())
                     }
                     // Upstream expects a JSON *string* here, not an object: the
                     // replacement is the prompt text itself.
                     CommandVerdict::ReplaceInput(value) => match value.get("prompt") {
                         Some(serde_json::Value::String(text)) => {
-                            self.report(rule, SUBJECT, outcome::REWROTE);
+                            self.report(rule, SUBJECT, outcome::REWROTE, None, detail);
                             Ok(
                                 HookDecision::Replace(serde_json::Value::String(text.clone()))
                                     .into(),
@@ -301,7 +321,7 @@ impl Extension for RuleHookExtension {
                         // dropped by the host anyway; treat it as no opinion
                         // rather than silently mangling the turn.
                         _ => {
-                            self.report(rule, SUBJECT, outcome::RAN);
+                            self.report(rule, SUBJECT, outcome::RAN, None, detail);
                             Ok(UserMessageOutcome::cont())
                         }
                     },
@@ -325,36 +345,46 @@ impl Extension for RuleHookExtension {
 
         match rule.action {
             HookAction::Notify => {
-                self.report(rule, &event.tool_name, outcome::OBSERVED);
+                self.report(
+                    rule,
+                    &event.tool_name,
+                    outcome::OBSERVED,
+                    Some(&event.call_id),
+                    None,
+                );
                 Ok(HookDecision::Continue)
             }
             HookAction::RunCommand => {
-                let verdict = self.run_command(rule, "before_tool_call", &event.tool_name, || {
-                    serde_json::json!({
-                        "event": "before_tool_call",
-                        "sessionId": self.session_id,
-                        "ruleId": rule.id,
-                        "ruleName": rule.name,
-                        "toolName": event.tool_name,
-                        "callId": event.call_id,
-                        "arguments": event.arguments,
+                let run = self
+                    .run_command(rule, "before_tool_call", &event.tool_name, || {
+                        serde_json::json!({
+                            "event": "before_tool_call",
+                            "sessionId": self.session_id,
+                            "ruleId": rule.id,
+                            "ruleName": rule.name,
+                            "toolName": event.tool_name,
+                            "callId": event.call_id,
+                            "arguments": event.arguments,
+                        })
                     })
-                });
+                    .await;
+                let detail = run.detail.as_deref();
+                let call_id = Some(event.call_id.as_str());
 
-                match verdict.await {
+                match run.verdict {
                     // A tool-call hook has no context channel upstream, so any
                     // text the command printed is dropped rather than smuggled
                     // somewhere it does not belong.
                     CommandVerdict::Proceed { .. } => {
-                        self.report(rule, &event.tool_name, outcome::RAN);
+                        self.report(rule, &event.tool_name, outcome::RAN, call_id, detail);
                         Ok(HookDecision::Continue)
                     }
                     CommandVerdict::Deny(reason) => {
-                        self.report(rule, &event.tool_name, outcome::DENIED);
+                        self.report(rule, &event.tool_name, outcome::DENIED, call_id, detail);
                         Ok(HookDecision::Cancel(reason))
                     }
                     CommandVerdict::ReplaceInput(args) => {
-                        self.report(rule, &event.tool_name, outcome::REWROTE);
+                        self.report(rule, &event.tool_name, outcome::REWROTE, call_id, detail);
                         Ok(HookDecision::Replace(args))
                     }
                 }
@@ -379,14 +409,20 @@ impl Extension for RuleHookExtension {
 
         match rule.action {
             HookAction::Notify => {
-                self.report(rule, &event.tool_name, outcome::OBSERVED);
+                self.report(
+                    rule,
+                    &event.tool_name,
+                    outcome::OBSERVED,
+                    Some(&event.call_id),
+                    None,
+                );
                 Ok(ResultDecision::Continue)
             }
             HookAction::RunCommand => {
                 // The call already ran, so a verdict cannot undo it. The command
                 // runs for its side effect — format the file just written, commit,
                 // notify — and a failure is reported, not enforced.
-                let verdict = self
+                let run = self
                     .run_command(rule, "after_tool_call", &event.tool_name, || {
                         serde_json::json!({
                             "event": "after_tool_call",
@@ -400,23 +436,25 @@ impl Extension for RuleHookExtension {
                         })
                     })
                     .await;
+                let detail = run.detail.as_deref();
+                let call_id = Some(event.call_id.as_str());
 
-                match verdict {
+                match run.verdict {
                     // A `Replace` here rewrites what the model reads AND what
                     // the transcript records, which is what makes redaction
                     // actually redact rather than just hide.
                     CommandVerdict::ReplaceInput(result) => {
-                        self.report(rule, &event.tool_name, outcome::REWROTE);
+                        self.report(rule, &event.tool_name, outcome::REWROTE, call_id, detail);
                         Ok(ResultDecision::Replace(result))
                     }
                     // The call already ran, so a denial cannot undo it; it is
                     // reported and the result stands.
                     CommandVerdict::Deny(_) => {
-                        self.report(rule, &event.tool_name, outcome::FAILED);
+                        self.report(rule, &event.tool_name, outcome::FAILED, call_id, detail);
                         Ok(ResultDecision::Continue)
                     }
                     CommandVerdict::Proceed { .. } => {
-                        self.report(rule, &event.tool_name, outcome::RAN);
+                        self.report(rule, &event.tool_name, outcome::RAN, call_id, detail);
                         Ok(ResultDecision::Continue)
                     }
                 }
@@ -579,6 +617,16 @@ mod tests {
         assert_eq!(events[0]["outcome"], "denied");
         assert_eq!(events[0]["ruleName"], "block rm");
         assert_eq!(events[0]["toolName"], "bash");
+        assert_eq!(
+            events[0]["callId"], "call-bash",
+            "the notice must name the call so the timeline can attach it"
+        );
+        assert_eq!(events[0]["event"], "before_tool_call");
+        let detail = events[0]["detail"].as_str().expect("execution capture");
+        assert!(
+            detail.contains("$ echo") && detail.contains("[exit 0]"),
+            "detail should show the command and its exit status, got: {detail}"
+        );
     }
 
     /// A call no rule matched stays silent, or every tool call would toast.

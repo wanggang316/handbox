@@ -7,7 +7,7 @@
     AgentMessage,
     ToolResultContent,
   } from "$lib/types/agentSession";
-  import { Webhook } from "@lucide/svelte";
+  import { Anchor, ChevronDown } from "@lucide/svelte";
   import AgentThinkingBlock from "./AgentThinkingBlock.svelte";
   import AgentToolCallCard from "./AgentToolCallCard.svelte";
   import HtmlCard from "./HtmlCard.svelte";
@@ -114,10 +114,24 @@
     );
   }
 
-  // Hook-rule firings render inline where they happened: entries anchored to
-  // message index i appear right after that message (-1 = before the first).
+  // Hook-rule firings render inline where they happened. Firings that carry a
+  // callId attach to that tool card (before-hooks above it, after-hooks below);
+  // the rest (prompt rules) anchor by message index: entries anchored to index
+  // i appear right after that message (-1 = before the first).
   function hookNoticesAfter(anchor: number) {
-    return runState.hookNotices.filter((entry) => entry.anchor === anchor);
+    return runState.hookNotices.filter(
+      (entry) => entry.notice.callId === null && entry.anchor === anchor,
+    );
+  }
+
+  function hookNoticesForCall(
+    callId: string,
+    event: "before_tool_call" | "after_tool_call",
+  ) {
+    return runState.hookNotices.filter(
+      (entry) =>
+        entry.notice.callId === callId && entry.notice.event === event,
+    );
   }
 
   // The notice line reuses the settings-page notice strings; the rule's own
@@ -214,15 +228,33 @@
 </script>
 
 {#snippet hookNoticeRow(notice: HookRuleNotification)}
-  <div
-    class="flex items-center gap-2 px-3 py-1.5 text-xs {notice.outcome ===
-      'denied' || notice.outcome === 'failed'
-      ? 'text-warning'
-      : 'text-base-content/60'}"
-  >
-    <Webhook size={12} class="shrink-0" />
-    <span class="break-words">{hookNoticeText(notice)}</span>
-  </div>
+  {@const tone =
+    notice.outcome === "denied" || notice.outcome === "failed"
+      ? "text-warning"
+      : "text-base-content/60"}
+  {#if notice.detail}
+    <!-- A command firing carries its execution capture; a native disclosure
+         keeps the row one line until the user asks for the output. -->
+    <details class="hook-notice group px-3 py-1.5">
+      <summary
+        class="flex cursor-pointer list-none items-center gap-2 text-xs {tone}"
+      >
+        <Anchor size={12} class="shrink-0" />
+        <span class="break-words">{hookNoticeText(notice)}</span>
+        <ChevronDown
+          size={12}
+          class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <pre
+        class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{notice.detail}</pre>
+    </details>
+  {:else}
+    <div class="flex items-center gap-2 px-3 py-1.5 text-xs {tone}">
+      <Anchor size={12} class="shrink-0" />
+      <span class="break-words">{hookNoticeText(notice)}</span>
+    </div>
+  {/if}
 {/snippet}
 
 <!-- The message stream is content: bubbles, markdown replies, tool-card bodies
@@ -286,6 +318,11 @@
             {#if assistantToolCalls(message).length}
               <div class="mt-2 space-y-2">
                 {#each assistantToolCalls(message) as block (block.id)}
+                  <!-- A before-hook fires before its call runs, so it reads
+                       above the card; an after-hook reads below it. -->
+                  {#each hookNoticesForCall(block.id, "before_tool_call") as entry}
+                    {@render hookNoticeRow(entry.notice)}
+                  {/each}
                   {#if block.name === RENDER_CARD_TOOL_NAME}
                     <!-- render_card is purely presentational: its arguments are
                          the card, so it renders as an inline sandbox card
@@ -302,6 +339,9 @@
                   {:else}
                     <AgentToolCallCard toolCall={toolCallView(block)} />
                   {/if}
+                  {#each hookNoticesForCall(block.id, "after_tool_call") as entry}
+                    {@render hookNoticeRow(entry.notice)}
+                  {/each}
                 {/each}
               </div>
             {/if}
@@ -406,6 +446,12 @@
 </div>
 
 <style>
+  /* WebKit draws its own disclosure marker on <summary>; the row supplies its
+     own chevron instead. */
+  .hook-notice summary::-webkit-details-marker {
+    display: none;
+  }
+
   .overflow-y-auto::-webkit-scrollbar {
     width: 6px;
   }

@@ -34,6 +34,11 @@ use tokio::io::AsyncWriteExt;
 /// into memory; the decision JSON is tiny and anything past this is diagnostics.
 const MAX_CAPTURED_OUTPUT: usize = 64 * 1024;
 
+/// Cap on the human-readable execution capture that rides on the notify event.
+/// Enough to read what a formatter or linter printed; a full log does not
+/// belong in an event payload.
+const MAX_DETAIL: usize = 4 * 1024;
+
 /// What the command told us to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandVerdict {
@@ -50,6 +55,25 @@ impl CommandVerdict {
     /// Proceed with nothing to add — the common case.
     pub fn proceed() -> Self {
         Self::Proceed { context: None }
+    }
+}
+
+/// A finished hook-command run: the verdict plus what observably happened —
+/// the command line, exit status, and captured output — so the UI can show
+/// *what the hook did*, not only how it voted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandRun {
+    pub verdict: CommandVerdict,
+    /// Human-readable execution capture; `None` only when nothing ran at all.
+    pub detail: Option<String>,
+}
+
+impl CommandRun {
+    fn deny(reason: String, detail: String) -> Self {
+        Self {
+            verdict: CommandVerdict::Deny(reason),
+            detail: Some(detail),
+        }
     }
 }
 
@@ -85,7 +109,7 @@ pub struct CommandSpec<'a> {
 /// Never returns an error: a hook that cannot be spawned, times out, or exits
 /// non-zero produces a [`CommandVerdict::Deny`] with the reason. The caller
 /// decides whether a deny is binding — after a tool call it no longer is.
-pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) -> CommandVerdict {
+pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) -> CommandRun {
     let payload = event.to_string();
 
     // `sh -c` because the field holds a command LINE — pipes and redirects are
@@ -103,7 +127,12 @@ pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) 
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(e) => return CommandVerdict::Deny(format!("hook command failed to start: {e}")),
+        Err(e) => {
+            return CommandRun::deny(
+                format!("hook command failed to start: {e}"),
+                format!("$ {}\n[failed to start] {e}", spec.command),
+            )
+        }
     };
 
     if let Some(mut stdin) = child.stdin.take() {
@@ -115,27 +144,71 @@ pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) 
 
     let output = match tokio::time::timeout(spec.timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
-        Ok(Err(e)) => return CommandVerdict::Deny(format!("hook command failed: {e}")),
+        Ok(Err(e)) => {
+            return CommandRun::deny(
+                format!("hook command failed: {e}"),
+                format!("$ {}\n[failed] {e}", spec.command),
+            )
+        }
         Err(_) => {
-            return CommandVerdict::Deny(format!(
-                "hook command timed out after {}ms",
-                spec.timeout.as_millis()
-            ))
+            let ms = spec.timeout.as_millis();
+            return CommandRun::deny(
+                format!("hook command timed out after {ms}ms"),
+                format!("$ {}\n[timed out after {ms}ms]", spec.command),
+            );
         }
     };
 
     let stdout = truncate(&output.stdout);
     let stderr = truncate(&output.stderr);
+    let detail = describe_run(spec.command, output.status.code(), &stdout, &stderr);
 
     if !output.status.success() {
         // stderr is the conventional place for the reason; fall back to
         // something identifiable so the model never sees an empty refusal.
         let reason = first_non_empty(&[&stderr, &stdout])
             .unwrap_or_else(|| "hook command exited non-zero".to_string());
-        return CommandVerdict::Deny(reason);
+        return CommandRun::deny(reason, detail);
     }
 
-    parse_verdict(&stdout)
+    CommandRun {
+        verdict: parse_verdict(&stdout),
+        detail: Some(detail),
+    }
+}
+
+/// The execution capture shown to the user: command line, exit status, and
+/// trimmed output, with stderr labeled so the two streams stay tellable apart.
+fn describe_run(command: &str, code: Option<i32>, stdout: &str, stderr: &str) -> String {
+    let mut out = format!("$ {command}\n");
+    match code {
+        Some(code) => out.push_str(&format!("[exit {code}]")),
+        None => out.push_str("[killed by signal]"),
+    }
+
+    let so = stdout.trim();
+    let se = stderr.trim();
+    if so.is_empty() && se.is_empty() {
+        out.push_str(" (no output)");
+    }
+    if !so.is_empty() {
+        out.push('\n');
+        out.push_str(so);
+    }
+    if !se.is_empty() {
+        out.push_str("\n[stderr]\n");
+        out.push_str(se);
+    }
+
+    if out.len() > MAX_DETAIL {
+        let mut end = MAX_DETAIL;
+        while !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+        out.push_str("\n[truncated]");
+    }
+    out
 }
 
 /// Interpret stdout. Anything that is not a recognised decision means "no
@@ -219,7 +292,9 @@ mod tests {
     #[tokio::test]
     async fn a_silent_command_proceeds() {
         let dir = TempDir::new().unwrap();
-        let verdict = run_hook_command(spec("true", dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec("true", dir.path()), &json!({}))
+            .await
+            .verdict;
         assert_eq!(verdict, CommandVerdict::proceed());
     }
 
@@ -230,7 +305,9 @@ mod tests {
         let marker = dir.path().join("ran.txt");
         let command = format!("echo done > {}", marker.display());
 
-        let verdict = run_hook_command(spec(&command, dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec(&command, dir.path()), &json!({}))
+            .await
+            .verdict;
 
         assert_eq!(verdict, CommandVerdict::proceed());
         assert!(marker.exists(), "the command's side effect must happen");
@@ -260,7 +337,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let command = r#"echo '{"decision":"deny","reason":"not on main"}'"#;
 
-        let verdict = run_hook_command(spec(command, dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec(command, dir.path()), &json!({}))
+            .await
+            .verdict;
 
         assert_eq!(verdict, CommandVerdict::Deny("not on main".to_string()));
     }
@@ -270,7 +349,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let command = r#"echo '{"updatedInput":{"command":"ls -la"}}'"#;
 
-        let verdict = run_hook_command(spec(command, dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec(command, dir.path()), &json!({}))
+            .await
+            .verdict;
 
         assert_eq!(
             verdict,
@@ -284,7 +365,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let command = "echo 'refused by policy' >&2; exit 1";
 
-        let verdict = run_hook_command(spec(command, dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec(command, dir.path()), &json!({}))
+            .await
+            .verdict;
 
         match verdict {
             CommandVerdict::Deny(reason) => assert!(
@@ -300,7 +383,9 @@ mod tests {
     #[tokio::test]
     async fn non_json_output_becomes_context_not_a_decision() {
         let dir = TempDir::new().unwrap();
-        let verdict = run_hook_command(spec("echo formatting done", dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec("echo formatting done", dir.path()), &json!({}))
+            .await
+            .verdict;
         assert_eq!(
             verdict,
             CommandVerdict::Proceed {
@@ -316,7 +401,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let command = r#"echo '{"additionalContext":"on branch main, 3 files dirty"}'"#;
 
-        let verdict = run_hook_command(spec(command, dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec(command, dir.path()), &json!({}))
+            .await
+            .verdict;
 
         assert_eq!(
             verdict,
@@ -333,7 +420,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let command = r#"echo '{"updatedInput":{"command":"ls"}}'"#;
 
-        let verdict = run_hook_command(spec(command, dir.path()), &json!({})).await;
+        let verdict = run_hook_command(spec(command, dir.path()), &json!({}))
+            .await
+            .verdict;
 
         assert!(matches!(verdict, CommandVerdict::ReplaceInput(_)));
     }
@@ -345,7 +434,7 @@ mod tests {
         let mut s = spec("sleep 5", dir.path());
         s.timeout = Duration::from_millis(150);
 
-        let verdict = run_hook_command(s, &json!({})).await;
+        let verdict = run_hook_command(s, &json!({})).await.verdict;
 
         match verdict {
             CommandVerdict::Deny(reason) => {
@@ -362,7 +451,8 @@ mod tests {
             spec("definitely-not-a-real-binary-xyz", dir.path()),
             &json!({}),
         )
-        .await;
+        .await
+        .verdict;
         assert!(matches!(verdict, CommandVerdict::Deny(_)));
     }
 
@@ -385,7 +475,9 @@ mod tests {
     #[tokio::test]
     async fn a_missing_working_dir_falls_back_instead_of_failing() {
         let missing = PathBuf::from("/definitely/not/here/at/all");
-        let verdict = run_hook_command(spec("true", &missing), &json!({})).await;
+        let verdict = run_hook_command(spec("true", &missing), &json!({}))
+            .await
+            .verdict;
         assert_eq!(verdict, CommandVerdict::proceed());
     }
 }
