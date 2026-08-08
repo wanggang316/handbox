@@ -13,9 +13,13 @@ export const navigationState = {
   get backTarget(): string {
     return lastMainRoute;
   },
-  /** Record the most recent route that is neither settings nor the launch page. */
-  remember(path: string): void {
-    if (path === "/" || path.startsWith("/settings")) return;
-    lastMainRoute = path;
+  /**
+   * Record the most recent route that is neither settings nor the launch page.
+   * The query string is part of the route: the open agent session lives in
+   * `?id=`, so dropping it would send "back to app" to an empty landing page.
+   */
+  remember(url: URL): void {
+    if (url.pathname === "/" || url.pathname.startsWith("/settings")) return;
+    lastMainRoute = `${url.pathname}${url.search}`;
   },
 };
