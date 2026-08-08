@@ -16,9 +16,10 @@
       {
         "label": "main",
         "title": "handbox",
-        "width": 1200,
+        "width": 1280,
         "height": 800,
-        "minWidth": 500,
+        "minWidth": 640,
+        "minHeight": 400,
         "decorations": true,
         "transparent": true,
         "titleBarStyle": "Overlay",

@@ -53,7 +53,29 @@ pub fn run() {
         // `quickAction.shortcut` is registered later in the async service-init
         // path (after SettingsService is available). No per-shortcut handler on
         // the builder — each shortcut carries its own handler via `on_shortcut`.
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // Window state: the sizes in tauri.conf.json are first-launch defaults;
+        // afterwards the main window reopens where the user left it. The panel
+        // windows are denylisted because they are repositioned per invocation
+        // (caret / cursor anchored) and must never be restored. VISIBLE is left
+        // out of the flags so a restored state cannot fight the deliberate
+        // hidden-until-first-paint startup, and FULLSCREEN because entering it
+        // on a still-hidden window is unreliable on macOS.
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .with_denylist(&[
+                    "selection_menu",
+                    "selection_content",
+                    "selection_settings",
+                    "quick_action",
+                ])
+                .build(),
+        );
 
     #[cfg(target_os = "macos")]
     {
