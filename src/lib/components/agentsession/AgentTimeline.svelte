@@ -1,3 +1,16 @@
+<script module lang="ts">
+  /**
+   * Where each session was left, keyed by session id. Module-level so it
+   * outlives the component: entering settings tears the timeline down, and the
+   * reader expects to come back to the spot they were reading.
+   *
+   * A reader parked at the end is remembered as "bottom" rather than as pixels,
+   * so a session that grew while they were away still opens at its newest turn.
+   */
+  type ScrollAnchor = "bottom" | { index: number; offset: number };
+  const scrollMemory = new Map<string, ScrollAnchor>();
+</script>
+
 <script lang="ts">
   import { tick, untrack } from "svelte";
   import { ChartNoAxesColumn, Check, Copy } from "@lucide/svelte";
@@ -257,9 +270,86 @@
   // fills in one idle chunk at a time, so the first paint costs a viewport.
   const INITIAL_WINDOW = 20;
   const FILL_CHUNK = 40;
+  // Slack for "parked at the end": sub-pixel scroll offsets and a growing last
+  // turn should still read as being at the bottom.
+  const BOTTOM_EPSILON = 24;
 
   // First rendered message index; 0 once the whole transcript is mounted.
   let windowStart = $state(0);
+
+  // Whether the reader is parked at the end. Plain `let`, not `$state`: it
+  // gates imperative scrolling and must not invalidate anything when it flips.
+  let stickToBottom = true;
+
+  // Auto-scroll (new turn, streaming text, hook notice) applies only to a
+  // reader who is already at the end — otherwise reading history mid-run, or a
+  // just-restored position, gets yanked to the bottom.
+  function pinToBottom() {
+    if (stickToBottom) {
+      scrollToBottom();
+    }
+  }
+
+  // The reader's position as a message row plus its offset from the container's
+  // top edge, which survives the older messages mounting in later — a pixel
+  // scrollTop would not.
+  function readAnchor(): ScrollAnchor {
+    const el = messagesContainer;
+    if (!el) return "bottom";
+    if (el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_EPSILON) {
+      return "bottom";
+    }
+    const top = el.getBoundingClientRect().top;
+    for (const row of el.querySelectorAll<HTMLElement>("[data-message-index]")) {
+      const box = row.getBoundingClientRect();
+      // First row still visible: the one straddling the top edge, so its offset
+      // is negative and restoring reproduces the same partial row.
+      if (box.bottom > top) {
+        return {
+          index: Number(row.dataset.messageIndex),
+          offset: box.top - top,
+        };
+      }
+    }
+    return "bottom";
+  }
+
+  function restoreAnchor(anchor: ScrollAnchor) {
+    const el = messagesContainer;
+    if (!el) return;
+    if (anchor === "bottom") {
+      scrollToBottom();
+      return;
+    }
+    const row = el.querySelector<HTMLElement>(
+      `[data-message-index="${anchor.index}"]`,
+    );
+    if (!row) {
+      // The remembered row is gone (transcript compacted, session cleared).
+      scrollToBottom();
+      return;
+    }
+    el.scrollTop +=
+      row.getBoundingClientRect().top -
+      el.getBoundingClientRect().top -
+      anchor.offset;
+  }
+
+  let scrollFrame = 0;
+
+  // rAF-throttled: scroll fires far more often than the memory needs updating,
+  // and reading layout on every event would trade one jank for another.
+  function handleScroll() {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      const anchor = readAnchor();
+      stickToBottom = anchor === "bottom";
+      scrollMemory.set(sessionId, anchor);
+    });
+  }
+
+  $effect(() => () => cancelAnimationFrame(scrollFrame));
 
   const visibleMessages = $derived(
     windowStart > 0 ? runState.messages.slice(windowStart) : runState.messages,
@@ -280,13 +370,22 @@
   // synchronously inside the caller's effect, and reading the rune there would
   // make the effect depend on the very state this loop writes — a reset/refill
   // cycle that never lands on 0.
-  async function fillWindow(cancelled: () => boolean, from: number) {
-    let start = from;
-    // The tail is what the reader should be looking at, and every chunk below
-    // measures its offset against the bottom — so settle there before filling.
+  async function openWindow(
+    cancelled: () => boolean,
+    total: number,
+    anchor: ScrollAnchor,
+  ) {
+    const tailStart = Math.max(0, total - INITIAL_WINDOW);
+    // Mount down from the remembered row when there is one: a position in the
+    // middle of the transcript only means something once that row exists.
+    let start = anchor === "bottom" ? tailStart : Math.min(anchor.index, tailStart);
+    windowStart = start;
     await tick();
-    if (cancelled()) return;
-    scrollToBottom();
+    if (cancelled() || !messagesContainer) return;
+    // Settle where the reader was before filling: every chunk below measures
+    // its offset against the bottom, so it needs a truthful starting position.
+    restoreAnchor(anchor);
+
     while (!cancelled() && start > 0) {
       await idle();
       if (cancelled() || !messagesContainer) return;
@@ -307,53 +406,41 @@
   // shot (`hydrated`). Message count is read untracked: streaming appends must
   // not reset the window mid-run.
   $effect(() => {
-    void sessionId;
+    const id = sessionId;
     void runState.hydrated;
 
     const total = untrack(() => runState.messages.length);
-    if (total <= INITIAL_WINDOW) {
-      windowStart = 0;
-      return;
-    }
+    const anchor = scrollMemory.get(id) ?? "bottom";
+    stickToBottom = anchor === "bottom";
 
-    const start = total - INITIAL_WINDOW;
-    windowStart = start;
     let stopped = false;
-    void fillWindow(() => stopped, start);
+    void openWindow(() => stopped, total, anchor);
     return () => {
       stopped = true;
     };
   });
 
-  // Session switch / transcript arrival: pin to bottom synchronously after DOM
-  // update. The component instance is reused across sessions and keeps the old
-  // scroll position; relying on the delayed scroll alone would show one frame
-  // at the old position and jump ~100ms later.
-  $effect(() => {
-    void sessionId;
-    void runState.messages.length;
-    scrollToBottom();
-  });
-
-  // Scroll on message-count change; the delay re-pins after late layout
-  // (markdown/images growing the content).
+  // A committed turn keeps the newest content in view; the delay re-pins after
+  // late layout (markdown / images growing the content). Session switches and
+  // restores are positioned by openWindow instead.
   $effect(() => {
     if (runState.messages.length > 0) {
-      setTimeout(scrollToBottom, 100);
+      pinToBottom();
+      setTimeout(pinToBottom, 100);
     }
   });
 
   // Scroll as streaming text/thinking grows.
   $effect(() => {
     if (runState.streamingText || runState.thinkingText) {
-      setTimeout(scrollToBottom, 50);
+      setTimeout(pinToBottom, 50);
     }
   });
 
   // A hook notice appended at the bottom must not land below the fold.
   $effect(() => {
     if (runState.hookNotices.length > 0) {
-      setTimeout(scrollToBottom, 50);
+      setTimeout(pinToBottom, 50);
     }
   });
 </script>
@@ -406,6 +493,7 @@
 <div
   bind:this={messagesContainer}
   class="flex-1 overflow-y-auto select-text scroll-column"
+  onscroll={handleScroll}
 >
   <div class="chat-column py-4 space-y-6">
     <!-- Hook firings that preceded every message (a prompt rule on the first turn). -->
@@ -421,7 +509,10 @@
     {#each visibleMessages as message, offset (windowStart + offset)}
       {@const i = windowStart + offset}
       {#if message.role === "user"}
-        <div class="flex justify-end">
+        <!-- data-message-index anchors the reader's position across a teardown
+             (see scrollMemory): the row, not a pixel offset, is what survives
+             older messages mounting in later. -->
+        <div class="flex justify-end" data-message-index={i}>
           <div class="flex flex-col items-end">
             <div
               class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
@@ -437,7 +528,7 @@
       {:else if message.role === "assistant" && i !== liveAssistantIndex}
         <!-- Finished assistant message; the in-progress skeleton renders in the
              LIVE view below and is skipped here. -->
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-2" data-message-index={i}>
           <div class="flex-1 min-w-0">
             {#if assistantThinking(message)}
               <AgentThinkingBlock thinking={assistantThinking(message)} />
