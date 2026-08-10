@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick, untrack } from "svelte";
   import { ChartNoAxesColumn, Check, Copy } from "@lucide/svelte";
   import {
     renderMarkdown,
@@ -249,6 +250,81 @@
     }
   }
 
+  // Progressive mount. Entering the session view (cold start, session switch,
+  // returning from settings) rebuilds the whole transcript at once — hundreds
+  // of rows, tool cards and thinking blocks in a single task, which locks the
+  // window for as long as it takes. Only the tail is mounted up front; the rest
+  // fills in one idle chunk at a time, so the first paint costs a viewport.
+  const INITIAL_WINDOW = 20;
+  const FILL_CHUNK = 40;
+
+  // First rendered message index; 0 once the whole transcript is mounted.
+  let windowStart = $state(0);
+
+  const visibleMessages = $derived(
+    windowStart > 0 ? runState.messages.slice(windowStart) : runState.messages,
+  );
+
+  function idle(): Promise<void> {
+    return new Promise((resolve) => {
+      if (typeof window !== "undefined" && window.requestIdleCallback) {
+        // timeout: never let a busy main thread stall the fill indefinitely.
+        window.requestIdleCallback(() => resolve(), { timeout: 200 });
+      } else {
+        setTimeout(resolve, 16);
+      }
+    });
+  }
+
+  // `start` is a local, never a read of `windowStart`: the first loop check runs
+  // synchronously inside the caller's effect, and reading the rune there would
+  // make the effect depend on the very state this loop writes — a reset/refill
+  // cycle that never lands on 0.
+  async function fillWindow(cancelled: () => boolean, from: number) {
+    let start = from;
+    // The tail is what the reader should be looking at, and every chunk below
+    // measures its offset against the bottom — so settle there before filling.
+    await tick();
+    if (cancelled()) return;
+    scrollToBottom();
+    while (!cancelled() && start > 0) {
+      await idle();
+      if (cancelled() || !messagesContainer) return;
+      // Older messages prepend above the viewport and push content down, so
+      // hold the distance to the bottom rather than the raw offset — this keeps
+      // the view still whether the reader sits at the bottom or has scrolled up.
+      const fromBottom =
+        messagesContainer.scrollHeight - messagesContainer.scrollTop;
+      start = Math.max(0, start - FILL_CHUNK);
+      windowStart = start;
+      await tick();
+      if (cancelled() || !messagesContainer) return;
+      messagesContainer.scrollTop = messagesContainer.scrollHeight - fromBottom;
+    }
+  }
+
+  // Re-window on session switch and when a restore lands the transcript in one
+  // shot (`hydrated`). Message count is read untracked: streaming appends must
+  // not reset the window mid-run.
+  $effect(() => {
+    void sessionId;
+    void runState.hydrated;
+
+    const total = untrack(() => runState.messages.length);
+    if (total <= INITIAL_WINDOW) {
+      windowStart = 0;
+      return;
+    }
+
+    const start = total - INITIAL_WINDOW;
+    windowStart = start;
+    let stopped = false;
+    void fillWindow(() => stopped, start);
+    return () => {
+      stopped = true;
+    };
+  });
+
   // Session switch / transcript arrival: pin to bottom synchronously after DOM
   // update. The component instance is reused across sessions and keeps the old
   // scroll position; relying on the delayed scroll alone would show one frame
@@ -337,10 +413,13 @@
       {@render hookNoticeRow(entry.notice)}
     {/each}
 
-    <!-- Committed messages. messages is append-only (the reducer only appends
-         or finalizes in place, never reorders), so index keys reuse DOM safely;
+    <!-- Committed messages, from `windowStart` to the end (see the progressive
+         mount above). messages is append-only (the reducer only appends or
+         finalizes in place, never reorders), so absolute index keys reuse DOM
+         safely — including when the window widens and prepends older rows;
          cards key by toolCallId so their state never shifts with the index. -->
-    {#each runState.messages as message, i (i)}
+    {#each visibleMessages as message, offset (windowStart + offset)}
+      {@const i = windowStart + offset}
       {#if message.role === "user"}
         <div class="flex justify-end">
           <div class="flex flex-col items-end">
