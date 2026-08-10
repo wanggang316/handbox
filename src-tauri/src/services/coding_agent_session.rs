@@ -14,7 +14,7 @@ use hand_coding_agent::tools::create_default_tools;
 use hand_coding_agent::{AgentSession, AgentSessionConfig};
 
 use crate::models::AppError;
-use crate::services::agent_hook_rules::{NotifyEmitter, RuleHookExtension};
+use crate::services::agent_hook_rules::{wrap_approval_emitter, NotifyEmitter, RuleHookExtension};
 use crate::services::agent_permission::{ApprovalEmitter, PermissionExtension, SandboxExtension};
 use crate::services::extensions;
 use crate::services::model_runtime::{self, ChatOptions};
@@ -196,18 +196,31 @@ pub fn build_agent_session(
     // and ahead of the gate so a command that vetoes a call spares the user a
     // prompt for something that would be blocked anyway. Skipped entirely when
     // no rule is configured.
-    let rules = RuleHookExtension::new(config.session_id.clone(), config.hook_rules.clone())
-        .with_notifier(emitters.notify.clone())
-        .with_working_dir(config.working_dir.clone());
+    let rules = Arc::new(
+        RuleHookExtension::new(config.session_id.clone(), config.hook_rules.clone())
+            .with_notifier(emitters.notify.clone())
+            .with_working_dir(config.working_dir.clone()),
+    );
     // Logged unconditionally: "did my rule load?" is the first question when a
     // rule appears not to fire, and a zero here answers it immediately.
     tracing::info!(
         hook_rules = config.hook_rules.len(),
         "[build_agent_session] hook rules loaded"
     );
-    if !rules.is_empty() {
-        session.register_extension(Arc::new(rules));
+    if rules.has_extension_rules() {
+        session.register_extension(rules.clone());
     }
+
+    // Approval-requested rules ride the approval channel itself rather than the
+    // extension chain: the emitter fires exactly when a call pauses for the
+    // user, so an always-allowed tool never triggers them. Headless (`None`)
+    // never prompts, so there is nothing to observe.
+    let approval = match emitters.approval {
+        Some(inner) if rules.has_approval_rules() => {
+            Some(wrap_approval_emitter(rules.clone(), inner))
+        }
+        other => other,
+    };
 
     // Approval gate for write/edit/bash: emits `agent_approval_request` and awaits
     // the decision (allow → Continue, deny → Cancel); no emitter means fail CLOSED.
@@ -217,7 +230,7 @@ pub fn build_agent_session(
     // `abort_run` / `deny_pending_for_session` can unblock a parked approval await
     // and always-allow consent persists across turns.
     session.register_extension(Arc::new(
-        PermissionExtension::new(config.session_id.clone(), emitters.approval)
+        PermissionExtension::new(config.session_id.clone(), approval)
             .with_approval_tools(config.mcp_approval_tools.clone()),
     ));
 

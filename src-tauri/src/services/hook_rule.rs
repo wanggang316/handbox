@@ -47,6 +47,8 @@ impl HookRuleService {
             HookEvent::BeforeToolCall,
             HookEvent::AfterToolCall,
             HookEvent::UserPromptSubmit,
+            HookEvent::TurnEnd,
+            HookEvent::ApprovalRequested,
         ] {
             rules.extend(self.repository.list_enabled_for_event(event).await?);
         }
@@ -132,6 +134,8 @@ mod tests {
             HookEvent::BeforeToolCall,
             HookEvent::AfterToolCall,
             HookEvent::UserPromptSubmit,
+            HookEvent::TurnEnd,
+            HookEvent::ApprovalRequested,
         ] {
             service
                 .create(request(event, HookAction::Notify))
@@ -196,20 +200,25 @@ mod tests {
     #[tokio::test]
     async fn list_enabled_covers_every_event() {
         let (service, _dir) = service().await;
-        service
-            .create(request(HookEvent::BeforeToolCall, HookAction::Notify))
-            .await
-            .unwrap();
-        service
-            .create(request(HookEvent::AfterToolCall, HookAction::Notify))
-            .await
-            .unwrap();
-        service
-            .create(request(HookEvent::UserPromptSubmit, HookAction::Notify))
-            .await
-            .unwrap();
+        let events = [
+            HookEvent::BeforeToolCall,
+            HookEvent::AfterToolCall,
+            HookEvent::UserPromptSubmit,
+            HookEvent::TurnEnd,
+            HookEvent::ApprovalRequested,
+        ];
+        for event in events {
+            service
+                .create(request(event, HookAction::Notify))
+                .await
+                .unwrap();
+        }
 
         let rules = service.list_enabled().await.unwrap();
-        assert_eq!(rules.len(), 3, "the session snapshot spans every event");
+        assert_eq!(
+            rules.len(),
+            events.len(),
+            "the session snapshot spans every event"
+        );
     }
 }

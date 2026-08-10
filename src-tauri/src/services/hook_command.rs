@@ -45,10 +45,16 @@ pub enum CommandVerdict {
     /// Proceed. `context` is text the hook wants the model to see; only the
     /// prompt hook has somewhere to put it, so the tool-call hooks ignore it.
     Proceed { context: Option<String> },
-    /// Block the call with this reason.
+    /// Block the call with this reason. Deliberate: an explicit `deny` decision
+    /// or a non-zero exit — both are the command speaking the protocol.
     Deny(String),
     /// Run the tool with these arguments instead.
     ReplaceInput(serde_json::Value),
+    /// The command never got to speak: spawn failure or timeout. Kept apart
+    /// from [`Self::Deny`] because the caller's stakes differ by event — a
+    /// pending call still fails closed, but a turn-end hook must not hand the
+    /// model "hook command timed out" as its next instruction.
+    Errored(String),
 }
 
 impl CommandVerdict {
@@ -72,6 +78,13 @@ impl CommandRun {
     fn deny(reason: String, detail: String) -> Self {
         Self {
             verdict: CommandVerdict::Deny(reason),
+            detail: Some(detail),
+        }
+    }
+
+    fn errored(reason: String, detail: String) -> Self {
+        Self {
+            verdict: CommandVerdict::Errored(reason),
             detail: Some(detail),
         }
     }
@@ -106,9 +119,10 @@ pub struct CommandSpec<'a> {
 
 /// Run the command, feed it `event`, and interpret the result.
 ///
-/// Never returns an error: a hook that cannot be spawned, times out, or exits
-/// non-zero produces a [`CommandVerdict::Deny`] with the reason. The caller
-/// decides whether a deny is binding — after a tool call it no longer is.
+/// Never returns an error: a non-zero exit produces a [`CommandVerdict::Deny`]
+/// (the low-ceremony way to block), while a spawn failure or timeout produces
+/// [`CommandVerdict::Errored`]. The caller decides what either is worth —
+/// after a tool call neither is binding.
 pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) -> CommandRun {
     let payload = event.to_string();
 
@@ -128,7 +142,7 @@ pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(e) => {
-            return CommandRun::deny(
+            return CommandRun::errored(
                 format!("hook command failed to start: {e}"),
                 format!("$ {}\n[failed to start] {e}", spec.command),
             )
@@ -145,14 +159,14 @@ pub async fn run_hook_command(spec: CommandSpec<'_>, event: &serde_json::Value) 
     let output = match tokio::time::timeout(spec.timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => {
-            return CommandRun::deny(
+            return CommandRun::errored(
                 format!("hook command failed: {e}"),
                 format!("$ {}\n[failed] {e}", spec.command),
             )
         }
         Err(_) => {
             let ms = spec.timeout.as_millis();
-            return CommandRun::deny(
+            return CommandRun::errored(
                 format!("hook command timed out after {ms}ms"),
                 format!("$ {}\n[timed out after {ms}ms]", spec.command),
             );
@@ -427,9 +441,11 @@ mod tests {
         assert!(matches!(verdict, CommandVerdict::ReplaceInput(_)));
     }
 
-    /// Fail closed: a hook asked for an opinion that never answers is not consent.
+    /// A timeout is the command failing to speak, not it speaking a deny — the
+    /// caller decides whether that fails closed (pending call) or is only
+    /// reported (turn end).
     #[tokio::test]
-    async fn a_timeout_denies() {
+    async fn a_timeout_errors_rather_than_denies() {
         let dir = TempDir::new().unwrap();
         let mut s = spec("sleep 5", dir.path());
         s.timeout = Duration::from_millis(150);
@@ -437,13 +453,15 @@ mod tests {
         let verdict = run_hook_command(s, &json!({})).await.verdict;
 
         match verdict {
-            CommandVerdict::Deny(reason) => {
+            CommandVerdict::Errored(reason) => {
                 assert!(reason.contains("timed out"), "got: {reason}")
             }
-            other => panic!("expected Deny on timeout, got {other:?}"),
+            other => panic!("expected Errored on timeout, got {other:?}"),
         }
     }
 
+    /// A missing binary surfaces through `sh -c` as exit 127 — the shell DID
+    /// speak, so this stays a protocol deny rather than an infrastructure error.
     #[tokio::test]
     async fn a_command_that_cannot_run_denies() {
         let dir = TempDir::new().unwrap();

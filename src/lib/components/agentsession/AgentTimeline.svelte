@@ -147,9 +147,10 @@
   }
 
   // Hook-rule firings render inline where they happened. Firings that carry a
-  // callId attach to that tool card (before-hooks above it, after-hooks below);
-  // the rest (prompt rules) anchor by message index: entries anchored to index
-  // i appear right after that message (-1 = before the first).
+  // callId attach to that tool card (before/approval-hooks above it,
+  // after-hooks below); the rest (prompt and turn-end rules) anchor by message
+  // index: entries anchored to index i appear right after that message
+  // (-1 = before the first).
   function hookNoticesAfter(anchor: number) {
     return runState.hookNotices.filter(
       (entry) => entry.notice.callId === null && entry.anchor === anchor,
@@ -158,11 +159,12 @@
 
   function hookNoticesForCall(
     callId: string,
-    event: "before_tool_call" | "after_tool_call",
+    events: HookRuleNotification["event"][],
   ) {
     return runState.hookNotices.filter(
       (entry) =>
-        entry.notice.callId === callId && entry.notice.event === event,
+        entry.notice.callId === callId &&
+        events.includes(entry.notice.event),
     );
   }
 
@@ -175,6 +177,10 @@
         return t("settings.hooks.event.after");
       case "user_prompt_submit":
         return t("settings.hooks.event.prompt");
+      case "turn_end":
+        return t("settings.hooks.event.turnEnd");
+      case "approval_requested":
+        return t("settings.hooks.event.approval");
       default:
         return event;
     }
@@ -383,9 +389,12 @@
             {#if assistantToolCalls(message).length}
               <div class="mt-2 space-y-2">
                 {#each assistantToolCalls(message) as block (block.id)}
-                  <!-- A before-hook fires before its call runs, so it reads
-                       above the card; an after-hook reads below it. -->
-                  {#each hookNoticesForCall(block.id, "before_tool_call") as entry}
+                  <!-- Before- and approval-hooks fire before their call runs,
+                       so they read above the card; an after-hook reads below. -->
+                  {#each hookNoticesForCall(block.id, [
+                    "before_tool_call",
+                    "approval_requested",
+                  ]) as entry}
                     {@render hookNoticeRow(entry.notice)}
                   {/each}
                   {#if block.name === RENDER_CARD_TOOL_NAME}
@@ -404,7 +413,7 @@
                   {:else}
                     <AgentToolCallCard toolCall={toolCallView(block)} />
                   {/if}
-                  {#each hookNoticesForCall(block.id, "after_tool_call") as entry}
+                  {#each hookNoticesForCall(block.id, ["after_tool_call"]) as entry}
                     {@render hookNoticeRow(entry.notice)}
                   {/each}
                 {/each}

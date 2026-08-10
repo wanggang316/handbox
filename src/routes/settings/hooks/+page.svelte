@@ -47,9 +47,11 @@
   let formMessage = $state("");
   let formCommand = $state("");
 
-  // A prompt has no tool name to glob and no arguments to inspect; showing
-  // those fields would invite rules that silently never match.
-  const matchesTool = $derived(formEvent !== "user_prompt_submit");
+  // A prompt or a finished turn has no tool name to glob and no arguments to
+  // inspect; showing those fields would invite rules that silently never match.
+  const matchesTool = $derived(
+    formEvent !== "user_prompt_submit" && formEvent !== "turn_end",
+  );
 
   // The command field only means something for run_command, and leaving a
   // stale command visible under another action reads as if it would still run.
@@ -59,6 +61,8 @@
     { value: "before_tool_call", label: t("settings.hooks.event.before") },
     { value: "after_tool_call", label: t("settings.hooks.event.after") },
     { value: "user_prompt_submit", label: t("settings.hooks.event.prompt") },
+    { value: "turn_end", label: t("settings.hooks.event.turnEnd") },
+    { value: "approval_requested", label: t("settings.hooks.event.approval") },
   ]);
 
   const actionOptions = $derived(
@@ -87,6 +91,10 @@
         return t("settings.hooks.event.after");
       case "user_prompt_submit":
         return t("settings.hooks.event.prompt");
+      case "turn_end":
+        return t("settings.hooks.event.turnEnd");
+      case "approval_requested":
+        return t("settings.hooks.event.approval");
       default:
         return event;
     }
@@ -94,10 +102,12 @@
 
   /** Human-readable summary of what a rule matches, for the list row. */
   function conditionSummary(rule: HookRule): string {
-    if (rule.event === "user_prompt_submit") {
-      return rule.argContains
-        ? `${t("settings.hooks.promptSubject")} ⊃ "${rule.argContains}"`
-        : t("settings.hooks.promptSubject");
+    if (rule.event === "user_prompt_submit" || rule.event === "turn_end") {
+      const subject =
+        rule.event === "user_prompt_submit"
+          ? t("settings.hooks.promptSubject")
+          : t("settings.hooks.replySubject");
+      return rule.argContains ? `${subject} ⊃ "${rule.argContains}"` : subject;
     }
     if (!rule.argContains) {
       return rule.toolPattern;
@@ -361,11 +371,18 @@
           />
         </div>
       </div>
-    {:else}
+    {:else if formEvent === "user_prompt_submit"}
       <Input
         label={t("settings.hooks.field.promptContains")}
         bind:value={formArgContains}
         placeholder={t("settings.hooks.field.promptContainsPlaceholder")}
+        literal
+      />
+    {:else}
+      <Input
+        label={t("settings.hooks.field.replyContains")}
+        bind:value={formArgContains}
+        placeholder={t("settings.hooks.field.replyContainsPlaceholder")}
         literal
       />
     {/if}
