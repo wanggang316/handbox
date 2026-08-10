@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.5.1] - 2026-08-10
+
+### Added
+- A New Chat button in the sidebar starts a fresh conversation, with the
+  greeting and input box centered on screen until you send the first message.
+  Clicking it again reopens the blank chat instead of piling up empty ones.
+- Hooks reach two more moments: when the agent finishes a reply, and when a tool
+  call stops to ask for your approval. A finish-reply hook can send the agent
+  back to work with a reason — "you said you'd run the tests" — while an
+  approval hook only reports, leaving the decision to you.
+
+### Fixed
+- Going back to an older version of the app no longer leaves it refusing to
+  start.
+
+
 ## [0.5.0] - 2026-08-07
 
 ### Added
