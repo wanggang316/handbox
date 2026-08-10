@@ -19,6 +19,14 @@ pub enum HookEvent {
     /// is against the prompt text rather than a tool call, and the rule can
     /// rewrite or refuse the turn.
     UserPromptSubmit,
+    /// The agent finished its reply, before control returns to the user.
+    /// Matching is against the assistant's final text; a command's deny
+    /// verdict sends the agent back to work with the reason as instruction.
+    TurnEnd,
+    /// A tool call paused for the user's approval. Matching is against the
+    /// call like `BeforeToolCall`, but the actions are report-only — the
+    /// decision stays with the user.
+    ApprovalRequested,
 }
 
 /// What a rule is matched against, which differs by event.

@@ -20,6 +20,8 @@ fn event_as_str(event: HookEvent) -> &'static str {
         HookEvent::BeforeToolCall => "before_tool_call",
         HookEvent::AfterToolCall => "after_tool_call",
         HookEvent::UserPromptSubmit => "user_prompt_submit",
+        HookEvent::TurnEnd => "turn_end",
+        HookEvent::ApprovalRequested => "approval_requested",
     }
 }
 
@@ -28,6 +30,8 @@ fn event_from_str(value: &str) -> Result<HookEvent, AppError> {
         "before_tool_call" => Ok(HookEvent::BeforeToolCall),
         "after_tool_call" => Ok(HookEvent::AfterToolCall),
         "user_prompt_submit" => Ok(HookEvent::UserPromptSubmit),
+        "turn_end" => Ok(HookEvent::TurnEnd),
+        "approval_requested" => Ok(HookEvent::ApprovalRequested),
         other => Err(AppError::internal_error(&format!(
             "Invalid hook event in database: {}",
             other
@@ -346,6 +350,27 @@ mod tests {
         assert_eq!(fetched.action, HookAction::RunCommand);
         assert_eq!(fetched.event, HookEvent::BeforeToolCall);
         assert!(fetched.enabled, "a new rule is enabled");
+    }
+
+    /// Every event value survives the column encoding — the failure this
+    /// guards is adding an enum variant without teaching the codec its string.
+    #[tokio::test]
+    async fn every_event_roundtrips_through_the_column_encoding() {
+        let (repo, _dir) = repo().await;
+        for event in [
+            HookEvent::BeforeToolCall,
+            HookEvent::AfterToolCall,
+            HookEvent::UserPromptSubmit,
+            HookEvent::TurnEnd,
+            HookEvent::ApprovalRequested,
+        ] {
+            let created = repo
+                .create(create_request("evt", event, HookAction::Notify), 1)
+                .await
+                .unwrap();
+            let fetched = repo.get(&created.id).await.unwrap().expect("stored rule");
+            assert_eq!(fetched.event, event);
+        }
     }
 
     /// Empty optional fields land as NULL rather than as empty strings, so

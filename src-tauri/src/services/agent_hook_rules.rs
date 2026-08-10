@@ -1,4 +1,5 @@
-//! Evaluates the user's hook rules against the agent's tool calls.
+//! Evaluates the user's hook rules against the agent's lifecycle: tool calls,
+//! prompt submission, turn end, and the approval pause.
 //!
 //! Hooks execute actions (run a command, notify); they are not a permission
 //! layer — gating what the agent may do belongs to the agent's permission
@@ -19,12 +20,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hand_coding_agent::core::extensions::api::{
-    ResultDecision, ToolCallEvent, ToolResultEvent, UserMessageEvent, UserMessageOutcome,
+    ResultDecision, ToolCallEvent, ToolResultEvent, TurnEndEvent, UserMessageEvent,
+    UserMessageOutcome,
 };
 use hand_coding_agent::{
     Extension, ExtensionContext, ExtensionError, ExtensionManifest, HookDecision,
 };
 
+use crate::services::agent_permission::ApprovalEmitter;
 use crate::services::hook_command::{run_hook_command, CommandRun, CommandSpec, CommandVerdict};
 use crate::storage::types::{
     HookAction, HookEvent, HookRule, MatchSubject, DEFAULT_HOOK_COMMAND_TIMEOUT_MS,
@@ -51,10 +54,13 @@ mod outcome {
     pub const RAN: &str = "ran";
     /// Its command rewrote the tool's arguments.
     pub const REWROTE: &str = "rewrote";
-    /// It failed after the call had already run, so nothing could be undone.
+    /// Its command broke — or, on a report-only event, objected — with nothing
+    /// left to enforce.
     pub const FAILED: &str = "failed";
     /// Its command contributed context for the model to read this turn.
     pub const INFORMED: &str = "informed";
+    /// Its command refused to let the turn end, so the agent keeps working.
+    pub const RESUMED: &str = "resumed";
 }
 
 /// Sink for [`HOOK_RULE_NOTIFY_EVENT`]. A plain closure so the extension stays
@@ -76,6 +82,10 @@ pub struct RuleHookExtension {
     before_rules: Vec<HookRule>,
     after_rules: Vec<HookRule>,
     prompt_rules: Vec<HookRule>,
+    turn_end_rules: Vec<HookRule>,
+    /// Not dispatched through the [`Extension`] trait: the approval pause is
+    /// HandBox's own, so these fire through [`wrap_approval_emitter`].
+    approval_rules: Vec<HookRule>,
 }
 
 impl RuleHookExtension {
@@ -83,11 +93,15 @@ impl RuleHookExtension {
         let mut before_rules = Vec::new();
         let mut after_rules = Vec::new();
         let mut prompt_rules = Vec::new();
+        let mut turn_end_rules = Vec::new();
+        let mut approval_rules = Vec::new();
         for rule in rules {
             match rule.event {
                 HookEvent::BeforeToolCall => before_rules.push(rule),
                 HookEvent::AfterToolCall => after_rules.push(rule),
                 HookEvent::UserPromptSubmit => prompt_rules.push(rule),
+                HookEvent::TurnEnd => turn_end_rules.push(rule),
+                HookEvent::ApprovalRequested => approval_rules.push(rule),
             }
         }
 
@@ -101,10 +115,11 @@ impl RuleHookExtension {
                 capabilities: hand_coding_agent::core::extensions::api::ExtensionCapabilities {
                     before_tool_call: true,
                     after_tool_call: true,
-                    // The host ENFORCES this one: an extension that does not
-                    // declare it is never called, so it must reflect whether
-                    // any prompt rule is actually loaded.
+                    // The host ENFORCES these two: an extension that does not
+                    // declare them is never called, so each must reflect
+                    // whether any such rule is actually loaded.
                     on_user_message: !prompt_rules.is_empty(),
+                    on_turn_end: !turn_end_rules.is_empty(),
                     ..Default::default()
                 },
                 exec: None,
@@ -120,6 +135,8 @@ impl RuleHookExtension {
             before_rules,
             after_rules,
             prompt_rules,
+            turn_end_rules,
+            approval_rules,
         }
     }
 
@@ -137,10 +154,21 @@ impl RuleHookExtension {
         self
     }
 
-    /// Whether any rule is loaded — lets the caller skip registering an
-    /// extension that would do nothing on every tool call.
-    pub fn is_empty(&self) -> bool {
-        self.before_rules.is_empty() && self.after_rules.is_empty() && self.prompt_rules.is_empty()
+    /// Whether any rule needs the [`Extension`] dispatch chain — lets the
+    /// caller skip registering an extension that would do nothing on every
+    /// tool call. Approval rules don't count: they fire through the wrapped
+    /// emitter, not the chain.
+    pub fn has_extension_rules(&self) -> bool {
+        !self.before_rules.is_empty()
+            || !self.after_rules.is_empty()
+            || !self.prompt_rules.is_empty()
+            || !self.turn_end_rules.is_empty()
+    }
+
+    /// Whether any rule fires on the approval pause — decides if the approval
+    /// emitter is worth wrapping at all.
+    pub fn has_approval_rules(&self) -> bool {
+        !self.approval_rules.is_empty()
     }
 
     /// Run a `run_command` rule's command against `payload`.
@@ -237,6 +265,83 @@ impl RuleHookExtension {
             }));
         }
     }
+
+    /// A tool call paused for the user's approval. Not an [`Extension`] hook —
+    /// the pause is HandBox's own (see [`wrap_approval_emitter`]) — and
+    /// strictly REPORT-ONLY: the decision belongs to the user and the
+    /// permission system, so a command runs for its side effect (ring a bell,
+    /// push to a phone) and its verdict enforces nothing.
+    pub async fn on_approval_requested(
+        &self,
+        tool_name: &str,
+        arguments: &serde_json::Value,
+        call_id: &str,
+    ) {
+        let Some(rule) = self
+            .approval_rules
+            .iter()
+            .find(|rule| rule.matches(tool_name, arguments))
+        else {
+            return;
+        };
+
+        match rule.action {
+            HookAction::Notify => {
+                self.report(rule, tool_name, outcome::OBSERVED, Some(call_id), None);
+            }
+            HookAction::RunCommand => {
+                let run = self
+                    .run_command(rule, "approval_requested", tool_name, || {
+                        serde_json::json!({
+                            "event": "approval_requested",
+                            "sessionId": self.session_id,
+                            "ruleId": rule.id,
+                            "ruleName": rule.name,
+                            "toolName": tool_name,
+                            "callId": call_id,
+                            "arguments": arguments,
+                        })
+                    })
+                    .await;
+                let detail = run.detail.as_deref();
+
+                let outcome = match run.verdict {
+                    CommandVerdict::Proceed { .. } | CommandVerdict::ReplaceInput(_) => {
+                        outcome::RAN
+                    }
+                    // An objection with nothing to enforce reads the same as a
+                    // breakage: the request stays with the user either way.
+                    CommandVerdict::Deny(_) | CommandVerdict::Errored(_) => outcome::FAILED,
+                };
+                self.report(rule, tool_name, outcome, Some(call_id), detail);
+            }
+        }
+    }
+}
+
+/// Interpose the user's approval-requested rules on the approval channel.
+///
+/// The emitter fires exactly when a call actually pauses for the user — an
+/// always-allowed tool never emits, so a hook here never fires for it. The
+/// rules run on a spawned task so a slow command cannot delay the approval
+/// prompt itself, and the payload is forwarded to `inner` untouched.
+pub fn wrap_approval_emitter(
+    rules: Arc<RuleHookExtension>,
+    inner: ApprovalEmitter,
+) -> ApprovalEmitter {
+    Arc::new(move |payload: serde_json::Value| {
+        // Field names follow the emitted approval payload (`agent_permission`).
+        let tool_name = payload["toolName"].as_str().unwrap_or_default().to_string();
+        let call_id = payload["callId"].as_str().unwrap_or_default().to_string();
+        let arguments = payload["args"].clone();
+        let rules = Arc::clone(&rules);
+        tokio::spawn(async move {
+            rules
+                .on_approval_requested(&tool_name, &arguments, &call_id)
+                .await;
+        });
+        inner(payload);
+    })
 }
 
 #[async_trait]
@@ -305,6 +410,12 @@ impl Extension for RuleHookExtension {
                     }
                     CommandVerdict::Deny(reason) => {
                         self.report(rule, SUBJECT, outcome::DENIED, None, detail);
+                        Ok(HookDecision::Cancel(reason).into())
+                    }
+                    // Fail closed, like the pending-call hooks: a gate that
+                    // broke did not consent to the turn.
+                    CommandVerdict::Errored(reason) => {
+                        self.report(rule, SUBJECT, outcome::FAILED, None, detail);
                         Ok(HookDecision::Cancel(reason).into())
                     }
                     // Upstream expects a JSON *string* here, not an object: the
@@ -383,9 +494,82 @@ impl Extension for RuleHookExtension {
                         self.report(rule, &event.tool_name, outcome::DENIED, call_id, detail);
                         Ok(HookDecision::Cancel(reason))
                     }
+                    // A hook asked for an opinion that never answered is not
+                    // consent — the pending call fails closed, reported as the
+                    // failure it is rather than a decision it never made.
+                    CommandVerdict::Errored(reason) => {
+                        self.report(rule, &event.tool_name, outcome::FAILED, call_id, detail);
+                        Ok(HookDecision::Cancel(reason))
+                    }
                     CommandVerdict::ReplaceInput(args) => {
                         self.report(rule, &event.tool_name, outcome::REWROTE, call_id, detail);
                         Ok(HookDecision::Replace(args))
+                    }
+                }
+            }
+        }
+    }
+
+    async fn on_turn_end(
+        &self,
+        _cx: &ExtensionContext,
+        event: &TurnEndEvent,
+    ) -> Result<HookDecision, ExtensionError> {
+        // A turn has no tool to glob; the needle is tested against the
+        // assistant's final text, so a rule can react to WHAT was said
+        // ("TODO", "I could not") rather than merely that the turn ended.
+        let Some(rule) = self
+            .turn_end_rules
+            .iter()
+            .find(|rule| rule.matches_subject(&MatchSubject::Text(&event.last_assistant_message)))
+        else {
+            return Ok(HookDecision::Continue);
+        };
+
+        // Like the prompt hook's "prompt": the subject named in the notice.
+        const SUBJECT: &str = "turn";
+
+        match rule.action {
+            HookAction::Notify => {
+                self.report(rule, SUBJECT, outcome::OBSERVED, None, None);
+                Ok(HookDecision::Continue)
+            }
+            HookAction::RunCommand => {
+                let run = self
+                    .run_command(rule, "turn_end", SUBJECT, || {
+                        serde_json::json!({
+                            "event": "turn_end",
+                            "sessionId": self.session_id,
+                            "ruleId": rule.id,
+                            "ruleName": rule.name,
+                            "lastAssistantMessage": event.last_assistant_message,
+                            "stopReason": event.stop_reason,
+                        })
+                    })
+                    .await;
+                let detail = run.detail.as_deref();
+
+                match run.verdict {
+                    // Upstream turns a Cancel here into "the agent does NOT
+                    // stop": the reason becomes the model's next instruction,
+                    // bounded by the host's re-entry cap. This is the "you
+                    // said you'd run the tests — run them" enforcement.
+                    CommandVerdict::Deny(reason) => {
+                        self.report(rule, SUBJECT, outcome::RESUMED, None, detail);
+                        Ok(HookDecision::Cancel(reason))
+                    }
+                    // A hook that broke must NOT hand the model "hook command
+                    // timed out" as an instruction and burn a re-entry on it —
+                    // report-only, unlike the pending-call events.
+                    CommandVerdict::Errored(_) => {
+                        self.report(rule, SUBJECT, outcome::FAILED, None, detail);
+                        Ok(HookDecision::Continue)
+                    }
+                    // There is no pending action to rewrite and no context
+                    // channel; the command ran for its side effect.
+                    CommandVerdict::Proceed { .. } | CommandVerdict::ReplaceInput(_) => {
+                        self.report(rule, SUBJECT, outcome::RAN, None, detail);
+                        Ok(HookDecision::Continue)
                     }
                 }
             }
@@ -447,9 +631,9 @@ impl Extension for RuleHookExtension {
                         self.report(rule, &event.tool_name, outcome::REWROTE, call_id, detail);
                         Ok(ResultDecision::Replace(result))
                     }
-                    // The call already ran, so a denial cannot undo it; it is
-                    // reported and the result stands.
-                    CommandVerdict::Deny(_) => {
+                    // The call already ran, so a denial — or a hook that broke —
+                    // cannot undo it; it is reported and the result stands.
+                    CommandVerdict::Deny(_) | CommandVerdict::Errored(_) => {
                         self.report(rule, &event.tool_name, outcome::FAILED, call_id, detail);
                         Ok(ResultDecision::Continue)
                     }
@@ -1100,5 +1284,272 @@ mod tests {
             matches!(decision, HookDecision::Continue),
             "an after-rule must not decide a pending call"
         );
+    }
+
+    fn turn_end(text: &str) -> TurnEndEvent {
+        TurnEndEvent {
+            last_assistant_message: text.to_string(),
+            stop_reason: "end_turn".to_string(),
+        }
+    }
+
+    /// A turn-end rule matches the assistant's final TEXT, so it can react to
+    /// what was said rather than merely that the turn ended.
+    #[tokio::test]
+    async fn a_turn_end_rule_matches_the_reply_text() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let ext = RuleHookExtension::new(
+            "s30".to_string(),
+            vec![HookRule {
+                arg_field: None,
+                arg_contains: Some("TODO".to_string()),
+                ..rule("watch todos", HookEvent::TurnEnd, HookAction::Notify)
+            }],
+        )
+        .with_notifier(Some(notifier));
+
+        let skipped = ext
+            .on_turn_end(&cx(), &turn_end("all done, tests pass"))
+            .await
+            .unwrap();
+        assert!(matches!(skipped, HookDecision::Continue));
+        assert!(seen.lock().unwrap().is_empty(), "no match, no notice");
+
+        let matched = ext
+            .on_turn_end(&cx(), &turn_end("left a TODO for later"))
+            .await
+            .unwrap();
+        assert!(matches!(matched, HookDecision::Continue));
+
+        let events = seen.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["outcome"], "observed");
+        assert_eq!(events[0]["event"], "turn_end");
+        assert!(events[0]["callId"].is_null(), "a turn has no tool call");
+    }
+
+    /// The point of the event: a command's deny verdict sends the agent back
+    /// to work, with the reason as its next instruction.
+    #[tokio::test]
+    async fn a_turn_end_command_deny_sends_the_agent_back_to_work() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s31".to_string(),
+            vec![HookRule {
+                arg_field: None,
+                arg_contains: None,
+                command: Some(
+                    r#"echo '{"decision":"deny","reason":"you said you would run the tests"}'"#
+                        .to_string(),
+                ),
+                ..rule("enforce", HookEvent::TurnEnd, HookAction::RunCommand)
+            }],
+        )
+        .with_notifier(Some(notifier))
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext.on_turn_end(&cx(), &turn_end("done!")).await.unwrap();
+
+        match decision {
+            HookDecision::Cancel(reason) => {
+                assert_eq!(reason, "you said you would run the tests")
+            }
+            other => panic!("expected Cancel, got {other:?}"),
+        }
+        let events = seen.lock().unwrap();
+        assert_eq!(events[0]["outcome"], "resumed");
+    }
+
+    /// A hook that broke must not hand the model its error message as an
+    /// instruction — unlike the pending-call events, turn end reports and
+    /// lets the agent stop.
+    #[tokio::test]
+    async fn a_broken_turn_end_command_reports_and_lets_the_turn_end() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s32".to_string(),
+            vec![HookRule {
+                arg_field: None,
+                arg_contains: None,
+                command: Some("sleep 5".to_string()),
+                timeout_ms: Some(150),
+                ..rule("slow", HookEvent::TurnEnd, HookAction::RunCommand)
+            }],
+        )
+        .with_notifier(Some(notifier))
+        .with_working_dir(dir.path().to_path_buf());
+
+        let decision = ext.on_turn_end(&cx(), &turn_end("done")).await.unwrap();
+
+        assert!(
+            matches!(decision, HookDecision::Continue),
+            "a timed-out hook must not burn a re-entry"
+        );
+        let events = seen.lock().unwrap();
+        assert_eq!(events[0]["outcome"], "failed");
+        let detail = events[0]["detail"].as_str().expect("execution capture");
+        assert!(detail.contains("timed out"), "got: {detail}");
+    }
+
+    /// Host-enforced like `on_user_message`: without the declared capability
+    /// the hook is never dispatched.
+    #[test]
+    fn the_turn_end_capability_tracks_whether_rules_exist() {
+        let without = RuleHookExtension::new(
+            "s33".to_string(),
+            vec![rule("tool", HookEvent::BeforeToolCall, HookAction::Notify)],
+        );
+        assert!(!without.manifest().capabilities.on_turn_end);
+
+        let with = RuleHookExtension::new(
+            "s34".to_string(),
+            vec![HookRule {
+                arg_field: None,
+                arg_contains: None,
+                ..rule("turn", HookEvent::TurnEnd, HookAction::Notify)
+            }],
+        );
+        assert!(with.manifest().capabilities.on_turn_end);
+    }
+
+    /// Approval rules never join the extension chain; only the wrapped
+    /// emitter fires them, so registration can be skipped without losing them.
+    #[test]
+    fn approval_rules_do_not_count_as_extension_rules() {
+        let ext = RuleHookExtension::new(
+            "s35".to_string(),
+            vec![rule(
+                "ping",
+                HookEvent::ApprovalRequested,
+                HookAction::Notify,
+            )],
+        );
+        assert!(!ext.has_extension_rules());
+        assert!(ext.has_approval_rules());
+    }
+
+    /// `notify` on the approval pause observes it, carrying the call id so
+    /// the timeline can attach the notice to its card.
+    #[tokio::test]
+    async fn a_notify_approval_rule_observes_the_pause() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let ext = RuleHookExtension::new(
+            "s36".to_string(),
+            vec![rule(
+                "ping",
+                HookEvent::ApprovalRequested,
+                HookAction::Notify,
+            )],
+        )
+        .with_notifier(Some(notifier));
+
+        ext.on_approval_requested("bash", &json!({"command": "rm -rf /tmp/x"}), "call-1")
+            .await;
+        ext.on_approval_requested("bash", &json!({"command": "ls"}), "call-2")
+            .await;
+
+        let events = seen.lock().unwrap();
+        assert_eq!(events.len(), 1, "only the matching call notifies");
+        assert_eq!(events[0]["outcome"], "observed");
+        assert_eq!(events[0]["event"], "approval_requested");
+        assert_eq!(events[0]["callId"], "call-1");
+    }
+
+    /// The approval event is REPORT-ONLY: a command's deny verdict enforces
+    /// nothing — the request stays with the user — and is reported as failed.
+    #[tokio::test]
+    async fn an_approval_command_verdict_enforces_nothing() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s37".to_string(),
+            vec![HookRule {
+                command: Some(r#"echo '{"decision":"deny","reason":"no"}'"#.to_string()),
+                ..rule(
+                    "objector",
+                    HookEvent::ApprovalRequested,
+                    HookAction::RunCommand,
+                )
+            }],
+        )
+        .with_notifier(Some(notifier))
+        .with_working_dir(dir.path().to_path_buf());
+
+        ext.on_approval_requested("bash", &json!({"command": "rm -rf /"}), "call-1")
+            .await;
+
+        let events = seen.lock().unwrap();
+        assert_eq!(events[0]["outcome"], "failed");
+    }
+
+    /// The wrapper forwards the payload untouched and fires the rules from a
+    /// spawned task, so a slow hook can never delay the approval prompt.
+    #[tokio::test]
+    async fn wrap_approval_emitter_forwards_and_fires_rules() {
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let rules = Arc::new(
+            RuleHookExtension::new(
+                "s38".to_string(),
+                vec![rule(
+                    "ping",
+                    HookEvent::ApprovalRequested,
+                    HookAction::Notify,
+                )],
+            )
+            .with_notifier(Some(notifier)),
+        );
+
+        let forwarded: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let inner_sink = forwarded.clone();
+        let inner: ApprovalEmitter = Arc::new(move |payload| {
+            inner_sink.lock().unwrap().push(payload);
+        });
+
+        let wrapped = wrap_approval_emitter(rules, inner);
+        wrapped(json!({
+            "sessionId": "s38",
+            "callId": "call-9",
+            "toolName": "bash",
+            "args": {"command": "rm -rf /tmp/x"},
+            "requestId": "r1",
+        }));
+
+        assert_eq!(
+            forwarded.lock().unwrap().len(),
+            1,
+            "the approval payload must reach the frontend regardless of rules"
+        );
+
+        // The rule fires on a spawned task; poll briefly for it.
+        for _ in 0..50 {
+            if !seen.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let events = seen.lock().unwrap();
+        assert_eq!(events.len(), 1, "the approval rule must fire");
+        assert_eq!(events[0]["callId"], "call-9");
+        assert_eq!(events[0]["toolName"], "bash");
     }
 }
