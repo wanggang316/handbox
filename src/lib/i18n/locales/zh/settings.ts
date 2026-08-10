@@ -106,7 +106,7 @@ export const settingsZh = {
 
   // Hook rules page
   "settings.hooks.description":
-    "在 Agent 调用工具前后或提交提示词时自动执行动作，按顺序匹配，命中的第一条生效",
+    "在 Agent 生命周期的关键节点（调用工具、提交提示词、回复结束、等待审批）自动执行动作，按顺序匹配，命中的第一条生效",
   "settings.hooks.add": "添加规则",
   "settings.hooks.addTitle": "添加规则",
   "settings.hooks.editTitle": "编辑规则",
@@ -115,9 +115,12 @@ export const settingsZh = {
     "添加规则可在工具调用前后自动执行命令（格式化、提交、注入上下文等），或在命中特定操作时收到提醒。",
   "settings.hooks.anyArgument": "任意参数",
   "settings.hooks.promptSubject": "提示词",
+  "settings.hooks.replySubject": "回复",
   "settings.hooks.event.before": "工具调用前",
   "settings.hooks.event.after": "工具调用后",
   "settings.hooks.event.prompt": "提交提示词时",
+  "settings.hooks.event.turnEnd": "回复结束时",
+  "settings.hooks.event.approval": "等待审批时",
   "settings.hooks.action.notify": "提醒",
   "settings.hooks.action.runCommand": "执行命令",
   "settings.hooks.field.name": "名称",
@@ -129,9 +132,11 @@ export const settingsZh = {
   "settings.hooks.field.argContains": "参数包含（可选）",
   "settings.hooks.field.promptContains": "提示词包含（可选）",
   "settings.hooks.field.promptContainsPlaceholder": "留空则每次提交都触发",
+  "settings.hooks.field.replyContains": "回复包含（可选）",
+  "settings.hooks.field.replyContainsPlaceholder": "留空则每次回复结束都触发",
   "settings.hooks.field.command": "命令",
   "settings.hooks.field.commandHint":
-    '脚本通过 /bin/sh 在会话工作目录执行，事件 JSON 从标准输入传入，默认 10 秒超时。\n\n可用环境变量\n· $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME\n· $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME\n\n输出的含义\n· 普通输出：提交提示词时作为上下文交给模型\n· {"decision":"deny","reason":"…"}：拦截本次调用\n· {"updatedInput":{…}}：改写参数；调用后则改写结果（可脱敏）\n· 非零退出码：视为拦截',
+    '脚本通过 /bin/sh 在会话工作目录执行，事件 JSON 从标准输入传入，默认 10 秒超时。\n\n可用环境变量\n· $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME\n· $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME\n\n输出的含义\n· 普通输出：提交提示词时作为上下文交给模型\n· {"decision":"deny","reason":"…"}：拦截本次调用\n· {"updatedInput":{…}}：改写参数；调用后则改写结果（可脱敏）\n· 非零退出码：视为拦截\n\n各时机的差异\n· 回复结束时：deny 会让 Agent 带着 reason 继续工作（最多续 3 轮）；命令失败只提示\n· 等待审批时：仅执行副作用（如响铃、推送），输出不影响审批',
   "settings.hooks.field.message": "说明（可选）",
   "settings.hooks.field.messagePlaceholder": "命中时随提醒一起展示",
   "settings.hooks.field.hint":

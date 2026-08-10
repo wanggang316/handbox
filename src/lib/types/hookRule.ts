@@ -3,13 +3,19 @@
  * Mirrors `src-tauri/src/storage/types/hook_rule.rs`.
  */
 
-/** Which point of the tool-call lifecycle a rule fires at. */
+/** Which point of the agent's lifecycle a rule fires at. */
 export type HookEvent =
   | "before_tool_call"
   | "after_tool_call"
   /** The prompt the user submitted, before it enters the transcript. Matched
    *  against the prompt text, and can be rewritten or refused. */
-  | "user_prompt_submit";
+  | "user_prompt_submit"
+  /** The agent finished its reply. Matched against the assistant's final
+   *  text; a command's deny verdict sends the agent back to work. */
+  | "turn_end"
+  /** A tool call paused for the user's approval. Matched like
+   *  `before_tool_call`, but the actions are report-only. */
+  | "approval_requested";
 
 /**
  * What a matching rule does. Hooks execute actions rather than gate calls —
@@ -85,10 +91,13 @@ export type HookRuleOutcome =
   | "ran"
   /** Its command rewrote the tool's arguments. */
   | "rewrote"
-  /** It failed after the call had run, so nothing could be undone. */
+  /** Its command broke — or objected on a report-only event — with nothing
+   *  left to enforce. */
   | "failed"
   /** Its command contributed context for the model to read this turn. */
-  | "informed";
+  | "informed"
+  /** Its command refused to let the turn end, so the agent keeps working. */
+  | "resumed";
 
 /**
  * Payload of `agent_hook_rule_notify`, emitted on **every** rule match, not

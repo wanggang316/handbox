@@ -112,7 +112,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
 
   // Hook rules page
   "settings.hooks.description":
-    "Actions run automatically around the agent's tool calls and prompts, matched in order — the first hit decides",
+    "Actions run automatically at the agent's lifecycle points (tool calls, prompt submit, turn end, approval), matched in order — the first hit decides",
   "settings.hooks.add": "Add rule",
   "settings.hooks.addTitle": "Add rule",
   "settings.hooks.editTitle": "Edit rule",
@@ -121,9 +121,12 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
     "Add a rule to run a command around tool calls (format, commit, inject context), or get notified when an operation you care about happens.",
   "settings.hooks.anyArgument": "any argument",
   "settings.hooks.promptSubject": "prompt",
+  "settings.hooks.replySubject": "reply",
   "settings.hooks.event.before": "Before tool call",
   "settings.hooks.event.after": "After tool call",
   "settings.hooks.event.prompt": "On prompt submit",
+  "settings.hooks.event.turnEnd": "On turn end",
+  "settings.hooks.event.approval": "On approval request",
   "settings.hooks.action.notify": "Notify",
   "settings.hooks.action.runCommand": "Run command",
   "settings.hooks.field.name": "Name",
@@ -136,9 +139,12 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.hooks.field.promptContains": "Prompt contains (optional)",
   "settings.hooks.field.promptContainsPlaceholder":
     "Leave empty to fire on every prompt",
+  "settings.hooks.field.replyContains": "Reply contains (optional)",
+  "settings.hooks.field.replyContainsPlaceholder":
+    "Leave empty to fire when every reply ends",
   "settings.hooks.field.command": "Command",
   "settings.hooks.field.commandHint":
-    'The script runs via /bin/sh in the session\'s working directory; the event arrives as JSON on stdin, 10s timeout by default.\n\nEnvironment variables\n· $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME\n· $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME\n\nWhat the output means\n· Plain output: becomes context for the model on prompt submit\n· {"decision":"deny","reason":"…"}: blocks this call\n· {"updatedInput":{…}}: rewrites the arguments; after a call, the result (redaction)\n· Non-zero exit: treated as a block',
+    'The script runs via /bin/sh in the session\'s working directory; the event arrives as JSON on stdin, 10s timeout by default.\n\nEnvironment variables\n· $HANDBOX_HOOK_EVENT / $HANDBOX_TOOL_NAME\n· $HANDBOX_SESSION_ID / $HANDBOX_RULE_NAME\n\nWhat the output means\n· Plain output: becomes context for the model on prompt submit\n· {"decision":"deny","reason":"…"}: blocks this call\n· {"updatedInput":{…}}: rewrites the arguments; after a call, the result (redaction)\n· Non-zero exit: treated as a block\n\nPer-event differences\n· On turn end: deny sends the agent back to work with the reason (up to 3 rounds); a broken command only reports\n· On approval request: side effects only (ring, push) — output never affects the decision',
   "settings.hooks.field.message": "Message (optional)",
   "settings.hooks.field.messagePlaceholder":
     "Shown alongside the notice when the rule fires",
