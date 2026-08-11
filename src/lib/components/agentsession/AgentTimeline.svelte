@@ -274,12 +274,41 @@
   // turn should still read as being at the bottom.
   const BOTTOM_EPSILON = 24;
 
+  // Where the first render should start: the tail, or the remembered row when
+  // the reader left mid-transcript (that row and everything under it must exist
+  // before the position means anything). Pure — no rune reads — so the fill loop
+  // can call it without making its caller's effect depend on `windowStart`.
+  function windowStartFor(id: string, total: number): number {
+    const tailStart = Math.max(0, total - INITIAL_WINDOW);
+    const anchor = scrollMemory.get(id);
+    if (!anchor || anchor === "bottom") return tailStart;
+    return Math.min(anchor.index, tailStart);
+  }
+
   // First rendered message index; 0 once the whole transcript is mounted.
-  let windowStart = $state(0);
+  // Seeded at init, not from an effect: effects run after the first render, so
+  // starting at 0 would build the entire transcript and immediately throw it
+  // away — exactly the cost this avoids.
+  let windowStart = $state(
+    untrack(() => windowStartFor(sessionId, runState.messages.length)),
+  );
 
   // Whether the reader is parked at the end. Plain `let`, not `$state`: it
   // gates imperative scrolling and must not invalidate anything when it flips.
   let stickToBottom = true;
+
+  // True while openWindow is positioning the view. Programmatic scrolling fires
+  // the same scroll events the reader's own does, and treating those as intent
+  // would overwrite the very position being restored.
+  let opening = false;
+
+  // Real input during the open sequence: the reader has taken over, so stop
+  // re-asserting the anchor under them.
+  let readerMoved = false;
+
+  function noteReaderInput() {
+    readerMoved = true;
+  }
 
   // Auto-scroll (new turn, streaming text, hook notice) applies only to a
   // reader who is already at the end — otherwise reading history mid-run, or a
@@ -340,7 +369,7 @@
   // rAF-throttled: scroll fires far more often than the memory needs updating,
   // and reading layout on every event would trade one jank for another.
   function handleScroll() {
-    if (scrollFrame) return;
+    if (opening || scrollFrame) return;
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = 0;
       const anchor = readAnchor();
@@ -366,39 +395,56 @@
     });
   }
 
-  // `start` is a local, never a read of `windowStart`: the first loop check runs
-  // synchronously inside the caller's effect, and reading the rune there would
-  // make the effect depend on the very state this loop writes — a reset/refill
-  // cycle that never lands on 0.
+  function raf(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  /**
+   * Open the session at `anchor`, then widen the window upwards a chunk at a
+   * time until the whole transcript is mounted.
+   *
+   * `from` is passed in rather than read off `windowStart`: this function's
+   * first statements run synchronously inside the caller's effect, and reading
+   * the rune there would make that effect depend on the state this loop writes
+   * — a reset/refill cycle that never lands on 0.
+   *
+   * The anchor is re-asserted after every mutation instead of preserving a
+   * pixel offset. Each chunk prepends content above the reader, and a one-shot
+   * placement cannot survive that, nor the late layout (images, KaTeX, code
+   * blocks) that keeps changing heights for a few frames afterwards.
+   */
   async function openWindow(
     cancelled: () => boolean,
-    total: number,
+    from: number,
     anchor: ScrollAnchor,
   ) {
-    const tailStart = Math.max(0, total - INITIAL_WINDOW);
-    // Mount down from the remembered row when there is one: a position in the
-    // middle of the transcript only means something once that row exists.
-    let start = anchor === "bottom" ? tailStart : Math.min(anchor.index, tailStart);
-    windowStart = start;
-    await tick();
-    if (cancelled() || !messagesContainer) return;
-    // Settle where the reader was before filling: every chunk below measures
-    // its offset against the bottom, so it needs a truthful starting position.
-    restoreAnchor(anchor);
+    const stop = () => cancelled() || readerMoved || !messagesContainer;
 
-    while (!cancelled() && start > 0) {
-      await idle();
-      if (cancelled() || !messagesContainer) return;
-      // Older messages prepend above the viewport and push content down, so
-      // hold the distance to the bottom rather than the raw offset — this keeps
-      // the view still whether the reader sits at the bottom or has scrolled up.
-      const fromBottom =
-        messagesContainer.scrollHeight - messagesContainer.scrollTop;
-      start = Math.max(0, start - FILL_CHUNK);
-      windowStart = start;
+    opening = true;
+    readerMoved = false;
+    try {
+      let start = from;
       await tick();
-      if (cancelled() || !messagesContainer) return;
-      messagesContainer.scrollTop = messagesContainer.scrollHeight - fromBottom;
+      if (stop()) return;
+      restoreAnchor(anchor);
+
+      while (!stop() && start > 0) {
+        await idle();
+        if (stop()) return;
+        start = Math.max(0, start - FILL_CHUNK);
+        windowStart = start;
+        await tick();
+        if (stop()) return;
+        restoreAnchor(anchor);
+      }
+
+      for (let frame = 0; frame < 3; frame += 1) {
+        await raf();
+        if (stop()) return;
+        restoreAnchor(anchor);
+      }
+    } finally {
+      opening = false;
     }
   }
 
@@ -413,8 +459,11 @@
     const anchor = scrollMemory.get(id) ?? "bottom";
     stickToBottom = anchor === "bottom";
 
+    const start = windowStartFor(id, total);
+    windowStart = start;
+
     let stopped = false;
-    void openWindow(() => stopped, total, anchor);
+    void openWindow(() => stopped, start, anchor);
     return () => {
       stopped = true;
     };
@@ -494,6 +543,8 @@
   bind:this={messagesContainer}
   class="flex-1 overflow-y-auto select-text scroll-column"
   onscroll={handleScroll}
+  onwheel={noteReaderInput}
+  ontouchmove={noteReaderInput}
 >
   <div class="chat-column py-4 space-y-6">
     <!-- Hook firings that preceded every message (a prompt rule on the first turn). -->
