@@ -1,5 +1,14 @@
+<script module lang="ts">
+  /**
+   * The session list's scroll offset, kept outside the component so it survives
+   * a teardown: entering settings unmounts the whole app layout, and a reader
+   * whose session sits far down a long list should not be dumped back at the top.
+   */
+  let listScrollTop = 0;
+</script>
+
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { slide } from "svelte/transition";
   import { goto } from "$app/navigation";
   import {
@@ -86,8 +95,65 @@
     initialLoadDone = true;
   }
 
+  let listEl: HTMLDivElement | undefined;
+  let scrollFrame = 0;
+
+  // Set while the restore is driving scrollTop. Programmatic scrolling raises
+  // the same events the reader's own does, and a restore that lands clamped
+  // against a still-short list would otherwise record the clamped value and
+  // lose the position it was reaching for.
+  let restoringScroll = false;
+
+  // Real input hands control back: stop asserting the old offset under them.
+  let readerTookOver = false;
+
+  function handleListScroll() {
+    if (restoringScroll || scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      listScrollTop = listEl?.scrollTop ?? 0;
+    });
+  }
+
+  function noteReaderInput() {
+    readerTookOver = true;
+  }
+
+  function raf(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  /**
+   * The list fills in stages — the warm store paints first, then the three
+   * fetches land — so a single assignment clamps against content that is still
+   * short. Keep asserting until the offset sticks, or until the budget runs out
+   * (the list genuinely shrank, e.g. sessions were deleted while away).
+   */
+  async function restoreListScroll() {
+    const target = listScrollTop;
+    if (target <= 0) return;
+
+    restoringScroll = true;
+    readerTookOver = false;
+    try {
+      for (let frame = 0; frame < 40 && !readerTookOver; frame += 1) {
+        await tick();
+        if (!listEl) return;
+        if (listEl.scrollTop !== target) {
+          listEl.scrollTop = target;
+        }
+        if (listEl.scrollTop === target && frame >= 2) break;
+        await raf();
+      }
+    } finally {
+      restoringScroll = false;
+    }
+  }
+
   onMount(() => {
     loadSidebarData();
+    void restoreListScroll();
+    return () => cancelAnimationFrame(scrollFrame);
   });
 
   // Location of the active session (bucket key + optional project collapse
@@ -625,7 +691,13 @@
 
   <!-- Grouped list (Agent → Project → Session; sessions without a source agent
        fall into the trailing Chats bucket). -->
-  <div class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-2">
+  <div
+    bind:this={listEl}
+    class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-2"
+    onscroll={handleListScroll}
+    onwheel={noteReaderInput}
+    ontouchmove={noteReaderInput}
+  >
     {#if !initialLoadDone}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
         {t("common.loading")}
