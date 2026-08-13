@@ -5,6 +5,10 @@
  * summon use, and is it runnable?". Both the overlay send path and the
  * settings page lean on this.
  *
+ * The resolution itself is the shared `resolveDefaultModel` helper (the agent
+ * settings' default model resolves the same way); this module only binds it to
+ * the `quickAction` settings slice.
+ *
  * Kept as a PURE function (catalog + settings passed in as arguments) so it
  * is unit-testable without mounting the provider/settings stores. Callers
  * pass `settingsState.settings?.quickAction` and `getAllModels()`.
@@ -12,33 +16,27 @@
 
 import type { ModelWithProvider } from "../types/provider";
 import type { QuickActionSettings } from "../types/settings";
+import {
+  resolveDefaultModel,
+  type DefaultModelEmptyReason,
+  type DefaultModelResolution,
+  type DefaultModelResolved,
+  type DefaultModelEmpty,
+} from "../utils/defaultModel";
 
 /**
  * Why a configured quick-action default cannot produce a runnable model.
  * Callers use this to decide which "configure a model" prompt to show.
  */
-export type QuickActionEmptyReason =
-  | "empty-catalog" // no enabled provider+model exists at all
-  | "no-default" // the user has not picked a default model yet
-  | "dangling-default"; // a default was set but is no longer in the catalog
+export type QuickActionEmptyReason = DefaultModelEmptyReason;
 
 /** The overlay has a resolved, runnable default model. */
-export interface QuickActionModelResolved {
-  available: true;
-  modelId: string;
-  providerId: string;
-  model: ModelWithProvider;
-}
+export type QuickActionModelResolved = DefaultModelResolved;
 
 /** The overlay has no runnable default; show the configure prompt instead. */
-export interface QuickActionModelEmpty {
-  available: false;
-  reason: QuickActionEmptyReason;
-}
+export type QuickActionModelEmpty = DefaultModelEmpty;
 
-export type QuickActionModelResolution =
-  | QuickActionModelResolved
-  | QuickActionModelEmpty;
+export type QuickActionModelResolution = DefaultModelResolution;
 
 /**
  * Resolve the quick-action overlay's effective model against the catalog.
@@ -53,24 +51,5 @@ export function resolveQuickActionModel(
   quickActionSettings: QuickActionSettings | undefined | null,
   allModels: ModelWithProvider[],
 ): QuickActionModelResolution {
-  if (allModels.length === 0) {
-    return { available: false, reason: "empty-catalog" };
-  }
-
-  const modelId = quickActionSettings?.modelId;
-  const providerId = quickActionSettings?.providerId;
-  if (!modelId || !providerId) {
-    return { available: false, reason: "no-default" };
-  }
-
-  // Catalog item key mirrors AgentInput's lookup: the Model type uses
-  // snake_case `provider_id` while settings store camelCase `providerId`.
-  const model = allModels.find(
-    (m) => m.id === modelId && m.provider_id === providerId,
-  );
-  if (!model) {
-    return { available: false, reason: "dangling-default" };
-  }
-
-  return { available: true, modelId, providerId, model };
+  return resolveDefaultModel(quickActionSettings, allModels);
 }

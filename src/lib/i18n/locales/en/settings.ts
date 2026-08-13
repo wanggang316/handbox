@@ -80,7 +80,17 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   // Agent Tools page
   "settings.agentTools.title": "Agent Tools",
   "settings.agentTools.description":
-    "Tools enabled by default for new Agent sessions. Existing sessions are unaffected.",
+    "Model and tools new Agent sessions start with. Existing sessions are unaffected.",
+  "settings.agentTools.defaultModel.title": "Default model",
+  "settings.agentTools.defaultModel.label": "Model for new sessions",
+  "settings.agentTools.defaultModel.hint":
+    "Model picked automatically when a new Agent session is created; you can still switch inside the session.",
+  "settings.agentTools.defaultModel.none": "Not selected",
+  "settings.agentTools.defaultModel.unavailable":
+    "The selected model is no longer available — pick another",
+  "settings.agentTools.defaultModel.emptyCatalog":
+    "Enable a provider and add a model under Models first.",
+  "settings.agentTools.defaultModel.openModels": "Open model settings",
   "settings.agentTools.webSearch.title": "Web Search",
   "settings.agentTools.webSearch.provider": "Search provider",
   "settings.agentTools.webSearch.apiKey": "API Key",

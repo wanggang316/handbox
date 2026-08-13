@@ -71,6 +71,8 @@ export interface WebSearchSettings {
 export interface AgentSettings {
   defaultEnabledTools: string[]; // Enabled by default for new sessions (registration names, incl. extension tools).
   defaultEditorId?: string | null; // Default "Open in ..." target id (see api/openIn.ts).
+  defaultModelId?: string | null; // Model new sessions start on; unset = the composer asks for one.
+  defaultProviderId?: string | null; // Provider owning defaultModelId; always written as a pair.
   webSearch?: WebSearchSettings; // Absent = unconfigured.
 }
 
