@@ -216,6 +216,8 @@ pub fn run() {
             agent_session_rename,
             agent_session_generate_title,
             agent_session_update_field,
+            agent_session_set_pinned,
+            agent_session_set_archived,
             agent_session_delete,
             agent_session_messages,
             // Agent projects: sessions grouped by working directory

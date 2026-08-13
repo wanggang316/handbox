@@ -306,6 +306,8 @@ mod tests {
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
+            pinned: false,
+            archived: false,
             created_at,
             updated_at: created_at,
         }

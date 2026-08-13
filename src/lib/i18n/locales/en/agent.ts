@@ -171,6 +171,20 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.deleteProject": "Delete project",
   "agent.list.copyId": "Copy ID",
   "agent.list.untitledSession": "Untitled",
+
+  // Session row hover actions + the Archived group
+  "agent.list.pin": "Pin",
+  "agent.list.unpin": "Unpin",
+  "agent.list.archive": "Archive",
+  "agent.list.unarchive": "Unarchive",
+  "agent.list.archived": "Archived",
+  "agent.list.pinFailed": "Failed to pin the session",
+  "agent.list.archiveFailed": "Failed to archive the session",
+
+  // Session hover card
+  "agent.list.card.messages": "{count} messages",
+  "agent.list.card.localRun": "Runs on your computer",
+
   "agent.list.deleteProjectConfirm":
     "This will delete project “{name}” and its {count} session(s) permanently.",
   "agent.list.deleteProjectFailed": "Failed to delete project",

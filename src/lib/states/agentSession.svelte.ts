@@ -125,6 +125,36 @@ async function maybeAutoGenerateTitle(
   }
 }
 
+/** Writes a session object into the list and, when it is current, there too. */
+function applySession(id: UUID, session: AgentSession): void {
+  const index = sessions.findIndex((item) => item.id === id);
+  if (index !== -1) {
+    sessions[index] = session;
+  }
+  if (currentSession?.id === id) {
+    currentSession = session;
+  }
+}
+
+/**
+ * Optimistically merges sidebar flags into the local session and returns the
+ * undo. A session that is not (or no longer) listed yields a no-op undo, so a
+ * failed toggle on a deleted session cannot resurrect it.
+ */
+function applySessionFlags(
+  id: UUID,
+  patch: { pinned?: boolean; archived?: boolean },
+): () => void {
+  const previous = sessions.find((session) => session.id === id);
+  if (!previous) return () => {};
+  applySession(id, { ...previous, ...patch });
+  return () => {
+    if (sessions.some((session) => session.id === id)) {
+      applySession(id, previous);
+    }
+  };
+}
+
 export const agentSessionState = {
   get sessions() {
     return sessions;
@@ -282,6 +312,38 @@ export const agentSessionActions = {
       currentSession = updated;
     }
     return updated;
+  },
+
+  /**
+   * Pin / unpin a session. Optimistic: the flag flips locally first so the row
+   * reorders under the cursor without a round-trip, then the backend's returned
+   * session replaces the entry. A failure rolls the flag back and rethrows so
+   * the caller can surface it.
+   */
+  async setPinned(id: UUID, pinned: boolean): Promise<void> {
+    const rollback = applySessionFlags(id, { pinned });
+    try {
+      applySession(id, await agentSessionApi.setAgentSessionPinned(id, pinned));
+    } catch (error) {
+      rollback();
+      console.error("Failed to pin agent session:", error);
+      throw error;
+    }
+  },
+
+  /** Archive / unarchive a session; same optimistic contract as `setPinned`. */
+  async setArchived(id: UUID, archived: boolean): Promise<void> {
+    const rollback = applySessionFlags(id, { archived });
+    try {
+      applySession(
+        id,
+        await agentSessionApi.setAgentSessionArchived(id, archived),
+      );
+    } catch (error) {
+      rollback();
+      console.error("Failed to archive agent session:", error);
+      throw error;
+    }
   },
 
   /** Delete a session: remove from the list; clear current if it was current. */

@@ -131,6 +131,32 @@ export async function updateAgentSessionField(
   });
 }
 
+/**
+ * Pins / unpins a session in the sidebar. Its own command rather than an
+ * `updateAgentSessionField` case: the backend writes the single column so a
+ * concurrent field edit cannot revert it.
+ */
+export async function setAgentSessionPinned(
+  sessionId: UUID,
+  pinned: boolean,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_set_pinned", {
+    sessionId,
+    pinned,
+  });
+}
+
+/** Archives / unarchives a session; nothing is deleted, so it is reversible. */
+export async function setAgentSessionArchived(
+  sessionId: UUID,
+  archived: boolean,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_set_archived", {
+    sessionId,
+    archived,
+  });
+}
+
 export async function deleteAgentSession(sessionId: UUID): Promise<void> {
   return apiCall<void>("agent_session_delete", { sessionId });
 }

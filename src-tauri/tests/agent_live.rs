@@ -185,6 +185,8 @@ fn seeded_session(
         tool_execution_mode: None,
         message_count: 0,
         last_message_at: None,
+        pinned: false,
+        archived: false,
         created_at: now_ms(),
         updated_at: now_ms(),
     };

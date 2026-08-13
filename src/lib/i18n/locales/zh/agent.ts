@@ -160,6 +160,20 @@ export const agentZh = {
   "agent.list.deleteProject": "删除项目",
   "agent.list.copyId": "复制ID",
   "agent.list.untitledSession": "未命名",
+
+  // Session row hover actions + the Archived group
+  "agent.list.pin": "置顶",
+  "agent.list.unpin": "取消置顶",
+  "agent.list.archive": "归档",
+  "agent.list.unarchive": "取消归档",
+  "agent.list.archived": "已归档",
+  "agent.list.pinFailed": "置顶失败",
+  "agent.list.archiveFailed": "归档失败",
+
+  // Session hover card
+  "agent.list.card.messages": "{count} 条消息",
+  "agent.list.card.localRun": "在本机运行",
+
   "agent.list.deleteProjectConfirm":
     "将删除项目“{name}”及其 {count} 个会话，不可恢复。",
   "agent.list.deleteProjectFailed": "删除项目失败",
