@@ -25,6 +25,8 @@
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
+  import { agentQuestionStore } from "$lib/states/agentQuestion.svelte";
+  import AgentQuestionPanel from "./AgentQuestionPanel.svelte";
   import { getAllModels, getProviderIconById } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
   import { listSkills } from "$lib/api/skill";
@@ -32,6 +34,8 @@
     Agent,
     AgentSession,
     AgentRunAttachment,
+    AgentQuestionRequest,
+    AgentQuestionResponse,
     SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
@@ -255,6 +259,15 @@
   // conversation: input disabled, send blocked, until the user decides in the
   // page-level AgentApprovalModal.
   const awaitingApproval = $derived(agentApprovalStore.hasPending(session.id));
+
+  // A pending `ask_question` call pauses the conversation the same way, except
+  // the answering surface is the inline panel above this composer rather than a
+  // modal — the user must answer or skip before typing again.
+  const pendingQuestion = $derived(agentQuestionStore.pendingFor(session.id));
+
+  // Either pause disables the composer; they never overlap in practice (the
+  // agent loop awaits one parked call at a time) but the guard is symmetric.
+  const paused = $derived(awaitingApproval || pendingQuestion !== null);
 
   // Slash skill autocomplete: typing `/` into an empty textarea (not pasted,
   // not during IME composition) opens a popover of enabled skills filtered
@@ -507,9 +520,9 @@
   });
 
   async function sendAgentRun() {
-    // Approval pending: neither start a run nor enqueue steering until the
-    // user decides in the approval modal. No-op, input preserved.
-    if (awaitingApproval) return;
+    // Paused on an approval or a question: neither start a run nor enqueue
+    // steering until the user decides. No-op, input preserved.
+    if (paused) return;
 
     // Run in progress: route the message into the active run's steering queue
     // (drained at turn boundaries) instead of starting a second run. Steering
@@ -612,6 +625,15 @@
       });
   }
 
+  // Answers (or a dismissal) flow straight back to the parked tool call. Pass
+  // the request the panel is showing so the store answers that exact requestId.
+  function handleQuestionRespond(
+    request: AgentQuestionRequest,
+    response: AgentQuestionResponse,
+  ) {
+    void agentQuestionStore.respondTo(request, response);
+  }
+
   function handleThinkingChange(value: string) {
     agentSessionActions
       .updateField(session.id, "thinkingLevel", value)
@@ -659,6 +681,48 @@
   </div>
 {/if}
 
+<!-- ask_question panel, docked directly above the composer so it reads as
+     sliding up out of the input. `{#key requestId}` remounts it per request, so
+     a new question set never inherits the previous one's selections. -->
+{#if pendingQuestion}
+  {#key pendingQuestion.requestId}
+    <AgentQuestionPanel
+      request={pendingQuestion}
+      onRespond={handleQuestionRespond}
+    />
+  {/key}
+{/if}
+
+<!-- Composer status line. Deliberately ABOVE the input box, not inside it:
+     these are notices about the conversation's state, not part of what the user
+     is composing, and rendering them between the textarea and the button row
+     made the box look like it had grown an extra field. Every status message
+     the composer shows belongs here. -->
+{#if awaitingApproval || pendingQuestion || modelPrompt}
+  <div class="flex w-full flex-col gap-1 pb-1.5">
+    {#if awaitingApproval}
+      <!-- Paused on a dangerous tool call: a gate, so it reads as a warning. -->
+      <div class="flex items-center gap-2 px-1 text-xs text-warning">
+        <span
+          class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+        ></span>
+        <span>{t("agent.input.awaitingApprovalHint")}</span>
+      </div>
+    {:else if pendingQuestion}
+      <!-- Paused on the question panel above — not a gate, so primary accent. -->
+      <div class="flex items-center gap-2 px-1 text-xs text-primary">
+        <span
+          class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+        ></span>
+        <span>{t("agent.input.awaitingQuestionHint")}</span>
+      </div>
+    {/if}
+    {#if modelPrompt}
+      <div class="px-1 text-xs text-warning">{modelPrompt}</div>
+    {/if}
+  </div>
+{/if}
+
 <div
   class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] w-full"
 >
@@ -682,13 +746,15 @@
       bind:value={input}
       placeholder={awaitingApproval
         ? t("agent.input.awaitingApprovalPlaceholder")
-        : t("agent.input.placeholder")}
+        : pendingQuestion
+          ? t("agent.input.awaitingQuestionPlaceholder")
+          : t("agent.input.placeholder")}
       onkeydown={handleKeydown}
       oninput={handleInput}
       oncompositionstart={handleCompositionStart}
       oncompositionend={handleCompositionEnd}
       rows="1"
-      disabled={awaitingApproval}
+      disabled={paused}
       class="composer-input bg-transparent text-[14px] text-base-content/80 p-4 outline-none resize-none w-full min-h-[48px] max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-60"
     ></textarea>
   </div>
@@ -714,22 +780,6 @@
           </button>
         </div>
       {/each}
-    </div>
-  {/if}
-
-  {#if awaitingApproval}
-    <!-- Approval-pending indicator: the conversation is paused on a dangerous tool call. -->
-    <div class="px-4 pb-1 flex items-center gap-2 text-xs text-warning">
-      <span
-        class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
-      ></span>
-      <span>{t("agent.input.awaitingApprovalHint")}</span>
-    </div>
-  {/if}
-
-  {#if modelPrompt}
-    <div class="px-4 pb-1 text-xs text-warning">
-      {modelPrompt}
     </div>
   {/if}
 
@@ -915,7 +965,7 @@
           shape="pill"
           class="enabled:hover:opacity-90"
           ariaLabel={t("agent.input.send")}
-          disabled={awaitingApproval}
+          disabled={paused}
           onclick={sendAgentRun}
         >
           <ArrowUp size={18} />

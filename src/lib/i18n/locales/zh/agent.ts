@@ -27,6 +27,8 @@ export const agentZh = {
   "agent.input.awaitingApprovalPlaceholder": "等待审批中，请在弹窗中允许或拒绝",
   "agent.input.placeholder": "在这里输入消息，按 Enter 发送",
   "agent.input.awaitingApprovalHint": "等待工具审批，对话已暂停",
+  "agent.input.awaitingQuestionPlaceholder": "请先回答上方的问题，或选择跳过",
+  "agent.input.awaitingQuestionHint": "等待你的回答，对话已暂停",
   "agent.input.addImage": "添加图片",
   "agent.input.uploadImage": "上传图片",
   "agent.input.stop": "停止",
@@ -83,6 +85,7 @@ export const agentZh = {
   "agent.tool.web_search": "web_search",
   "agent.tool.render_card": "render_card",
   "agent.tool.render_app": "render_app",
+  "agent.tool.ask_question": "ask_question",
   "agent.tool.skill": "skill",
 
   // Tool-call card (AgentToolCallCard)
@@ -122,6 +125,22 @@ export const agentZh = {
   "agent.approval.deny": "拒绝",
   "agent.approval.allowOnce": "本次允许",
   "agent.approval.allowAlways": "始终允许",
+
+  // Question panel (AgentQuestionPanel; the ask_question tool)
+  "agent.question.panelAria": "Agent 提问",
+  "agent.question.title": "Agent 想了解",
+  "agent.question.progress": "第 {current} / {total} 题",
+  "agent.question.prev": "上一题",
+  "agent.question.next": "下一题",
+  "agent.question.goTo": "跳到第 {index} 题",
+  "agent.question.kindSingle": "单选",
+  "agent.question.kindMultiple": "多选",
+  "agent.question.kindText": "填写",
+  "agent.question.textPlaceholder": "输入你的回答…",
+  "agent.question.required": "必填",
+  "agent.question.submitBlocked": "请先回答标记为必填的问题",
+  "agent.question.dismiss": "跳过，继续沟通",
+  "agent.question.submit": "提交",
 
   // Skill slash popover (SkillSlashPopover)
   "agent.slash.ariaLabel": "Skill 自动补全",

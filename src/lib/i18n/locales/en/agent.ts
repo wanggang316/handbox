@@ -34,6 +34,10 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.placeholder": "Type a message, press Enter to send",
   "agent.input.awaitingApprovalHint":
     "Awaiting tool approval, conversation paused",
+  "agent.input.awaitingQuestionPlaceholder":
+    "Answer the questions above, or skip them",
+  "agent.input.awaitingQuestionHint":
+    "Awaiting your answer, conversation paused",
   "agent.input.addImage": "Add image",
   "agent.input.uploadImage": "Upload image",
   "agent.input.stop": "Stop",
@@ -92,6 +96,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.tool.web_search": "web_search",
   "agent.tool.render_card": "render_card",
   "agent.tool.render_app": "render_app",
+  "agent.tool.ask_question": "ask_question",
   "agent.tool.skill": "skill",
 
   // Tool-call card (AgentToolCallCard)
@@ -131,6 +136,22 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.approval.deny": "Deny",
   "agent.approval.allowOnce": "Allow once",
   "agent.approval.allowAlways": "Always allow",
+
+  // Question panel (AgentQuestionPanel; the ask_question tool)
+  "agent.question.panelAria": "Agent questions",
+  "agent.question.title": "The agent needs your input",
+  "agent.question.progress": "{current} of {total}",
+  "agent.question.prev": "Previous question",
+  "agent.question.next": "Next question",
+  "agent.question.goTo": "Go to question {index}",
+  "agent.question.kindSingle": "Pick one",
+  "agent.question.kindMultiple": "Pick any",
+  "agent.question.kindText": "Write",
+  "agent.question.textPlaceholder": "Type your answer…",
+  "agent.question.required": "Required",
+  "agent.question.submitBlocked": "Answer the required questions first",
+  "agent.question.dismiss": "Skip and keep talking",
+  "agent.question.submit": "Submit",
 
   // Skill slash popover (SkillSlashPopover)
   "agent.slash.ariaLabel": "Skill autocomplete",

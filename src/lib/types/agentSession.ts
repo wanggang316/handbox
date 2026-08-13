@@ -378,6 +378,76 @@ export interface AgentApprovalRequest {
 export type ApprovalDecision = "deny" | "allow_once" | "allow_always";
 
 /**
+ * How one `ask_question` question is answered; mirrors the backend
+ * `QuestionKind` (serde snake_case), wire values verbatim.
+ *  - `"single"`: pick exactly one option.
+ *  - `"multiple"`: pick any number of options.
+ *  - `"text"`: free-form reply, no options.
+ */
+export type AgentQuestionKind = "single" | "multiple" | "text";
+
+/** One selectable option of a choice question. */
+export interface AgentQuestionOption {
+  label: string;
+  /** Optional one-line elaboration rendered under the label. */
+  description?: string;
+}
+
+/**
+ * One question of an `ask_question` call, already validated and normalized
+ * backend-side (`type` is always one of the three kinds; choice questions
+ * always carry 2-8 options, `text` carries none).
+ */
+export interface AgentQuestion {
+  /** Stable per-call id (`q0`, `q1`, …); answers are keyed by it. */
+  id: string;
+  /** Very short chip label. */
+  header: string;
+  question: string;
+  type: AgentQuestionKind;
+  options: AgentQuestionOption[];
+  /**
+   * The panel blocks submission until this one is answered. The model opts in
+   * per question; everything else stays skippable.
+   */
+  required: boolean;
+}
+
+/**
+ * `agent_question_request` payload, emitted when the model calls
+ * `ask_question`; the backend then parks the tool call on a oneshot keyed by
+ * `requestId` (uuid v4; duplicate or unknown ids are idempotent no-ops) until
+ * the panel answers. `callId` matches the transcript's toolCallId.
+ */
+export interface AgentQuestionRequest {
+  sessionId: UUID;
+  callId: string;
+  requestId: string;
+  questions: AgentQuestion[];
+}
+
+/**
+ * One question's answer: the selected option labels, or a single free-text
+ * value. An omitted entry (or an empty `values`) is reported to the model as
+ * explicitly unanswered, so a partial submission never reads as a full one.
+ */
+export interface AgentQuestionAnswer {
+  questionId: string;
+  values: string[];
+}
+
+/**
+ * Mirrors the backend `QuestionResponse` (serde-tagged on `kind`); wire shape
+ * verbatim.
+ *  - `answered`: the answers become the tool result the model reads.
+ *  - `dismissed`: the user chose to keep talking instead of answering; the
+ *    model is told to continue without the answers rather than re-ask.
+ */
+export type AgentQuestionResponse =
+  | { kind: "answered"; answers: AgentQuestionAnswer[] }
+  | { kind: "dismissed" };
+
+/**
  * `agent_session_lifecycle` payload, discriminated on `kind`. Independent of
  * the run channels — these are not run events and never enter the
  * `agent_stream_event` reducer, so closed-once is unaffected.
