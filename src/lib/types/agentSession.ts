@@ -249,6 +249,10 @@ export interface AgentSession {
   toolExecutionMode?: string;
   messageCount: number;
   lastMessageAt?: Timestamp;
+  /** Sidebar pin: sorts ahead of unpinned siblings and lifts its group with it. */
+  pinned: boolean;
+  /** Out of the main sidebar tree, into the collapsed "Archived" group. */
+  archived: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

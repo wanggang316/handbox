@@ -9,10 +9,17 @@
  * Sort contract:
  *  - Session activity key = coalesce(lastMessageAt, createdAt) — never
  *    updatedAt (rename/config writes bump updatedAt but are not "activity").
+ *  - Pinned outranks activity at every level: a pinned session sorts ahead of
+ *    its unpinned siblings, and a project subgroup / agent bucket containing one
+ *    sorts ahead of those that do not. Without that lift, pinning a session
+ *    inside a low-activity group would leave the pin invisible.
  *  - Bucket children (project subgroups interleaved with loose sessions) sort
  *    by activity key desc; a project subgroup's key is its latest session's.
  *  - Agent buckets sort by latest activity desc, ties broken by agent name
- *    asc; the "Chats" bucket always comes last.
+ *    asc; the "Chats" bucket always comes last — even when it holds a pin, so
+ *    the hierarchy's shape never depends on pin state.
+ *  - Archived sessions are the caller's business: pass only the sessions that
+ *    belong in the tree (see [`partitionArchivedSessions`]).
  *  - Pure: inputs are not mutated; output order is independent of input order.
  */
 
@@ -51,7 +58,7 @@ export function sessionActivityKey(session: AgentSession): Timestamp {
 }
 
 /** Activity desc; ties by createdAt desc then id asc for a deterministic total order. */
-function compareSessionsByActivityDesc(
+export function compareSessionsByActivityDesc(
   a: AgentSession,
   b: AgentSession,
 ): number {
@@ -62,11 +69,42 @@ function compareSessionsByActivityDesc(
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+/** Sidebar order: pinned first, then activity desc. */
+function compareSessionsForTree(a: AgentSession, b: AgentSession): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  return compareSessionsByActivityDesc(a, b);
+}
+
+/**
+ * Splits sessions into the ones the sidebar tree renders and the ones the
+ * "Archived" group does, the latter already in activity-desc order. Archived
+ * rows ignore the pin: a pin is about where a session sits in the tree, and
+ * inside the archive there is no tree to sit in.
+ */
+export function partitionArchivedSessions(sessions: AgentSession[]): {
+  active: AgentSession[];
+  archived: AgentSession[];
+} {
+  const active: AgentSession[] = [];
+  const archived: AgentSession[] = [];
+  for (const session of sessions) {
+    (session.archived ? archived : active).push(session);
+  }
+  return { active, archived: archived.sort(compareSessionsByActivityDesc) };
+}
+
 /** Session: its own key; project subgroup: latest member (sessions pre-sorted desc). */
 function childActivityKey(child: AgentBucketChild): Timestamp {
   return child.kind === "session"
     ? sessionActivityKey(child.session)
     : sessionActivityKey(child.sessions[0]);
+}
+
+/** Whether a child holds a pin, which lifts it above unpinned siblings. */
+function childHasPinned(child: AgentBucketChild): boolean {
+  return child.kind === "session"
+    ? child.session.pinned
+    : child.sessions.some((session) => session.pinned);
 }
 
 /** Stable cross-kind tie-break key (project prefix sorts before session prefix). */
@@ -80,6 +118,9 @@ function compareChildrenByActivityDesc(
   a: AgentBucketChild,
   b: AgentBucketChild,
 ): number {
+  const pinnedA = childHasPinned(a);
+  const pinnedB = childHasPinned(b);
+  if (pinnedA !== pinnedB) return pinnedA ? -1 : 1;
   const delta = childActivityKey(b) - childActivityKey(a);
   if (delta !== 0) return delta;
   const ka = childTiebreakKey(a);
@@ -115,7 +156,7 @@ function buildBucketChildren(
     children.push({
       kind: "project",
       project: projectById.get(projectId)!,
-      sessions: list.sort(compareSessionsByActivityDesc),
+      sessions: list.sort(compareSessionsForTree),
     });
   }
   for (const session of loose) {
@@ -130,8 +171,8 @@ function buildBucketChildren(
  *
  *  - Only agents with at least one session get a bucket.
  *  - Sessions with an empty or dangling agentDefinitionId go to "Chats".
- *  - Buckets sort by latest activity desc, ties by agent name asc; the
- *    "Chats" bucket always comes last.
+ *  - Buckets holding a pinned session sort first, then by latest activity desc,
+ *    ties by agent name asc; the "Chats" bucket always comes last.
  *
  * Pure: inputs are not mutated; output order is independent of input order.
  */
@@ -172,11 +213,17 @@ export function groupSessionsByAgent(
     else agentBuckets.push(bucket);
   }
 
-  // children are sorted desc, so the first child carries the bucket's latest activity.
+  // children are sorted desc, so the first child carries the bucket's latest
+  // activity — and, since pinned children sort first, also its pin state.
   const bucketSortKey = (bucket: AgentSessionBucket): Timestamp =>
     bucket.children.length ? childActivityKey(bucket.children[0]) : 0;
+  const bucketHasPinned = (bucket: AgentSessionBucket): boolean =>
+    bucket.children.length > 0 && childHasPinned(bucket.children[0]);
 
   agentBuckets.sort((a, b) => {
+    const pinnedA = bucketHasPinned(a);
+    const pinnedB = bucketHasPinned(b);
+    if (pinnedA !== pinnedB) return pinnedA ? -1 : 1;
     const delta = bucketSortKey(b) - bucketSortKey(a);
     if (delta !== 0) return delta;
     const nameA = a.agent?.name ?? "";
