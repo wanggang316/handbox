@@ -260,8 +260,11 @@
   const TOP_PAD = 16;
   /** Distance from the bottom that still counts as "at the bottom". */
   const BOTTOM_EPS = 24;
-  /** Free space beside the chat column needed before the rail is shown. */
-  const RAIL_MIN_WIDTH = 960;
+  // Width at which the rail clears the chat column's text. The column caps at
+  // 832px (--chat-column + gutters) and centres, so the free strip is
+  // (width - 832) / 2; the rail needs ~48px of it plus breathing room. The
+  // default window lands just above this, so the rail is there out of the box.
+  const RAIL_MIN_WIDTH = 920;
 
   // Reactive refs: the ResizeObserver is wired in an effect that must re-run
   // once the bindings land, never silently no-op on an unbound element.
