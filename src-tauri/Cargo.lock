@@ -2704,7 +2704,7 @@ dependencies = [
 
 [[package]]
 name = "handbox"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "accessibility",
  "accessibility-sys",
