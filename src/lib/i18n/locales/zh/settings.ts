@@ -19,8 +19,8 @@ export const settingsZh = {
   // Sidebar
   "settings.sidebar.backToApp": "返回应用",
   "settings.sidebar.search": "搜索设置…",
-  "settings.sidebar.group.personal": "个人",
-  "settings.sidebar.group.features": "功能",
+  "settings.sidebar.group.general": "通用",
+  "settings.sidebar.group.agents": "Agents",
   "settings.sidebar.group.other": "其他",
   "settings.sidebar.account": "账户",
   "settings.sidebar.general": "通用",

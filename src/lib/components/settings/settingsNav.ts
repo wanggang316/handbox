@@ -36,8 +36,8 @@ export interface SettingsNavGroup {
 export function getSettingsNavGroups(): SettingsNavGroup[] {
   return [
     {
-      id: "personal",
-      title: t("settings.sidebar.group.personal"),
+      id: "general",
+      title: t("settings.sidebar.group.general"),
       items: [
         {
           id: "account",
@@ -57,23 +57,23 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
           icon: Keyboard,
           url: "/settings/shortcuts",
         },
+        {
+          id: "quicktools",
+          title: t("settings.sidebar.quicktools"),
+          icon: MousePointerClick,
+          url: "/settings/quicktools",
+        },
       ],
     },
     {
-      id: "features",
-      title: t("settings.sidebar.group.features"),
+      id: "agents",
+      title: t("settings.sidebar.group.agents"),
       items: [
         {
           id: "session",
           title: t("settings.sidebar.session"),
           icon: MessagesSquare,
           url: "/settings/session",
-        },
-        {
-          id: "quicktools",
-          title: t("settings.sidebar.quicktools"),
-          icon: MousePointerClick,
-          url: "/settings/quicktools",
         },
         {
           id: "models",

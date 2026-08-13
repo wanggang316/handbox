@@ -22,8 +22,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   // Sidebar
   "settings.sidebar.backToApp": "Back to app",
   "settings.sidebar.search": "Search settings...",
-  "settings.sidebar.group.personal": "Personal",
-  "settings.sidebar.group.features": "Features",
+  "settings.sidebar.group.general": "General",
+  "settings.sidebar.group.agents": "Agents",
   "settings.sidebar.group.other": "Other",
   "settings.sidebar.account": "Account",
   "settings.sidebar.general": "General",
