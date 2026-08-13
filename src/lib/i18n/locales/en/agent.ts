@@ -71,6 +71,10 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.usageOutput": "Output {count}",
   "agent.timeline.copy": "Copy",
   "agent.timeline.copied": "Copied",
+
+  "agent.nav.label": "Message navigation",
+  "agent.nav.jumpTo": "Jump to question {index}",
+  "agent.nav.noAnswer": "No reply yet",
   "agent.timeline.genuiStreaming": "Generating UI…",
 
   // Thinking block (AgentThinkingBlock)
