@@ -87,6 +87,7 @@ export const settingsZh = {
   "settings.agentTools.renderCardDesc": "在会话中内联渲染交互式 HTML 卡片",
   "settings.agentTools.renderAppDesc":
     "在侧边面板生成完整的 HTML 应用（预览 + 源码）",
+  "settings.agentTools.askQuestionDesc": "让模型在需要你拍板时弹出提问面板，等你作答后再继续",
   "settings.agentTools.skillDesc": "允许模型发现并按需加载 Skill",
 
   // Skills page

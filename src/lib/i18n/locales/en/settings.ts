@@ -92,6 +92,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
     "Render interactive HTML cards inline in the conversation",
   "settings.agentTools.renderAppDesc":
     "Build full HTML apps in a side panel (preview + source)",
+  "settings.agentTools.askQuestionDesc":
+    "Let the model pause and ask you structured questions before continuing",
   "settings.agentTools.skillDesc":
     "Let the model discover and load skills on demand",
 
