@@ -311,6 +311,42 @@ fn extract_user_text(payload: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// Pins / unpins a session in the sidebar.
+///
+/// Its own command rather than an `agent_session_update_field` case: the flag is
+/// written as a single column so a concurrent field edit cannot revert it (see
+/// [`AgentSessionRepository::set_session_pinned`]). Returns the overlaid session,
+/// consistent with rename/get, so the frontend can swap the list entry in place.
+#[tauri::command]
+pub async fn agent_session_set_pinned(
+    session_id: UUID,
+    pinned: bool,
+    app_handle: AppHandle,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<AgentSession, AppError> {
+    let mut session = agent_session_service
+        .set_session_pinned(session_id, pinned)
+        .await?;
+    overlay_jsonl_activity(&mut session, &resolve_app_data_dir(&app_handle)?);
+    Ok(session)
+}
+
+/// Archives / unarchives a session. Same shape as [`agent_session_set_pinned`];
+/// nothing is deleted, so unarchiving restores the session untouched.
+#[tauri::command]
+pub async fn agent_session_set_archived(
+    session_id: UUID,
+    archived: bool,
+    app_handle: AppHandle,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<AgentSession, AppError> {
+    let mut session = agent_session_service
+        .set_session_archived(session_id, archived)
+        .await?;
+    overlay_jsonl_activity(&mut session, &resolve_app_data_dir(&app_handle)?);
+    Ok(session)
+}
+
 /// Updates a single session field (mirrors `agent_update_field`).
 #[tauri::command]
 pub async fn agent_session_update_field(

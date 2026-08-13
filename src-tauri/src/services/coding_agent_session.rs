@@ -805,6 +805,8 @@ mod tests {
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
+            pinned: false,
+            archived: false,
             // Distinctive non-zero value so the mapping test can prove created_at
             // is lifted off the row rather than defaulted.
             created_at: 1_700_000_000_000,

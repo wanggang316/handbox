@@ -76,6 +76,8 @@ impl AgentSessionService {
             tool_execution_mode: request.tool_execution_mode,
             message_count: 0,
             last_message_at: None,
+            pinned: false,
+            archived: false,
             created_at: now,
             updated_at: now,
         };
@@ -295,6 +297,32 @@ impl AgentSessionService {
         name: String,
     ) -> Result<AgentSession, AppError> {
         self.repository.rename_session(&session_id, &name).await?;
+        self.get_session(session_id).await
+    }
+
+    /// Toggles the sidebar pin. Kept off `update_session_field` on purpose: the
+    /// flag has no place in the generic read-modify-write path (see
+    /// [`AgentSessionRepository::set_session_pinned`]).
+    pub async fn set_session_pinned(
+        &self,
+        session_id: UUID,
+        pinned: bool,
+    ) -> Result<AgentSession, AppError> {
+        self.repository
+            .set_session_pinned(&session_id, pinned)
+            .await?;
+        self.get_session(session_id).await
+    }
+
+    /// Toggles the archive flag; same rationale as [`set_session_pinned`].
+    pub async fn set_session_archived(
+        &self,
+        session_id: UUID,
+        archived: bool,
+    ) -> Result<AgentSession, AppError> {
+        self.repository
+            .set_session_archived(&session_id, archived)
+            .await?;
         self.get_session(session_id).await
     }
 
