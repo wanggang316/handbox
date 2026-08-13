@@ -18,8 +18,7 @@
 
   // Remember the last main-area route so settings' "back to app" can return to it.
   afterNavigate((nav) => {
-    const path = nav.to?.url.pathname;
-    if (path) navigationState.remember(path);
+    if (nav.to?.url) navigationState.remember(nav.to.url);
   });
 
   // The WebView's own context menu is browser semantics (Look Up / Translate /
