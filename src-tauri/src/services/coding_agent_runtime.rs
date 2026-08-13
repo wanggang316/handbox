@@ -333,6 +333,9 @@ pub fn abort_run(session_id: &str) {
     // Fail-close any approval the (now-cancelled) turn is parked on, so the bare
     // approval await unblocks and the dangerous tool never runs.
     crate::services::agent_permission::deny_pending_for_session(session_id);
+    // Same for an open question panel: `ask_question` awaits a bare oneshot, so
+    // the cancel token alone would leave the turn parked on it forever.
+    crate::services::extensions::ask_question::cancel_pending_questions_for_session(session_id);
 }
 
 /// Register a run's steer / abort controls under `session_id`. Called before the

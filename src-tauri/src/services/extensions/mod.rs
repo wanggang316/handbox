@@ -12,7 +12,7 @@
 //!    [`EXTENSION_TOOL_IDS`] is the canonical registry; the frontend mirror is
 //!    `src/lib/constants/builtinToolIds.ts`.
 //!  - **Activation**: per run, by that id. `web_search` / `render_card` /
-//!    `render_app` are constructed here and injected through
+//!    `render_app` / `ask_question` are constructed here and injected through
 //!    `build_agent_session`'s `extra_tools` (agent_run does the gating);
 //!    [`TOOL_SKILL`] carries no factory — it gates the coding-agent's own
 //!    skill pipeline inside `build_agent_session`.
@@ -21,6 +21,7 @@
 //!
 //! One module per tool; cross-tool prompt doctrine lives here.
 
+pub mod ask_question;
 pub mod render_app;
 pub mod render_card;
 pub mod web_search;
@@ -35,10 +36,11 @@ pub const TOOL_SKILL: &str = "skill";
 ///
 /// `select_enabled_tools` uses it to skip these ids silently (they are
 /// legitimate `enabled_tools` entries resolved outside the built-in filter).
-pub const EXTENSION_TOOL_IDS: [&str; 4] = [
+pub const EXTENSION_TOOL_IDS: [&str; 5] = [
     web_search::WEB_SEARCH_TOOL_NAME,
     render_card::TOOL_RENDER_CARD,
     render_app::TOOL_RENDER_APP,
+    ask_question::TOOL_ASK_QUESTION,
     TOOL_SKILL,
 ];
 
