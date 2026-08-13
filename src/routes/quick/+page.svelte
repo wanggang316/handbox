@@ -26,7 +26,7 @@
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { providerActions, getAllModels } from "$lib/states/provider.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
-  import { resolveQuickActionModel } from "$lib/quickaction/resolveModel";
+  import { resolveAgentDefaultModel } from "$lib/utils/defaultModel";
   import { runAgentStream } from "$lib/api/agentSession";
 
   let composer = $state<QuickInput | null>(null);
@@ -143,14 +143,16 @@
     sending = true;
     runError = null;
     try {
-      // Sessions don't inherit a model from the AgentDefinition; Quick Action
-      // uses the configured default model (resolved against the catalog) and
-      // passes it as a paired modelId+providerId override. Load the catalog first.
+      // Sessions don't inherit a model from the AgentDefinition; the overlay
+      // runs on the app-wide default model (settings > Agent), resolved against
+      // the catalog and passed as a paired modelId+providerId override so an
+      // unrunnable default is caught before a session is created. Load the
+      // catalog first — helper windows skip the main window's preload.
       if (getAllModels().length === 0) {
         await providerActions.loadProvidersWithModels();
       }
-      const resolved = resolveQuickActionModel(
-        settingsState.settings?.quickAction,
+      const resolved = resolveAgentDefaultModel(
+        settingsState.settings?.agent,
         getAllModels(),
       );
       if (!resolved.available) {

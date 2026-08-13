@@ -1,9 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { TableGroup, SwitchRow, SelectRow, TextRow } from "$lib/components/ui/table";
-  import { settingsState } from "$lib/states";
+  import { goto } from "$app/navigation";
+  import {
+    TableGroup,
+    TableBaseRow,
+    SwitchRow,
+    SelectRow,
+    TextRow,
+  } from "$lib/components/ui/table";
+  import ModelSelectButton from "$lib/components/settings/ModelSelectButton.svelte";
+  import { settingsState, providerActions } from "$lib/states";
+  import { getAllModels } from "$lib/states/provider.svelte";
+  import { resolveAgentDefaultModel } from "$lib/utils/defaultModel";
   import { BUILTIN_TOOLS, BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
+  import type { ModelWithProvider } from "$lib/types/provider";
 
   // Globally enabled default tool set (coding-agent registry names); a missing
   // agent section means all enabled.
@@ -65,7 +76,44 @@
       .catch((error) => {
         console.error("加载 Agent 工具设置失败:", error);
       });
+    // Catalog needed to resolve / detect-dangling the default model display.
+    providerActions.loadProvidersWithModels().catch((error) => {
+      console.error("加载模型目录失败:", error);
+    });
   });
+
+  // Resolve the persisted default against the live catalog. Reactive on both
+  // the settings slice (changes when a pick is persisted) and the catalog
+  // (loaded in onMount), so the row repaints without extra bookkeeping.
+  const modelResolution = $derived(
+    resolveAgentDefaultModel(settingsState.settings?.agent, getAllModels()),
+  );
+
+  // Only a resolved model reaches the button: a dangling default falls back to
+  // the placeholder, with the stale pair left on disk so re-enabling the
+  // provider restores it.
+  const defaultModel = $derived<ModelWithProvider | null>(
+    modelResolution.available ? modelResolution.model : null,
+  );
+
+  /** Persist the pick immediately (no Save step), mirroring the other rows. */
+  async function handleDefaultModelSelect(
+    model: ModelWithProvider,
+  ): Promise<void> {
+    try {
+      await settingsState.updateSettings({
+        section: "agent",
+        data: { defaultModelId: model.id, defaultProviderId: model.provider_id },
+      });
+    } catch (error) {
+      console.error("更新 Agent 默认模型失败:", error);
+    }
+  }
+
+  /** Jump to the model settings to enable a provider (empty-catalog guidance). */
+  function openModelSettings(): void {
+    void goto("/settings/models");
+  }
 
   function isEnabled(toolId: string): boolean {
     return enabledTools.includes(toolId);
@@ -120,7 +168,43 @@
     </p>
   </div>
 
-  <div class="flex flex-col gap-y-1">
+  <TableGroup title={t("settings.agentTools.defaultModel.title")}>
+    <TableBaseRow
+      label={t("settings.agentTools.defaultModel.label")}
+      layout="vertical"
+      helpText={t("settings.agentTools.defaultModel.hint")}
+    >
+      {#if modelResolution.available || modelResolution.reason !== "empty-catalog"}
+        <div class="flex items-center gap-3 mt-2">
+          <ModelSelectButton
+            selectedModel={defaultModel}
+            placeholder={t("settings.agentTools.defaultModel.none")}
+            onModelSelect={handleDefaultModelSelect}
+          />
+          {#if modelResolution.available === false && modelResolution.reason === "dangling-default"}
+            <span class="text-xs text-warning">
+              {t("settings.agentTools.defaultModel.unavailable")}
+            </span>
+          {/if}
+        </div>
+      {:else}
+        <div class="flex items-center justify-between gap-3 mt-2">
+          <p class="text-sm text-base-content/70">
+            {t("settings.agentTools.defaultModel.emptyCatalog")}
+          </p>
+          <button
+            type="button"
+            class="text-sm text-base-content/70 hover:text-base-content transition-colors whitespace-nowrap"
+            onclick={openModelSettings}
+          >
+            {t("settings.agentTools.defaultModel.openModels")}
+          </button>
+        </div>
+      {/if}
+    </TableBaseRow>
+  </TableGroup>
+
+  <div class="flex flex-col gap-y-1 mt-2">
     <p class="text-sm font-medium text-base-content">
       {t("settings.agentTools.system.title")}
     </p>

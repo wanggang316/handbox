@@ -1,23 +1,23 @@
 /**
  * Pure builder for the quick-action overlay's throwaway agent session.
  *
- * Given the resolved quick-action model (from {@link resolveQuickActionModel})
- * and the global agent default-tools setting, it produces either a ready-to-send
+ * Given the resolved default model (from {@link resolveAgentDefaultModel}) and
+ * the global agent default-tools setting, it produces either a ready-to-send
  * `CreateAgentSessionRequest` or an empty-state decision telling the overlay to
  * show the "configure a model" prompt instead of creating an unrunnable session.
  *
  * Kept PURE (no store access, no `.svelte` imports) so the model/default/empty
  * decisions are unit-testable without mounting the provider/settings stores.
- * The overlay passes `resolveQuickActionModel(...)`, `settings.agent.defaultEnabledTools`
+ * The overlay passes `resolveAgentDefaultModel(...)`, `settings.agent.defaultEnabledTools`
  * and a localized session name in; this function does no I/O.
  */
 
 import type { CreateAgentSessionRequest } from "../types/agentSession";
 import { BUILTIN_TOOL_IDS } from "../constants/builtinToolIds";
 import type {
-  QuickActionModelResolution,
-  QuickActionEmptyReason,
-} from "./resolveModel";
+  DefaultModelResolution,
+  DefaultModelEmptyReason,
+} from "../utils/defaultModel";
 
 /** The overlay should create a session with this request. */
 export interface QuickSessionRequestReady {
@@ -28,7 +28,7 @@ export interface QuickSessionRequestReady {
 /** No runnable model — show the configure prompt; do NOT create a session. */
 export interface QuickSessionRequestEmpty {
   status: "empty";
-  reason: QuickActionEmptyReason;
+  reason: DefaultModelEmptyReason;
 }
 
 export type QuickSessionRequestDecision =
@@ -37,8 +37,8 @@ export type QuickSessionRequestDecision =
 
 /** Inputs the overlay supplies to the builder. */
 export interface BuildQuickSessionInput {
-  /** Result of {@link resolveQuickActionModel} (in-panel pick or quick-action default). */
-  resolution: QuickActionModelResolution;
+  /** Result of {@link resolveAgentDefaultModel}. */
+  resolution: DefaultModelResolution;
   /** `settings.agent.defaultEnabledTools`, or `undefined`/`null` when settings unloaded. */
   defaultEnabledTools: string[] | undefined | null;
   /** Localized session name (e.g. `t("quickaction.sessionName")`). */

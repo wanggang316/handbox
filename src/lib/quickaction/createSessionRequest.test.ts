@@ -10,10 +10,10 @@
 
 import { describe, it, expect } from "vitest";
 import { buildQuickSessionRequest } from "./createSessionRequest";
-import { resolveQuickActionModel } from "./resolveModel";
+import { resolveAgentDefaultModel } from "../utils/defaultModel";
 import { BUILTIN_TOOL_IDS } from "../constants/builtinToolIds";
 import type { ModelWithProvider } from "../types/provider";
-import type { QuickActionModelResolution } from "./resolveModel";
+import type { DefaultModelResolution } from "../utils/defaultModel";
 
 /** Build a catalog item with only the fields the resolver matches on. */
 function makeModel(id: string, providerId: string): ModelWithProvider {
@@ -37,7 +37,7 @@ const catalog: ModelWithProvider[] = [
   makeModel("claude-3", "anthropic-provider"),
 ];
 
-const resolved: QuickActionModelResolution = {
+const resolved: DefaultModelResolution = {
   available: true,
   modelId: "gpt-4o",
   providerId: "openai-provider",
@@ -62,7 +62,7 @@ describe("buildQuickSessionRequest", () => {
 
   it("respects an in-panel pick over the configured default", () => {
     // An in-panel pick is just a different resolution fed in by the caller.
-    const pick: QuickActionModelResolution = {
+    const pick: DefaultModelResolution = {
       available: true,
       modelId: "claude-3",
       providerId: "anthropic-provider",
@@ -137,12 +137,12 @@ describe("buildQuickSessionRequest", () => {
     expect(decision).toEqual({ status: "empty", reason: "no-default" });
   });
 
-  it("delegates the empty-state decision to resolveQuickActionModel", () => {
+  it("delegates the empty-state decision to resolveAgentDefaultModel", () => {
     // Empty catalog → resolver returns empty-catalog → builder is empty too,
     // with the reason carried through verbatim (no session built).
     const decision = buildQuickSessionRequest({
-      resolution: resolveQuickActionModel(
-        { modelId: "gpt-4o", providerId: "openai-provider" },
+      resolution: resolveAgentDefaultModel(
+        { defaultEnabledTools: [], defaultModelId: "gpt-4o", defaultProviderId: "openai-provider" },
         [],
       ),
       defaultEnabledTools: BUILTIN_TOOL_IDS,
@@ -153,8 +153,8 @@ describe("buildQuickSessionRequest", () => {
 
     // Dangling default likewise propagates and builds nothing.
     const dangling = buildQuickSessionRequest({
-      resolution: resolveQuickActionModel(
-        { modelId: "removed", providerId: "openai-provider" },
+      resolution: resolveAgentDefaultModel(
+        { defaultEnabledTools: [], defaultModelId: "removed", defaultProviderId: "openai-provider" },
         catalog,
       ),
       defaultEnabledTools: BUILTIN_TOOL_IDS,

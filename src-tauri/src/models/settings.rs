@@ -183,6 +183,15 @@ pub struct AgentSettings {
     /// unset; the frontend falls back to the first available editor/terminal.
     #[serde(default)]
     pub default_editor_id: Option<String>,
+    /// Model new agent sessions start on. `None` = unset; the session is
+    /// created without a model and the composer asks the user to pick one.
+    /// Always written paired with [`Self::default_provider_id`].
+    #[serde(default)]
+    pub default_model_id: Option<String>,
+    /// Provider owning [`Self::default_model_id`]; a model id alone is
+    /// ambiguous because the same id can exist under several providers.
+    #[serde(default)]
+    pub default_provider_id: Option<String>,
     #[serde(default)]
     pub web_search: WebSearchSettings,
 }
@@ -192,6 +201,8 @@ impl Default for AgentSettings {
         Self {
             default_enabled_tools: default_agent_enabled_tools(),
             default_editor_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             web_search: WebSearchSettings::default(),
         }
     }
@@ -239,6 +250,8 @@ pub struct SessionSettings {
     pub title_generation: TitleGenerationRule,
 }
 
+/// How the quick-action overlay is summoned. The model it runs on is the
+/// app-wide default in [`AgentSettings`], not a quick-action-specific one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickActionSettings {
@@ -249,12 +262,6 @@ pub struct QuickActionSettings {
     /// global-shortcut accelerator syntax).
     #[serde(default = "default_quick_action_shortcut")]
     pub shortcut: String,
-    /// Default model ID. `None` = unset; the default-model resolver decides.
-    #[serde(default)]
-    pub model_id: Option<String>,
-    /// Default provider ID. `None` = unset; the default-model resolver decides.
-    #[serde(default)]
-    pub provider_id: Option<String>,
 }
 
 impl Default for QuickActionSettings {
@@ -262,8 +269,6 @@ impl Default for QuickActionSettings {
         Self {
             enabled: default_quick_action_enabled(),
             shortcut: default_quick_action_shortcut(),
-            model_id: None,
-            provider_id: None,
         }
     }
 }
@@ -348,22 +353,54 @@ mod tests {
         assert_eq!(parsed.shortcut, "Alt+Space");
     }
 
-    // The model/provider fields default to None when absent.
+    // A `quickAction` section written while the overlay still had its own
+    // default-model pair keeps parsing: the retired keys are ignored, not
+    // rejected, so an old config does not reset the section to defaults.
     #[test]
-    fn quick_action_default_model_and_provider_are_none() {
-        let defaults = QuickActionSettings::default();
-        assert_eq!(defaults.model_id, None);
-        assert_eq!(defaults.provider_id, None);
+    fn quick_action_retired_model_keys_are_ignored() {
+        let parsed: QuickActionSettings = serde_json::from_value(serde_json::json!({
+            "shortcut": "Alt+Space",
+            "modelId": "gpt-4o",
+            "providerId": "openai",
+        }))
+        .unwrap();
+        assert_eq!(parsed.shortcut, "Alt+Space");
+
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert!(value.get("modelId").is_none());
+        assert!(value.get("providerId").is_none());
     }
 
-    // A `quickAction` section missing the model/provider fields falls back to
-    // None via serde(default) on each field (old configs upgrade cleanly).
+    // The agent default-model pair is unset by default, and an `agent` section
+    // written before the fields existed upgrades to None instead of failing to
+    // parse (which would reset the whole section to defaults).
     #[test]
-    fn quick_action_missing_model_provider_fields_default_to_none() {
-        let parsed: QuickActionSettings =
-            serde_json::from_value(serde_json::json!({ "shortcut": "Alt+Space" })).unwrap();
-        assert_eq!(parsed.model_id, None);
-        assert_eq!(parsed.provider_id, None);
+    fn agent_default_model_and_provider_are_none() {
+        let defaults = AgentSettings::default();
+        assert_eq!(defaults.default_model_id, None);
+        assert_eq!(defaults.default_provider_id, None);
+
+        let parsed: AgentSettings =
+            serde_json::from_value(serde_json::json!({ "defaultEnabledTools": ["read"] })).unwrap();
+        assert_eq!(parsed.default_model_id, None);
+        assert_eq!(parsed.default_provider_id, None);
+        assert_eq!(parsed.default_enabled_tools, vec!["read".to_string()]);
+    }
+
+    // The pair round-trips under its camelCase JSON keys.
+    #[test]
+    fn agent_default_model_uses_camel_case_keys() {
+        let parsed: AgentSettings = serde_json::from_value(serde_json::json!({
+            "defaultModelId": "gpt-4o",
+            "defaultProviderId": "openai-1",
+        }))
+        .unwrap();
+        assert_eq!(parsed.default_model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(parsed.default_provider_id.as_deref(), Some("openai-1"));
+
+        let value = serde_json::to_value(&parsed).unwrap();
+        assert_eq!(value["defaultModelId"], "gpt-4o");
+        assert_eq!(value["defaultProviderId"], "openai-1");
     }
 
     // The enabled flag defaults to true, both via Default and when the field
@@ -538,28 +575,5 @@ mod tests {
             parsed.session.title_generation,
             TitleGenerationRule::FirstMessage
         );
-    }
-
-    // The model/provider fields round-trip under their camelCase JSON keys.
-    #[test]
-    fn quick_action_model_provider_use_camel_case_keys() {
-        let settings = QuickActionSettings {
-            enabled: true,
-            shortcut: "Alt+Space".to_string(),
-            model_id: Some("gpt-4o".to_string()),
-            provider_id: Some("openai".to_string()),
-        };
-        let value = serde_json::to_value(&settings).unwrap();
-        assert_eq!(value["modelId"], "gpt-4o");
-        assert_eq!(value["providerId"], "openai");
-
-        let parsed: QuickActionSettings = serde_json::from_value(serde_json::json!({
-            "shortcut": "Alt+Space",
-            "modelId": "gpt-4o",
-            "providerId": "openai",
-        }))
-        .unwrap();
-        assert_eq!(parsed.model_id.as_deref(), Some("gpt-4o"));
-        assert_eq!(parsed.provider_id.as_deref(), Some("openai"));
     }
 }

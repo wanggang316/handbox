@@ -76,7 +76,17 @@ export const settingsZh = {
   // Agent Tools page
   "settings.agentTools.title": "Agent 工具",
   "settings.agentTools.description":
-    "新建 Agent 会话默认启用的工具。已存在的会话不受影响。",
+    "新建 Agent 会话默认使用的模型与默认启用的工具。已存在的会话不受影响。",
+  "settings.agentTools.defaultModel.title": "默认模型",
+  "settings.agentTools.defaultModel.label": "新建会话默认模型",
+  "settings.agentTools.defaultModel.hint":
+    "新建 Agent 会话时自动选用的模型，会话内仍可随时切换。",
+  "settings.agentTools.defaultModel.none": "未选择",
+  "settings.agentTools.defaultModel.unavailable":
+    "所选模型已不可用，请重新选择",
+  "settings.agentTools.defaultModel.emptyCatalog":
+    "请先在「模型」中启用一个供应商并添加模型。",
+  "settings.agentTools.defaultModel.openModels": "前往模型设置",
   "settings.agentTools.webSearch.title": "网络搜索",
   "settings.agentTools.webSearch.provider": "搜索服务商",
   "settings.agentTools.webSearch.apiKey": "API Key",
