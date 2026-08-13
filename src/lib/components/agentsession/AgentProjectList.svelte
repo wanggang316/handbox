@@ -248,9 +248,15 @@
 
   function handleRowLeave(event: MouseEvent, session: AgentSession) {
     cancelHoverCard();
-    // Keep the controls up while the keyboard is still inside this row.
+    // Keep the controls up only while the KEYBOARD is inside this row.
+    // `document.activeElement` would also match the button the mouse just
+    // clicked — clicking focuses it — latching the controls open for good
+    // once the pointer moves away. `:focus-visible` is exactly the
+    // keyboard-only distinction.
     const row = event.currentTarget as HTMLElement;
-    if (row.contains(document.activeElement)) return;
+    if (row.matches(":focus-visible") || row.querySelector(":focus-visible")) {
+      return;
+    }
     if (activeRowSessionId === session.id) activeRowSessionId = "";
   }
 
