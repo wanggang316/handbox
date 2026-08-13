@@ -22,7 +22,7 @@
     providerActions,
     getAllModels,
   } from "$lib/states/provider.svelte";
-  import { resolveQuickActionModel } from "$lib/quickaction/resolveModel";
+  import { resolveAgentDefaultModel } from "$lib/utils/defaultModel";
   import { t } from "$lib/i18n";
   import {
     runAgentTextTurn,
@@ -183,8 +183,8 @@
       if (getAllModels().length === 0) {
         await providerActions.loadProvidersWithModels(false);
       }
-      const resolved = resolveQuickActionModel(
-        settingsState.settings?.quickAction,
+      const resolved = resolveAgentDefaultModel(
+        settingsState.settings?.agent,
         getAllModels(),
       );
       if (!resolved.available) {

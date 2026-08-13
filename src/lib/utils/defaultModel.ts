@@ -14,6 +14,7 @@
 
 import type { ModelWithProvider } from "../types/provider";
 import type { InstantiateAgentSessionRequest } from "../types/agentSession";
+import type { AgentSettings } from "../types/settings";
 
 /** Why a stored default cannot produce a runnable model. */
 export type DefaultModelEmptyReason =
@@ -74,6 +75,31 @@ export function resolveDefaultModel(
   }
 
   return { available: true, modelId, providerId, model };
+}
+
+/**
+ * Resolve the app-wide default model (settings > Agent) against the catalog.
+ *
+ * The single default every session-creating surface reads: the agent session
+ * list, the quick-action overlay and the selection window all start on it.
+ *
+ * @param agentSettings `settingsState.settings?.agent`, or `undefined`/`null`
+ *   while settings are still loading.
+ * @param allModels the provider+model catalog (`getAllModels()`).
+ */
+export function resolveAgentDefaultModel(
+  agentSettings: AgentSettings | undefined | null,
+  allModels: ModelWithProvider[],
+): DefaultModelResolution {
+  return resolveDefaultModel(
+    agentSettings
+      ? {
+          modelId: agentSettings.defaultModelId,
+          providerId: agentSettings.defaultProviderId,
+        }
+      : null,
+    allModels,
+  );
 }
 
 /**

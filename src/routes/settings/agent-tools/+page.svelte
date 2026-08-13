@@ -11,7 +11,7 @@
   import ModelSelectButton from "$lib/components/settings/ModelSelectButton.svelte";
   import { settingsState, providerActions } from "$lib/states";
   import { getAllModels } from "$lib/states/provider.svelte";
-  import { resolveDefaultModel } from "$lib/utils/defaultModel";
+  import { resolveAgentDefaultModel } from "$lib/utils/defaultModel";
   import { BUILTIN_TOOLS, BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
   import type { ModelWithProvider } from "$lib/types/provider";
@@ -86,15 +86,7 @@
   // the settings slice (changes when a pick is persisted) and the catalog
   // (loaded in onMount), so the row repaints without extra bookkeeping.
   const modelResolution = $derived(
-    resolveDefaultModel(
-      settingsState.settings?.agent
-        ? {
-            modelId: settingsState.settings.agent.defaultModelId,
-            providerId: settingsState.settings.agent.defaultProviderId,
-          }
-        : null,
-      getAllModels(),
-    ),
+    resolveAgentDefaultModel(settingsState.settings?.agent, getAllModels()),
   );
 
   // Only a resolved model reaches the button: a dangling default falls back to

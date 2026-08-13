@@ -1,14 +1,19 @@
 /**
  * Unit tests for the shared default-model helpers.
  *
- * The resolver's empty/dangling/resolved matrix is exercised in depth by
- * `quickaction/resolveModel.test.ts` (which now runs through this module); the
- * cases here cover the pieces the agent-session path adds: a null preference
- * and the override-merging rules of {@link applyDefaultModel}.
+ * Pure TypeScript — the helpers take the catalog + settings as arguments and
+ * import no `.svelte` module, so this suite runs under the plain-Node Vitest
+ * environment. It covers the resolver's resolved/no-default/dangling/empty
+ * matrix, the agent-settings binding every session-creating surface uses, and
+ * the override-merging rules of {@link applyDefaultModel}.
  */
 
 import { describe, it, expect } from "vitest";
-import { applyDefaultModel, resolveDefaultModel } from "./defaultModel";
+import {
+  applyDefaultModel,
+  resolveAgentDefaultModel,
+  resolveDefaultModel,
+} from "./defaultModel";
 import type { ModelWithProvider } from "../types/provider";
 
 /** Build a catalog item with only the fields the resolver matches on. */
@@ -57,6 +62,72 @@ describe("resolveDefaultModel", () => {
     expect(
       resolveDefaultModel({ modelId: "gpt-4o", providerId: null }, catalog),
     ).toEqual({ available: false, reason: "no-default" });
+
+    expect(resolveDefaultModel(undefined, catalog)).toEqual({
+      available: false,
+      reason: "no-default",
+    });
+
+    expect(resolveDefaultModel({}, catalog)).toEqual({
+      available: false,
+      reason: "no-default",
+    });
+  });
+
+  it("reports dangling-default when the pair is not in the catalog", () => {
+    expect(
+      resolveDefaultModel(
+        { modelId: "removed-model", providerId: "openai-provider" },
+        catalog,
+      ),
+    ).toEqual({ available: false, reason: "dangling-default" });
+
+    // Right model id under the wrong provider is dangling too.
+    expect(
+      resolveDefaultModel(
+        { modelId: "gpt-4o", providerId: "anthropic-provider" },
+        catalog,
+      ),
+    ).toEqual({ available: false, reason: "dangling-default" });
+  });
+
+  it("reports empty-catalog before looking at the stored pair", () => {
+    expect(
+      resolveDefaultModel(
+        { modelId: "gpt-4o", providerId: "openai-provider" },
+        [],
+      ),
+    ).toEqual({ available: false, reason: "empty-catalog" });
+
+    expect(resolveDefaultModel(undefined, [])).toEqual({
+      available: false,
+      reason: "empty-catalog",
+    });
+  });
+});
+
+describe("resolveAgentDefaultModel", () => {
+  it("reads the pair off the agent settings slice", () => {
+    const result = resolveAgentDefaultModel(
+      {
+        defaultEnabledTools: [],
+        defaultModelId: "gpt-4o",
+        defaultProviderId: "openai-provider",
+      },
+      catalog,
+    );
+
+    expect(result.available).toBe(true);
+    if (result.available) {
+      expect(result.model).toBe(catalog[0]);
+    }
+  });
+
+  it("treats unloaded settings as no-default", () => {
+    expect(resolveAgentDefaultModel(undefined, catalog)).toEqual({
+      available: false,
+      reason: "no-default",
+    });
   });
 });
 

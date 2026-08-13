@@ -17,7 +17,10 @@ import type { AgentSessionField, TitleScope } from "../api/agentSession";
 import type { TitleGenerationRule } from "../types/settings";
 import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
-import { applyDefaultModel, resolveDefaultModel } from "../utils/defaultModel";
+import {
+  applyDefaultModel,
+  resolveAgentDefaultModel,
+} from "../utils/defaultModel";
 import { agentState } from "./agent.svelte";
 import { settingsState } from "./settings.svelte";
 import { getAllModels, providerActions } from "./provider.svelte";
@@ -72,13 +75,7 @@ async function withDefaultModel(
 
   return applyDefaultModel(
     overrides,
-    resolveDefaultModel(
-      {
-        modelId: preference.defaultModelId,
-        providerId: preference.defaultProviderId,
-      },
-      getAllModels(),
-    ),
+    resolveAgentDefaultModel(preference, getAllModels()),
   );
 }
 
