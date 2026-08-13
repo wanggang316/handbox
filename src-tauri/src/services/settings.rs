@@ -715,6 +715,7 @@ mod tests {
                 "web_search",
                 "render_card",
                 "render_app",
+                "ask_question",
                 "skill"
             ]
         );
@@ -748,6 +749,7 @@ mod tests {
                 "web_search",
                 "render_card",
                 "render_app",
+                "ask_question",
                 "skill"
             ]
         );
@@ -786,6 +788,7 @@ mod tests {
                 "web_search",
                 "render_card",
                 "render_app",
+                "ask_question",
                 "skill"
             ]
         );

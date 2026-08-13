@@ -28,6 +28,9 @@ use crate::services::agent_permission::{
 };
 use crate::services::coding_agent_session::HookEmitters;
 use crate::services::coding_agent_session::{build_agent_session, config_from_rows};
+use crate::services::extensions::ask_question::{
+    self, QuestionEmitter, QuestionResponse, QUESTION_REQUEST_EVENT,
+};
 use crate::services::extensions::{render_app, render_card, web_search};
 use crate::services::skills::Skill;
 use crate::services::{
@@ -459,6 +462,32 @@ async fn assemble_and_drive(
         extra_tools.push(render_app::make_render_app_tool());
     }
 
+    // ask_question is the one INTERACTIVE extension tool: its handler emits
+    // `agent_question_request` and parks until the user answers through the
+    // `agent_question_respond` IPC, so it needs both the HandBox session id
+    // (the key `abort_run` cancels parked questions by) and an emitter. Same
+    // opt-in gate as the others.
+    if config
+        .enabled_tools
+        .iter()
+        .any(|t| t == ask_question::TOOL_ASK_QUESTION)
+    {
+        let question_window = window.clone();
+        let question_emitter: QuestionEmitter = Arc::new(move |payload| {
+            if let Err(e) = question_window.emit(QUESTION_REQUEST_EVENT, payload) {
+                tracing::warn!(
+                    "[agent_run_stream] failed to emit {}: {}",
+                    QUESTION_REQUEST_EVENT,
+                    e
+                );
+            }
+        });
+        extra_tools.push(ask_question::make_ask_question_tool(
+            session_id.clone(),
+            Some(question_emitter),
+        ));
+    }
+
     let mut session = build_agent_session(
         &config,
         HookEmitters {
@@ -602,6 +631,28 @@ pub async fn agent_approval_respond(
     decision: ApprovalDecision,
 ) -> Result<(), AppError> {
     respond_to_approval(&request_id, decision);
+    Ok(())
+}
+
+/// Feeds the user's answers back to the awaiting `ask_question` tool call.
+///
+/// The tool emits `agent_question_request` and parks on a oneshot keyed by
+/// `request_id`; the question panel answers through this command. `response`:
+///  - `{ kind: "answered", answers: [{ questionId, values }] }` → the answers
+///    become the tool result the model reads. Questions with no values are
+///    reported to the model as explicitly unanswered.
+///  - `{ kind: "dismissed" }` → the user chose to keep talking instead; the
+///    model is told to continue without the answers rather than re-ask.
+///
+/// Idempotent: the first response wins; duplicate / unknown `request_id`s are a
+/// clean no-op — the panel may answer twice in a race, or answer a request that
+/// vanished with an aborted run.
+#[tauri::command]
+pub async fn agent_question_respond(
+    request_id: String,
+    response: QuestionResponse,
+) -> Result<(), AppError> {
+    ask_question::respond_to_question(&request_id, response);
     Ok(())
 }
 

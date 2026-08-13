@@ -176,7 +176,7 @@ fn default_web_search_provider() -> String {
 pub struct AgentSettings {
     /// Tools enabled by default for new agent sessions: the coding-agent
     /// built-ins plus HandBox's extension tools (`web_search` / `render_card` /
-    /// `render_app` / `skill`). All are on by default.
+    /// `render_app` / `ask_question` / `skill`). All are on by default.
     #[serde(default = "default_agent_enabled_tools")]
     pub default_enabled_tools: Vec<String>,
     /// Default "Open in ..." target id (see commands/open_in.rs). `None` =
@@ -209,6 +209,7 @@ fn default_agent_enabled_tools() -> Vec<String> {
         "web_search",
         "render_card",
         "render_app",
+        "ask_question",
         "skill",
     ]
     .iter()
@@ -459,6 +460,7 @@ mod tests {
                 "web_search",
                 "render_card",
                 "render_app",
+                "ask_question",
                 "skill"
             ]
         );

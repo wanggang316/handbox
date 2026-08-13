@@ -18,15 +18,24 @@
   const webSearchProviderOptions = [{ value: "tavily", label: "Tavily" }];
 
   // Grouping: the first group lists only coding-agent builtins; web_search sits
-  // with its provider config; render_card / render_app form the UI-extension
-  // group; skill stands alone.
-  const EXTENSION_IDS = ["web_search", "render_card", "render_app", "skill"];
+  // with its provider config; render_card / render_app / ask_question form the
+  // UI-extension group (HandBox-native surfaces); skill stands alone. Every
+  // extension id must be listed here, or it falls through into the builtin
+  // group and is mislabelled as a coding-agent tool.
+  const EXTENSION_IDS = [
+    "web_search",
+    "render_card",
+    "render_app",
+    "ask_question",
+    "skill",
+  ];
   const codingAgentTools = BUILTIN_TOOLS.filter(
     (tool) => !EXTENSION_IDS.includes(tool.id),
   );
   const uiExtensionTools = $derived([
     { id: "render_card", label: t("agent.tool.render_card"), desc: t("settings.agentTools.renderCardDesc") },
     { id: "render_app", label: t("agent.tool.render_app"), desc: t("settings.agentTools.renderAppDesc") },
+    { id: "ask_question", label: t("agent.tool.ask_question"), desc: t("settings.agentTools.askQuestionDesc") },
   ]);
 
   function webSearchSnapshot(provider: string, apiKey: string): string {

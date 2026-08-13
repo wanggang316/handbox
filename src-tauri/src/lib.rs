@@ -230,6 +230,7 @@ pub fn run() {
             agent_run_abort,
             agent_run_steer,
             agent_approval_respond,
+            agent_question_respond,
             open_settings_window,
             provider_list,
             provider_get,
