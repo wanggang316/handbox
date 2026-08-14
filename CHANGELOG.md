@@ -16,6 +16,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.5.3] - 2026-08-15
+
+### Added
+- Sending a message pins your question to the top of the view and lets the reply
+  grow beneath it, and a nav rail down the left edge marks every question —
+  hover to preview, click to jump back. Switch it off in Settings → General.
+- Pin or archive a session from the sidebar, either from the controls that
+  appear when you hover a row or from the right-click menu. Pinned sessions rise
+  to the top of their group, and hovering also shows a summary card with the
+  project, agent, working folder, and message count.
+- Set a default model for new agent sessions in Settings → Agent Tools, so a new
+  session is ready to send instead of asking you to pick a model first.
+
+### Fixed
+- Quick Action and the selection window no longer stall on "configure a model" —
+  they run on the same default model as new sessions.
+
+
 ## [0.5.2] - 2026-08-14
 
 ### Added
