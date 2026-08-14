@@ -10,6 +10,7 @@
   import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { settingsState } from "$lib/states/settings.svelte";
   import type { HookRuleNotification } from "$lib/types";
   import type {
     AgentMessage,
@@ -541,9 +542,12 @@
 
   // A single question is its own navigation; the rail earns its space from two.
   // Below the width threshold it would overlap the transcript instead of
-  // floating beside it.
+  // floating beside it. The setting is the user's own veto over both — it
+  // reads `?? true` so a config written before the field existed keeps it.
   const showNavRail = $derived(
-    navItems.length > 1 && scrollWidth >= RAIL_MIN_WIDTH,
+    (settingsState.settings?.general.messageNav ?? true) &&
+      navItems.length > 1 &&
+      scrollWidth >= RAIL_MIN_WIDTH,
   );
 </script>
 

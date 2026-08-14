@@ -26,6 +26,7 @@
   let language = $state<Language>("zh-CN");
   let autoScroll = $state<boolean>(true);
   let sidebarVibrancy = $state<boolean>(true);
+  let messageNav = $state<boolean>(true);
 
   function syncFromSettings(): void {
     if (!settingsState.settings?.general) return;
@@ -33,6 +34,7 @@
     language = settingsState.settings.general.language;
     autoScroll = settingsState.settings.general.autoScroll;
     sidebarVibrancy = settingsState.settings.general.sidebarVibrancy ?? true;
+    messageNav = settingsState.settings.general.messageNav ?? true;
 
     uiState.setTheme(theme);
     uiState.setLanguage(language);
@@ -81,6 +83,11 @@
     updateGeneralSetting("autoScroll", autoScroll);
   }
 
+  function handleMessageNavChange(checked: boolean) {
+    messageNav = checked;
+    updateGeneralSetting("messageNav", messageNav);
+  }
+
   function handleSidebarVibrancyChange(checked: boolean) {
     sidebarVibrancy = checked;
     uiState.setSidebarVibrancy(sidebarVibrancy);
@@ -121,6 +128,13 @@
       description={t("settings.general.autoScrollDesc")}
       bind:checked={autoScroll}
       onChange={handleAutoScrollChange}
+    />
+
+    <SwitchRow
+      label={t("settings.general.messageNav")}
+      description={t("settings.general.messageNavDesc")}
+      bind:checked={messageNav}
+      onChange={handleMessageNavChange}
     />
   </TableGroup>
 </div>

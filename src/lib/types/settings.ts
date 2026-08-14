@@ -17,6 +17,8 @@ export interface GeneralSettings {
   autoScroll: boolean;
   /** macOS frosted-glass sidebar (window vibrancy); ignored elsewhere. */
   sidebarVibrancy: boolean;
+  /** Navigation rail beside the transcript, one tick per question. */
+  messageNav: boolean;
   shortcuts: ShortcutConfig;
 }
 
