@@ -407,16 +407,28 @@
   }
 
   function handleScroll() {
-    if (userIntent && scrollEl) {
-      const atBottom =
-        scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight <
-        BOTTOM_EPS;
-      stick = atBottom;
-      // Reaching the bottom means "follow the conversation" — release the pin
-      // so its leftover slack collapses instead of sitting there as dead space.
-      if (atBottom && pinnedIndex !== null) {
-        pinnedIndex = null;
-        recomputeSpacer();
+    if (userIntent && scrollEl && contentEl) {
+      if (pinnedIndex !== null) {
+        // A pinned view already sits at the end of its scroll range, so "at the
+        // bottom" says nothing about intent here — the slack is what the user
+        // is resting against, not the end of the conversation. Two rules follow.
+        //
+        // The slack may only collapse once it has stopped holding the view in
+        // place: scrolled up this far, the content alone fills the viewport, so
+        // removing the slack moves nothing. Collapsing it while it is still
+        // load-bearing shortens the scroll range under the user's finger and
+        // the transcript drops to the bottom in one frame.
+        const natural = contentEl.getBoundingClientRect().height;
+        if (scrollEl.scrollTop <= natural - scrollEl.clientHeight) {
+          pinnedIndex = null;
+          recomputeSpacer();
+        }
+        // And bottom-following stays off: it is handed back when the answer
+        // outgrows the slack, never by a scroll gesture against it.
+      } else {
+        stick =
+          scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight <
+          BOTTOM_EPS;
       }
     }
     scheduleActiveUpdate();
