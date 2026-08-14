@@ -15,6 +15,9 @@ export const settingsZh = {
   "settings.general.sidebarVibrancy": "侧边栏毛玻璃效果",
   "settings.general.sidebarVibrancyDesc":
     "侧边栏背景呈现 macOS 原生半透明磨砂质感",
+  "settings.general.messageNav": "消息导航条",
+  "settings.general.messageNavDesc":
+    "会话左侧按提问显示刻度，悬停预览、点击跳转",
 
   // Sidebar
   "settings.sidebar.backToApp": "返回应用",

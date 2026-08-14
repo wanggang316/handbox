@@ -18,6 +18,9 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.sidebarVibrancy": "Translucent sidebar",
   "settings.general.sidebarVibrancyDesc":
     "Give the sidebar the native macOS frosted-glass look",
+  "settings.general.messageNav": "Message navigation rail",
+  "settings.general.messageNavDesc":
+    "Show a tick per question beside the conversation; hover to preview, click to jump",
 
   // Sidebar
   "settings.sidebar.backToApp": "Back to app",

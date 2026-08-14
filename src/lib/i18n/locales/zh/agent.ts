@@ -66,6 +66,11 @@ export const agentZh = {
   "agent.timeline.copy": "复制",
   "agent.timeline.copied": "已复制",
 
+  // Message navigation rail (MessageNavRail)
+  "agent.nav.label": "消息导航",
+  "agent.nav.jumpTo": "跳转到第 {index} 条提问",
+  "agent.nav.noAnswer": "暂无回复",
+
   // Thinking block (AgentThinkingBlock)
   "agent.thinkingBlock.streaming": "思考中...",
   "agent.thinkingBlock.title": "思考",

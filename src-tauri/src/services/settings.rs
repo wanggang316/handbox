@@ -231,6 +231,7 @@ fn default_settings() -> AppSettings {
             language: Language::ZhCN,
             auto_scroll: true,
             sidebar_vibrancy: true,
+            message_nav: true,
             shortcuts: ShortcutConfig {
                 send_message: "Enter".to_string(),
                 new_line: "Shift+Enter".to_string(),

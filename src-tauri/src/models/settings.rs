@@ -51,10 +51,18 @@ pub struct GeneralSettings {
     /// field existed pick up the native look.
     #[serde(default = "default_sidebar_vibrancy")]
     pub sidebar_vibrancy: bool,
+    /// Navigation rail beside the transcript, one tick per question. Default
+    /// on so configs written before the field existed still get the rail.
+    #[serde(default = "default_message_nav")]
+    pub message_nav: bool,
     pub shortcuts: ShortcutConfig,
 }
 
 fn default_sidebar_vibrancy() -> bool {
+    true
+}
+
+fn default_message_nav() -> bool {
     true
 }
 
@@ -544,6 +552,7 @@ mod tests {
                 language: Language::ZhCN,
                 auto_scroll: true,
                 sidebar_vibrancy: true,
+                message_nav: true,
                 shortcuts: ShortcutConfig {
                     send_message: "Enter".to_string(),
                     new_line: "Shift+Enter".to_string(),
@@ -575,5 +584,25 @@ mod tests {
             parsed.session.title_generation,
             TitleGenerationRule::FirstMessage
         );
+    }
+
+    // A config.json written before the rail existed keeps it switched on, the
+    // same way `sidebarVibrancy` back-fills the native look.
+    #[test]
+    fn general_settings_missing_message_nav_defaults_on() {
+        let parsed: GeneralSettings = serde_json::from_value(serde_json::json!({
+            "theme": "system",
+            "themeColor": "system",
+            "language": "zh-CN",
+            "autoScroll": true,
+            "shortcuts": {
+                "sendMessage": "Enter",
+                "newLine": "Shift+Enter",
+                "switchModel": null,
+            },
+        }))
+        .unwrap();
+        assert!(parsed.message_nav);
+        assert!(parsed.sidebar_vibrancy);
     }
 }

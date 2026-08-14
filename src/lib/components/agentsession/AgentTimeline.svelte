@@ -23,6 +23,7 @@
   import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { settingsState } from "$lib/states/settings.svelte";
   import type { HookRuleNotification } from "$lib/types";
   import type {
     AgentMessage,
@@ -35,6 +36,7 @@
   import { RENDER_CARD_TOOL_NAME } from "./renderCard";
   import AppPill from "./AppPill.svelte";
   import { RENDER_APP_TOOL_NAME } from "./renderApp";
+  import MessageNavRail, { type MessageNavItem } from "./MessageNavRail.svelte";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -297,6 +299,109 @@
   // gates imperative scrolling and must not invalidate anything when it flips.
   let stickToBottom = true;
 
+  // ── Pinning a question to the top ────────────────────────────────────────
+  //
+  // Sending puts the question just asked at the top of the viewport and lets
+  // the answer grow under it, rather than dropping the reader at the bottom of
+  // a reply they have not started reading. Clicking the nav rail does the same
+  // for any earlier question.
+  //
+  // Pinning the *last* question needs slack below it — otherwise the scroll
+  // range ends before the question reaches the top. `spacer` supplies exactly
+  // that much and shrinks as the answer fills it, so the pinned question does
+  // not drift while the reply streams. It sits outside the measured column, so
+  // its own height never feeds back into the measurement.
+
+  /** Gap left above a pinned question. Matches the column's top padding. */
+  const TOP_PAD = 16;
+  /** Free space beside the chat column needed before the rail is shown. */
+  const RAIL_MIN_WIDTH = 920;
+
+  let contentEl = $state<HTMLDivElement>();
+  let spacer = $state(0);
+  let scrollWidth = $state(0);
+  let activeNavIndex = $state(-1);
+
+  // Which question is held at the top, if any. Plain `let` for the same reason
+  // as `stickToBottom`: handlers read it, the template never does.
+  let pinnedIndex: number | null = null;
+
+  const lastUserIndex = $derived.by(() => {
+    for (let i = runState.messages.length - 1; i >= 0; i -= 1) {
+      if (runState.messages[i].role === "user") {
+        return i;
+      }
+    }
+    return -1;
+  });
+
+  function rowFor(index: number): HTMLElement | null {
+    return (
+      contentEl?.querySelector<HTMLElement>(
+        `[data-message-index="${index}"]`,
+      ) ?? null
+    );
+  }
+
+  // Slack below the last question, sized so it can still reach the top; zero
+  // unless a pin is holding it there.
+  function recomputeSpacer() {
+    const el = messagesContainer;
+    if (!el || !contentEl) {
+      return;
+    }
+    let next = 0;
+    if (pinnedIndex !== null && pinnedIndex === lastUserIndex) {
+      const row = rowFor(pinnedIndex);
+      if (row) {
+        const contentTop = contentEl.getBoundingClientRect().top;
+        const top = row.getBoundingClientRect().top - contentTop;
+        const natural = contentEl.getBoundingClientRect().height;
+        next = Math.max(0, Math.round(top - TOP_PAD + el.clientHeight - natural));
+      }
+      // The slack is spent: the running turn has filled the screen below its
+      // question. Holding the pin from here on would freeze the view while
+      // tool cards keep landing off-screen, so hand back to bottom-following.
+      // Only the turn in flight does this — a pin aimed at an earlier question
+      // is a deliberate jump and must survive whatever the run appends.
+      if (next === 0 && runState.isRunning) {
+        pinnedIndex = null;
+        stickToBottom = true;
+      }
+    }
+    spacer = next;
+  }
+
+  async function pinTo(index: number) {
+    pinnedIndex = index;
+    stickToBottom = false;
+    // The reader has taken over: openWindow must stop re-asserting whatever
+    // position it was restoring, or it will pull the view back under them.
+    readerMoved = true;
+    // The transcript mounts tail-first; an older question may not exist yet.
+    if (!rowFor(index) && index < windowStart) {
+      windowStart = index;
+    }
+    // Two flushes, both load-bearing: the question's own row must exist before
+    // it can be measured, and the slack that measurement produces must be in
+    // the DOM before the scroll — otherwise the target is out of range and the
+    // browser clamps it back.
+    await tick();
+    recomputeSpacer();
+    await tick();
+    const el = messagesContainer;
+    const row = rowFor(index);
+    if (!el || !row) {
+      return;
+    }
+    const offset =
+      row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTo({
+      top: Math.max(0, el.scrollTop + offset - TOP_PAD),
+      behavior: "smooth",
+    });
+  }
+
   // True while openWindow is positioning the view. Programmatic scrolling fires
   // the same scroll events the reader's own does, and treating those as intent
   // would overwrite the very position being restored.
@@ -373,8 +478,16 @@
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = 0;
       const anchor = readAnchor();
-      stickToBottom = anchor === "bottom";
+      // A pinned view already rests at the end of its scroll range, so "at the
+      // bottom" says nothing about intent while a pin holds — the reader is
+      // resting against the slack, not the end of the conversation. Reading it
+      // as intent would collapse the slack under their finger and drop the
+      // transcript to the bottom in one frame.
+      if (pinnedIndex === null) {
+        stickToBottom = anchor === "bottom";
+      }
       scrollMemory.set(sessionId, anchor);
+      updateActiveNav();
     });
   }
 
@@ -458,6 +571,10 @@
     const total = untrack(() => runState.messages.length);
     const anchor = scrollMemory.get(id) ?? "bottom";
     stickToBottom = anchor === "bottom";
+    // A pin belongs to the turn that created it, never to the session being
+    // opened: openWindow owns this position.
+    pinnedIndex = null;
+    spacer = 0;
 
     const start = windowStartFor(id, total);
     windowStart = start;
@@ -469,14 +586,47 @@
     };
   });
 
-  // A committed turn keeps the newest content in view; the delay re-pins after
-  // late layout (markdown / images growing the content). Session switches and
-  // restores are positioned by openWindow instead.
-  $effect(() => {
-    if (runState.messages.length > 0) {
-      pinToBottom();
-      setTimeout(pinToBottom, 100);
+  // What a new message does to the view. A question the reader just sent goes
+  // to the top and holds there; anything else keeps the newest content in view,
+  // with a delayed re-pin for late layout (markdown / images growing the
+  // content). Session switches and restores are positioned by openWindow, so
+  // they only re-baseline the counters here.
+  let seenSession = "";
+  let seenCount = 0;
+  let seenHydrated = false;
+
+  function applyScrollPolicy(
+    id: string,
+    messages: AgentMessage[],
+    hydrated: boolean,
+  ) {
+    if (id !== seenSession || hydrated !== seenHydrated) {
+      seenSession = id;
+      seenHydrated = hydrated;
+      seenCount = messages.length;
+      return;
     }
+    // Not `> seenCount`: a turn finalizing in place keeps the count and still
+    // shifts the content, so it must re-pin the bottom like any other change.
+    const previousCount = seenCount;
+    seenCount = messages.length;
+    for (let i = messages.length - 1; i >= previousCount; i -= 1) {
+      if (messages[i].role === "user") {
+        void pinTo(i);
+        scheduleActiveNav();
+        return;
+      }
+    }
+    pinToBottom();
+    setTimeout(pinToBottom, 100);
+    scheduleActiveNav();
+  }
+
+  $effect(() => {
+    const messages = runState.messages;
+    const hydrated = runState.hydrated;
+    const id = sessionId;
+    untrack(() => applyScrollPolicy(id, messages, hydrated));
   });
 
   // Scroll as streaming text/thinking grows.
@@ -491,6 +641,99 @@
     if (runState.hookNotices.length > 0) {
       setTimeout(pinToBottom, 50);
     }
+  });
+
+  // ── Navigation rail ──────────────────────────────────────────────────────
+
+  // One entry per question, paired with the reply that followed it. Built from
+  // the whole transcript, not the mounted window: the rail is a map of the
+  // conversation, and rows it points at are mounted on demand by pinTo.
+  const navItems = $derived.by(() => {
+    const items: MessageNavItem[] = [];
+    const messages = runState.messages;
+    for (let i = 0; i < messages.length; i += 1) {
+      const message = messages[i];
+      if (message.role !== "user") {
+        continue;
+      }
+      let answer = "";
+      for (let j = i + 1; j < messages.length && !answer; j += 1) {
+        const next = messages[j];
+        if (next.role === "user") {
+          break;
+        }
+        if (next.role === "assistant") {
+          answer = assistantText(next);
+        }
+      }
+      items.push({ index: i, question: userText(message), answer });
+    }
+    return items;
+  });
+
+  // A single question is its own navigation; the rail earns its space from two.
+  // Below the width threshold it would overlap the transcript instead of
+  // floating beside it. The setting is the reader's own veto over both — it
+  // reads `?? true` so a config written before the field existed keeps it.
+  const showNavRail = $derived(
+    (settingsState.settings?.general.messageNav ?? true) &&
+      navItems.length > 1 &&
+      scrollWidth >= RAIL_MIN_WIDTH,
+  );
+
+  // The rail highlights the last question that has passed the top edge.
+  function updateActiveNav() {
+    const el = messagesContainer;
+    if (!el || !contentEl) {
+      return;
+    }
+    const edge = el.getBoundingClientRect().top + TOP_PAD + 8;
+    let active = -1;
+    let first = -1;
+    for (const row of contentEl.querySelectorAll<HTMLElement>("[data-question]")) {
+      const index = Number(row.dataset.messageIndex);
+      if (first < 0) {
+        first = index;
+      }
+      if (row.getBoundingClientRect().top <= edge) {
+        active = index;
+      }
+    }
+    // Above the first mounted question the rail still points at it, never at
+    // nothing.
+    activeNavIndex = active < 0 ? first : active;
+  }
+
+  let navFrame = 0;
+  function scheduleActiveNav() {
+    if (navFrame) {
+      return;
+    }
+    navFrame = requestAnimationFrame(() => {
+      navFrame = 0;
+      updateActiveNav();
+    });
+  }
+
+  $effect(() => () => cancelAnimationFrame(navFrame));
+
+  // Content growth (streaming text, tool cards, a widening mount window, late
+  // markdown layout) is observed rather than guessed at with timers: it is what
+  // eats into the pin's slack and what moves the rail's active tick.
+  $effect(() => {
+    const column = contentEl;
+    const el = messagesContainer;
+    if (!column || !el) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      scrollWidth = el.clientWidth;
+      recomputeSpacer();
+      scheduleActiveNav();
+    });
+    observer.observe(column);
+    observer.observe(el);
+    return () => observer.disconnect();
   });
 </script>
 
@@ -537,239 +780,258 @@
   {/if}
 {/snippet}
 
-<!-- The message stream is content: bubbles, markdown replies, tool-card bodies
-     and error text must all be selectable (buttons stay unselectable globally). -->
-<div
-  bind:this={messagesContainer}
-  class="flex-1 overflow-y-auto select-text scroll-column"
-  onscroll={handleScroll}
-  onwheel={noteReaderInput}
-  ontouchmove={noteReaderInput}
->
-  <div class="chat-column py-4 space-y-6">
-    <!-- Hook firings that preceded every message (a prompt rule on the first turn). -->
-    {#each hookNoticesAfter(-1) as entry}
-      {@render hookNoticeRow(entry.notice)}
-    {/each}
+<!-- The scroller sits in a positioned shell so the nav rail can float in the
+     free space beside the centred column without taking layout from it. -->
+<div class="relative flex min-h-0 flex-1 flex-col">
+  <!-- The message stream is content: bubbles, markdown replies, tool-card bodies
+       and error text must all be selectable (buttons stay unselectable globally). -->
+  <div
+    bind:this={messagesContainer}
+    class="flex-1 overflow-y-auto select-text scroll-column"
+    onscroll={handleScroll}
+    onwheel={noteReaderInput}
+    ontouchmove={noteReaderInput}
+  >
+    <div bind:this={contentEl} class="chat-column py-4 space-y-6">
+      <!-- Hook firings that preceded every message (a prompt rule on the first turn). -->
+      {#each hookNoticesAfter(-1) as entry}
+        {@render hookNoticeRow(entry.notice)}
+      {/each}
 
-    <!-- Committed messages, from `windowStart` to the end (see the progressive
-         mount above). messages is append-only (the reducer only appends or
-         finalizes in place, never reorders), so absolute index keys reuse DOM
-         safely — including when the window widens and prepends older rows;
-         cards key by toolCallId so their state never shifts with the index. -->
-    {#each visibleMessages as message, offset (windowStart + offset)}
-      {@const i = windowStart + offset}
-      {#if message.role === "user"}
-        <!-- data-message-index anchors the reader's position across a teardown
-             (see scrollMemory): the row, not a pixel offset, is what survives
-             older messages mounting in later. -->
-        <div class="flex justify-end" data-message-index={i}>
-          <div class="flex flex-col items-end">
-            <div
-              class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
-            >
+      <!-- Committed messages, from `windowStart` to the end (see the progressive
+           mount above). messages is append-only (the reducer only appends or
+           finalizes in place, never reorders), so absolute index keys reuse DOM
+           safely — including when the window widens and prepends older rows;
+           cards key by toolCallId so their state never shifts with the index. -->
+      {#each visibleMessages as message, offset (windowStart + offset)}
+        {@const i = windowStart + offset}
+        {#if message.role === "user"}
+          <!-- data-message-index anchors the reader's position across a teardown
+               (see scrollMemory): the row, not a pixel offset, is what survives
+               older messages mounting in later. -->
+          <!-- data-question marks it as a rail stop as well: the pin target on
+               send, and where a tick jumps to. -->
+          <div class="flex justify-end" data-message-index={i} data-question>
+            <div class="flex flex-col items-end">
               <div
-                class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+                class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
               >
-                {userText(message)}
+                <div
+                  class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+                >
+                  {userText(message)}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      {:else if message.role === "assistant" && i !== liveAssistantIndex}
-        <!-- Finished assistant message; the in-progress skeleton renders in the
-             LIVE view below and is skipped here. -->
-        <div class="flex flex-col gap-2" data-message-index={i}>
+        {:else if message.role === "assistant" && i !== liveAssistantIndex}
+          <!-- Finished assistant message; the in-progress skeleton renders in the
+               LIVE view below and is skipped here. -->
+          <div class="flex flex-col gap-2" data-message-index={i}>
+            <div class="flex-1 min-w-0">
+              {#if assistantThinking(message)}
+                <AgentThinkingBlock thinking={assistantThinking(message)} />
+              {/if}
+
+              {#if assistantText(message)}
+                {@const genuiSpec = resolveSpec(assistantText(message))}
+                {#if genuiSpec}
+                  <!-- GenUI card: the whole reply is a valid JSON-Render spec →
+                       rendered as an interactive card; non-spec replies fall
+                       through to markdown. -->
+                  <JsonUIProvider initialState={{}}>
+                    <Renderer spec={genuiSpec} registry={uiRegistry} />
+                  </JsonUIProvider>
+                {:else}
+                  <div
+                    class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
+                    use:markdownInteractions
+                  >
+                    {@html renderMarkdown(assistantText(message))}
+                  </div>
+                {/if}
+              {/if}
+
+              <!-- Tool-call cards in source order; one card per toolCallId flips
+                   from executing to final in place (live), reconciled from the
+                   committed toolResult after reload (restored). -->
+              {#if assistantToolCalls(message).length}
+                <div class="mt-2 space-y-2">
+                  {#each assistantToolCalls(message) as block (block.id)}
+                    <!-- Before- and approval-hooks fire before their call runs,
+                         so they read above the card; an after-hook reads below. -->
+                    {#each hookNoticesForCall(block.id, [
+                      "before_tool_call",
+                      "approval_requested",
+                    ]) as entry}
+                      {@render hookNoticeRow(entry.notice)}
+                    {/each}
+                    {#if block.name === RENDER_CARD_TOOL_NAME}
+                      <!-- render_card is purely presentational: its arguments are
+                           the card, so it renders as an inline sandbox card
+                           rather than a generic tool card. -->
+                      <HtmlCard toolCall={toolCallView(block)} />
+                    {:else if block.name === RENDER_APP_TOOL_NAME}
+                      <!-- render_app: the timeline shows only a clickable pill;
+                           the app itself lives in the side AppPanel. -->
+                      <AppPill
+                        toolCall={toolCallView(block)}
+                        {sessionId}
+                        fallbackTitle={appTitle}
+                      />
+                    {:else}
+                      <AgentToolCallCard toolCall={toolCallView(block)} />
+                    {/if}
+                    {#each hookNoticesForCall(block.id, ["after_tool_call"]) as entry}
+                      {@render hookNoticeRow(entry.notice)}
+                    {/each}
+                  {/each}
+                </div>
+              {/if}
+
+              {#if message.stopReason === "error" && message.errorMessage}
+                <div
+                  class="mt-2 px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
+                >
+                  {message.errorMessage}
+                </div>
+              {/if}
+
+              <!-- Message actions. Usage is an icon rather than a running total:
+                   the numbers matter when asked for, not on every turn. -->
+              {#if assistantText(message) || hasUsage(message)}
+                <div class="mt-2 flex items-center gap-0.5 text-base-content/40">
+                  {#if assistantText(message)}
+                    <Tooltip
+                      content={copiedIndex === i
+                        ? t("agent.timeline.copied")
+                        : t("agent.timeline.copy")}
+                    >
+                      <Button
+                        variant="clear"
+                        size="icon-sm"
+                        class="text-base-content/40 enabled:hover:text-base-content"
+                        ariaLabel={t("agent.timeline.copy")}
+                        onclick={() => copyMessage(i, assistantText(message))}
+                      >
+                        {#if copiedIndex === i}
+                          <Check size={14} />
+                        {:else}
+                          <Copy size={14} />
+                        {/if}
+                      </Button>
+                    </Tooltip>
+                  {/if}
+
+                  {#if hasUsage(message)}
+                    <Tooltip content={usageLabel(message)}>
+                      <!-- Mirrors the icon-sm clear button: it is a hover target
+                           like its neighbour, so it answers hover the same way.
+                           It stays out of the tab order though — one stop per
+                           message would bury the row's real control, and the
+                           label already carries the numbers for AT. -->
+                      <span
+                        class="flex size-7 items-center justify-center rounded-md transition-[color,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300 hover:text-base-content"
+                        role="img"
+                        aria-label={usageLabel(message)}
+                      >
+                        <ChartNoAxesColumn size={14} />
+                      </span>
+                    </Tooltip>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+        <!-- toolResult messages are not rendered standalone: the paired toolcall
+             card presents them inside the assistant turn, avoiding a detached
+             tool-result block. -->
+
+        <!-- Hook firings anchored right after this message, in arrival order. -->
+        {#each hookNoticesAfter(i) as entry}
+          {@render hookNoticeRow(entry.notice)}
+        {/each}
+      {/each}
+
+      <!-- LIVE streaming view: growing thinking block + streaming text. -->
+      {#if showLiveView}
+        <div class="flex flex-col gap-2">
           <div class="flex-1 min-w-0">
-            {#if assistantThinking(message)}
-              <AgentThinkingBlock thinking={assistantThinking(message)} />
+            {#if runState.thinkingText}
+              <AgentThinkingBlock thinking={runState.thinkingText} isStreaming />
             {/if}
 
-            {#if assistantText(message)}
-              {@const genuiSpec = resolveSpec(assistantText(message))}
-              {#if genuiSpec}
-                <!-- GenUI card: the whole reply is a valid JSON-Render spec →
-                     rendered as an interactive card; non-spec replies fall
-                     through to markdown. -->
-                <JsonUIProvider initialState={{}}>
-                  <Renderer spec={genuiSpec} registry={uiRegistry} />
-                </JsonUIProvider>
+            {#if runState.streamingText}
+              {#if looksLikeStreamingSpec(runState.streamingText)}
+                <!-- Spec-shaped stream: unclosed JSON is not rendered char-by-char
+                     (it would flash raw JSON); show a placeholder until the
+                     committed branch renders the GenUI card at message_end. -->
+                <div
+                  class="py-2 flex items-center gap-2 text-sm text-base-content/50"
+                >
+                  <div
+                    class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+                  ></div>
+                  <span>{t("agent.timeline.genuiStreaming")}</span>
+                </div>
               {:else}
                 <div
                   class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
                   use:markdownInteractions
                 >
-                  {@html renderMarkdown(assistantText(message))}
+                  {@html renderMarkdown(runState.streamingText)}
                 </div>
               {/if}
-            {/if}
-
-            <!-- Tool-call cards in source order; one card per toolCallId flips
-                 from executing to final in place (live), reconciled from the
-                 committed toolResult after reload (restored). -->
-            {#if assistantToolCalls(message).length}
-              <div class="mt-2 space-y-2">
-                {#each assistantToolCalls(message) as block (block.id)}
-                  <!-- Before- and approval-hooks fire before their call runs,
-                       so they read above the card; an after-hook reads below. -->
-                  {#each hookNoticesForCall(block.id, [
-                    "before_tool_call",
-                    "approval_requested",
-                  ]) as entry}
-                    {@render hookNoticeRow(entry.notice)}
-                  {/each}
-                  {#if block.name === RENDER_CARD_TOOL_NAME}
-                    <!-- render_card is purely presentational: its arguments are
-                         the card, so it renders as an inline sandbox card
-                         rather than a generic tool card. -->
-                    <HtmlCard toolCall={toolCallView(block)} />
-                  {:else if block.name === RENDER_APP_TOOL_NAME}
-                    <!-- render_app: the timeline shows only a clickable pill;
-                         the app itself lives in the side AppPanel. -->
-                    <AppPill
-                      toolCall={toolCallView(block)}
-                      {sessionId}
-                      fallbackTitle={appTitle}
-                    />
-                  {:else}
-                    <AgentToolCallCard toolCall={toolCallView(block)} />
-                  {/if}
-                  {#each hookNoticesForCall(block.id, ["after_tool_call"]) as entry}
-                    {@render hookNoticeRow(entry.notice)}
-                  {/each}
-                {/each}
-              </div>
-            {/if}
-
-            {#if message.stopReason === "error" && message.errorMessage}
-              <div
-                class="mt-2 px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
-              >
-                {message.errorMessage}
-              </div>
-            {/if}
-
-            <!-- Message actions. Usage is an icon rather than a running total:
-                 the numbers matter when asked for, not on every turn. -->
-            {#if assistantText(message) || hasUsage(message)}
-              <div class="mt-2 flex items-center gap-0.5 text-base-content/40">
-                {#if assistantText(message)}
-                  <Tooltip
-                    content={copiedIndex === i
-                      ? t("agent.timeline.copied")
-                      : t("agent.timeline.copy")}
-                  >
-                    <Button
-                      variant="clear"
-                      size="icon-sm"
-                      class="text-base-content/40 enabled:hover:text-base-content"
-                      ariaLabel={t("agent.timeline.copy")}
-                      onclick={() => copyMessage(i, assistantText(message))}
-                    >
-                      {#if copiedIndex === i}
-                        <Check size={14} />
-                      {:else}
-                        <Copy size={14} />
-                      {/if}
-                    </Button>
-                  </Tooltip>
-                {/if}
-
-                {#if hasUsage(message)}
-                  <Tooltip content={usageLabel(message)}>
-                    <!-- Mirrors the icon-sm clear button: it is a hover target
-                         like its neighbour, so it answers hover the same way.
-                         It stays out of the tab order though — one stop per
-                         message would bury the row's real control, and the
-                         label already carries the numbers for AT. -->
-                    <span
-                      class="flex size-7 items-center justify-center rounded-md transition-[color,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300 hover:text-base-content"
-                      role="img"
-                      aria-label={usageLabel(message)}
-                    >
-                      <ChartNoAxesColumn size={14} />
-                    </span>
-                  </Tooltip>
-                {/if}
+            {:else if !runState.thinkingText}
+              <!-- Stream started but no content yet: progress indicator. -->
+              <div class="py-2 text-base-content flex items-center">
+                <div
+                  class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+                ></div>
               </div>
             {/if}
           </div>
         </div>
       {/if}
-      <!-- toolResult messages are not rendered standalone: the paired toolcall
-           card presents them inside the assistant turn, avoiding a detached
-           tool-result block. -->
 
-      <!-- Hook firings anchored right after this message, in arrival order. -->
-      {#each hookNoticesAfter(i) as entry}
-        {@render hookNoticeRow(entry.notice)}
-      {/each}
-    {/each}
-
-    <!-- LIVE streaming view: growing thinking block + streaming text. -->
-    {#if showLiveView}
-      <div class="flex flex-col gap-2">
-        <div class="flex-1 min-w-0">
-          {#if runState.thinkingText}
-            <AgentThinkingBlock thinking={runState.thinkingText} isStreaming />
-          {/if}
-
-          {#if runState.streamingText}
-            {#if looksLikeStreamingSpec(runState.streamingText)}
-              <!-- Spec-shaped stream: unclosed JSON is not rendered char-by-char
-                   (it would flash raw JSON); show a placeholder until the
-                   committed branch renders the GenUI card at message_end. -->
-              <div
-                class="py-2 flex items-center gap-2 text-sm text-base-content/50"
-              >
-                <div
-                  class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
-                ></div>
-                <span>{t("agent.timeline.genuiStreaming")}</span>
-              </div>
-            {:else}
-              <div
-                class="flex-1 break-words text-[15px] leading-[1.6] markdown-content"
-                use:markdownInteractions
-              >
-                {@html renderMarkdown(runState.streamingText)}
-              </div>
-            {/if}
-          {:else if !runState.thinkingText}
-            <!-- Stream started but no content yet: progress indicator. -->
-            <div class="py-2 text-base-content flex items-center">
-              <div
-                class="h-4 w-4 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
-              ></div>
-            </div>
-          {/if}
-        </div>
-      </div>
-    {/if}
-
-    <!-- Compaction indicator. Compaction happens within a turn without a
-         terminal signal, so it coexists with the streaming view; hidden when
-         compaction_end arrives. The summary is intentionally not rendered. -->
-    {#if runState.isCompacting}
-      <div
-        class="flex items-center gap-2 px-3 py-2 text-xs text-base-content/60"
-      >
+      <!-- Compaction indicator. Compaction happens within a turn without a
+           terminal signal, so it coexists with the streaming view; hidden when
+           compaction_end arrives. The summary is intentionally not rendered. -->
+      {#if runState.isCompacting}
         <div
-          class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
-        ></div>
-        <span>{t("agent.timeline.compacting")}</span>
-      </div>
-    {/if}
+          class="flex items-center gap-2 px-3 py-2 text-xs text-base-content/60"
+        >
+          <div
+            class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+          ></div>
+          <span>{t("agent.timeline.compacting")}</span>
+        </div>
+      {/if}
 
-    <!-- Run-level errors are visible, never a silent stop. -->
-    {#if runState.error}
-      <div
-        class="px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
-      >
-        {runState.error}
-      </div>
-    {/if}
+      <!-- Run-level errors are visible, never a silent stop. -->
+      {#if runState.error}
+        <div
+          class="px-3 py-2 rounded-md bg-error/10 text-error text-sm whitespace-pre-wrap break-words"
+        >
+          {runState.error}
+        </div>
+      {/if}
+    </div>
+
+    <!-- Slack that lets the newest question reach the top of the viewport;
+         zero unless a pin is holding it there. Outside the measured column so
+         its height never feeds back into the measurement. -->
+    <div style="height: {spacer}px" aria-hidden="true"></div>
   </div>
+
+  {#if showNavRail}
+    <MessageNavRail
+      items={navItems}
+      activeIndex={activeNavIndex}
+      onSelect={(index) => void pinTo(index)}
+    />
+  {/if}
 </div>
 
 <style>
