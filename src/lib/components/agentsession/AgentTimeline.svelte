@@ -606,9 +606,8 @@
       seenCount = messages.length;
       return;
     }
-    if (messages.length <= seenCount) {
-      return;
-    }
+    // Not `> seenCount`: a turn finalizing in place keeps the count and still
+    // shifts the content, so it must re-pin the bottom like any other change.
     const previousCount = seenCount;
     seenCount = messages.length;
     for (let i = messages.length - 1; i >= previousCount; i -= 1) {
