@@ -16,20 +16,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
-## [0.5.1] - 2026-08-10
+## [0.5.2] - 2026-08-14
 
 ### Added
 - A New Chat button in the sidebar starts a fresh conversation, with the
   greeting and input box centered on screen until you send the first message.
   Clicking it again reopens the blank chat instead of piling up empty ones.
+- Agents can stop and ask you a question mid-task — single choice, multiple
+  choice, or free text — in a card above the input box, then carry on with your
+  answer instead of guessing.
 - Hooks reach two more moments: when the agent finishes a reply, and when a tool
   call stops to ask for your approval. A finish-reply hook can send the agent
   back to work with a reason — "you said you'd run the tests" — while an
   approval hook only reports, leaving the decision to you.
+- The window reopens at the size and position you last left it.
+
+### Changed
+- Settings navigation is regrouped into General and Agents, and Quick Tools now
+  sits under General.
+- Long conversations open immediately instead of freezing while the whole
+  history builds; older messages fill in behind you.
 
 ### Fixed
 - Going back to an older version of the app no longer leaves it refusing to
   start.
+- Returning from Settings keeps the session you had open, at the scroll position
+  you left it — and scrolling up mid-reply no longer yanks you back down on
+  every new word.
+
+
+## [0.5.1] - 2026-08-10 [NOT RELEASED]
+
+Tagged but never published — the build failed at notarization before any
+artifact was uploaded. These changes ship in 0.5.2 above.
 
 
 ## [0.5.0] - 2026-08-07

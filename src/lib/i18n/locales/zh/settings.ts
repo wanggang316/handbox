@@ -22,8 +22,8 @@ export const settingsZh = {
   // Sidebar
   "settings.sidebar.backToApp": "返回应用",
   "settings.sidebar.search": "搜索设置…",
-  "settings.sidebar.group.personal": "个人",
-  "settings.sidebar.group.features": "功能",
+  "settings.sidebar.group.general": "通用",
+  "settings.sidebar.group.agents": "Agents",
   "settings.sidebar.group.other": "其他",
   "settings.sidebar.account": "账户",
   "settings.sidebar.general": "通用",
@@ -79,7 +79,17 @@ export const settingsZh = {
   // Agent Tools page
   "settings.agentTools.title": "Agent 工具",
   "settings.agentTools.description":
-    "新建 Agent 会话默认启用的工具。已存在的会话不受影响。",
+    "新建 Agent 会话默认使用的模型与默认启用的工具。已存在的会话不受影响。",
+  "settings.agentTools.defaultModel.title": "默认模型",
+  "settings.agentTools.defaultModel.label": "新建会话默认模型",
+  "settings.agentTools.defaultModel.hint":
+    "新建 Agent 会话时自动选用的模型，会话内仍可随时切换。",
+  "settings.agentTools.defaultModel.none": "未选择",
+  "settings.agentTools.defaultModel.unavailable":
+    "所选模型已不可用，请重新选择",
+  "settings.agentTools.defaultModel.emptyCatalog":
+    "请先在「模型」中启用一个供应商并添加模型。",
+  "settings.agentTools.defaultModel.openModels": "前往模型设置",
   "settings.agentTools.webSearch.title": "网络搜索",
   "settings.agentTools.webSearch.provider": "搜索服务商",
   "settings.agentTools.webSearch.apiKey": "API Key",
@@ -90,6 +100,7 @@ export const settingsZh = {
   "settings.agentTools.renderCardDesc": "在会话中内联渲染交互式 HTML 卡片",
   "settings.agentTools.renderAppDesc":
     "在侧边面板生成完整的 HTML 应用（预览 + 源码）",
+  "settings.agentTools.askQuestionDesc": "让模型在需要你拍板时弹出提问面板，等你作答后再继续",
   "settings.agentTools.skillDesc": "允许模型发现并按需加载 Skill",
 
   // Skills page

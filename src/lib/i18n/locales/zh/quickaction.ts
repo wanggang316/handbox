@@ -42,15 +42,8 @@ export const quickactionZh = {
   // Fallback error when registration fails without an error message.
   "quickaction.shortcut.registerFailed": "快捷键注册失败，请更换组合后重试。",
 
-  // Settings page · default-model selector
-  "quickaction.model.title": "默认模型",
-  "quickaction.model.label": "默认模型",
-  "quickaction.model.hint": "唤起快捷动作浮层后默认使用的模型，可在浮层内临时切换。",
-  // No default model chosen yet (catalog non-empty, nothing selected).
-  "quickaction.model.none": "未选择",
-  // Chosen model's provider was removed or disabled (dangling reference): prompt to re-pick while keeping the stale value on disk.
-  "quickaction.model.unavailable": "所选模型已不可用，请重新选择",
-  // Empty catalog (no enabled providers/models): guide to configure a provider first.
-  "quickaction.model.emptyCatalog": "请先在「模型」中启用一个供应商并添加模型。",
-  "quickaction.model.openModels": "前往模型设置",
+  // The overlay runs on the app-wide default model; unset, dangling or an
+  // empty catalog all land here — the fix is the same: go pick a default.
+  "quickaction.model.unavailable":
+    "默认模型不可用，请先在设置 →「Agent 工具」中选择默认模型",
 };

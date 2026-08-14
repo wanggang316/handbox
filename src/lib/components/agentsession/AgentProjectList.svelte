@@ -1,8 +1,19 @@
+<script module lang="ts">
+  /**
+   * The session list's scroll offset, kept outside the component so it survives
+   * a teardown: entering settings unmounts the whole app layout, and a reader
+   * whose session sits far down a long list should not be dumped back at the top.
+   */
+  let listScrollTop = 0;
+</script>
+
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { slide } from "svelte/transition";
   import { goto } from "$app/navigation";
   import {
+    Archive,
+    ArchiveRestore,
     ChevronRight,
     Copy,
     Folder,
@@ -10,10 +21,13 @@
     Loader2,
     MessagesSquare,
     PencilLine,
+    Pin,
+    PinOff,
     Plus,
     Sparkles,
     Trash2,
   } from "@lucide/svelte";
+  import SessionHoverCard from "$lib/components/agentsession/SessionHoverCard.svelte";
   import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import {
     agentProjectState,
@@ -29,12 +43,13 @@
   import { t } from "$lib/i18n";
   import {
     groupSessionsByAgent,
+    partitionArchivedSessions,
     sessionActivityKey,
   } from "$lib/utils/agentGrouping";
   import type { AgentSessionBucket } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
   import { normalizeError } from "$lib/utils/error";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import type { AgentSession } from "$lib/types";
   import type { AgentProject } from "$lib/types/agentProject";
 
@@ -45,15 +60,28 @@
   let { activeId = "" }: Props = $props();
 
   // Grouping and ordering (Agent → Project → Session) are fully delegated to
-  // the selector; the component does not re-implement them.
+  // the selector; the component does not re-implement them. Archived sessions
+  // are split off first — they render flat in their own group at the bottom
+  // rather than anywhere in the tree.
+  const partitioned = $derived(
+    partitionArchivedSessions(agentSessionState.sessions),
+  );
   const buckets = $derived(
     groupSessionsByAgent(
       agentState.agents,
       agentProjectState.projects,
-      agentSessionState.sessions,
+      partitioned.active,
     ),
   );
-  const isEmpty = $derived(buckets.length === 0);
+  const archivedSessions = $derived(partitioned.archived);
+  const isEmpty = $derived(
+    buckets.length === 0 && archivedSessions.length === 0,
+  );
+
+  // The Archived group starts collapsed on every load and is deliberately kept
+  // out of `agentProjectCollapse` (whose contract is "missing = expanded", and
+  // whose persistence would defeat the point of tucking sessions away).
+  let archivedExpanded = $state(false);
 
   // A project can appear under multiple agent buckets, so collapse state is
   // keyed by bucket+project to keep each occurrence independent.
@@ -86,9 +114,75 @@
     initialLoadDone = true;
   }
 
+  let listEl: HTMLDivElement | undefined;
+  let scrollFrame = 0;
+
+  // Set while the restore is driving scrollTop. Programmatic scrolling raises
+  // the same events the reader's own does, and a restore that lands clamped
+  // against a still-short list would otherwise record the clamped value and
+  // lose the position it was reaching for.
+  let restoringScroll = false;
+
+  // Real input hands control back: stop asserting the old offset under them.
+  let readerTookOver = false;
+
+  function handleListScroll() {
+    // Rows slide out from under the cursor, so a hover card would be left
+    // pointing at nothing. Dismissed ahead of the early return below: a
+    // programmatic restore scrolls the list too, and the rAF throttle must not
+    // delay this. Guarded so an idle scroll does not write state every frame.
+    if (hoverCard || hoverTimer !== null) cancelHoverCard();
+
+    if (restoringScroll || scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      listScrollTop = listEl?.scrollTop ?? 0;
+    });
+  }
+
+  function noteReaderInput() {
+    readerTookOver = true;
+  }
+
+  function raf(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  /**
+   * The list fills in stages — the warm store paints first, then the three
+   * fetches land — so a single assignment clamps against content that is still
+   * short. Keep asserting until the offset sticks, or until the budget runs out
+   * (the list genuinely shrank, e.g. sessions were deleted while away).
+   */
+  async function restoreListScroll() {
+    const target = listScrollTop;
+    if (target <= 0) return;
+
+    restoringScroll = true;
+    readerTookOver = false;
+    try {
+      for (let frame = 0; frame < 40 && !readerTookOver; frame += 1) {
+        await tick();
+        if (!listEl) return;
+        if (listEl.scrollTop !== target) {
+          listEl.scrollTop = target;
+        }
+        if (listEl.scrollTop === target && frame >= 2) break;
+        await raf();
+      }
+    } finally {
+      restoringScroll = false;
+    }
+  }
+
   onMount(() => {
     loadSidebarData();
+    void restoreListScroll();
+    return () => cancelAnimationFrame(scrollFrame);
   });
+
+  // A pending hover timer must not fire into a torn-down component.
+  onDestroy(() => cancelHoverCard());
 
   // Location of the active session (bucket key + optional project collapse
   // key); undefined when there is no active session or no match.
@@ -126,8 +220,149 @@
     }
   });
 
+  // The open session must never be invisible in the sidebar: archiving the one
+  // currently on screen (or opening an archived one) reveals the group instead
+  // of silently dropping its highlight.
+  $effect(() => {
+    if (archivedSessions.some((session) => session.id === activeId)) {
+      archivedExpanded = true;
+    }
+  });
+
   function handleSessionClick(session: AgentSession) {
     goto(`/agent?id=${session.id}`);
+  }
+
+  // --- Row hover / focus ----------------------------------------------------
+
+  // The pin + archive controls share the relative time's slot, so which one is
+  // rendered is decided in JS rather than by a CSS `:hover` variant: a
+  // `display: none` control could never be reached by keyboard, and an
+  // always-mounted `opacity-0` one would eat the time label's width for good.
+  let activeRowSessionId = $state("");
+
+  function handleRowEnter(event: MouseEvent, session: AgentSession) {
+    activeRowSessionId = session.id;
+    scheduleHoverCard(event, session);
+  }
+
+  function handleRowLeave(event: MouseEvent, session: AgentSession) {
+    cancelHoverCard();
+    // Keep the controls up only while the KEYBOARD is inside this row.
+    // `document.activeElement` would also match the button the mouse just
+    // clicked — clicking focuses it — latching the controls open for good
+    // once the pointer moves away. `:focus-visible` is exactly the
+    // keyboard-only distinction.
+    const row = event.currentTarget as HTMLElement;
+    if (row.matches(":focus-visible") || row.querySelector(":focus-visible")) {
+      return;
+    }
+    if (activeRowSessionId === session.id) activeRowSessionId = "";
+  }
+
+  function handleRowFocusIn(session: AgentSession) {
+    activeRowSessionId = session.id;
+  }
+
+  // focusout also fires when focus moves from the row onto one of its own
+  // controls; only a move that leaves the row retracts them.
+  function handleRowFocusOut(event: FocusEvent, session: AgentSession) {
+    const row = event.currentTarget as HTMLElement;
+    const next = event.relatedTarget;
+    if (next instanceof Node && row.contains(next)) return;
+    if (activeRowSessionId === session.id) activeRowSessionId = "";
+  }
+
+  // Enter / Space open the session; the row is a div (not a button) so the pin
+  // and archive buttons can legally nest inside it.
+  function handleSessionRowKeydown(event: KeyboardEvent, session: AgentSession) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (event.target !== event.currentTarget) return; // a control owns its own keys
+    event.preventDefault();
+    handleSessionClick(session);
+  }
+
+  // --- Hover card -----------------------------------------------------------
+
+  // Delay before the card appears, so sweeping the cursor down the list does
+  // not flash a card per row.
+  const HOVER_CARD_DELAY_MS = 450;
+  /** Gap between the sidebar row and the card, and from the viewport edge. */
+  const HOVER_CARD_MARGIN = 8;
+  /** Kept in sync with the card's own height budget for the bottom clamp. */
+  const HOVER_CARD_MAX_HEIGHT = 160;
+
+  interface HoverCard {
+    session: AgentSession;
+    x: number;
+    y: number;
+  }
+
+  let hoverCard = $state<HoverCard | null>(null);
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function cancelHoverCard() {
+    if (hoverTimer !== null) {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+    }
+    hoverCard = null;
+  }
+
+  // Anchored to the row's right edge in viewport coordinates: the list scrolls,
+  // so an absolutely positioned card would be clipped by the sidebar.
+  function scheduleHoverCard(event: MouseEvent, session: AgentSession) {
+    cancelHoverCard();
+    const row = event.currentTarget as HTMLElement;
+    hoverTimer = setTimeout(() => {
+      hoverTimer = null;
+      // A context menu or a rename input owns the interaction; no card on top.
+      if (contextMenu || renamingSessionId) return;
+      const rect = row.getBoundingClientRect();
+      hoverCard = {
+        session,
+        x: rect.right + HOVER_CARD_MARGIN,
+        // Ride the row's top edge, lifted just enough to clear the viewport
+        // bottom — and never pushed above its top on a short window.
+        y: Math.max(
+          HOVER_CARD_MARGIN,
+          Math.min(
+            rect.top,
+            window.innerHeight - HOVER_CARD_MAX_HEIGHT - HOVER_CARD_MARGIN,
+          ),
+        ),
+      };
+    }, HOVER_CARD_DELAY_MS);
+  }
+
+  // --- Pin / archive --------------------------------------------------------
+
+  // Both are optimistic in the store, so the row reorders immediately; a
+  // failure rolls back there and surfaces here in the shared error bar.
+  async function togglePinned(session: AgentSession) {
+    cancelHoverCard();
+    contextMenu = null;
+    createErrorMessage = null;
+    try {
+      await agentSessionActions.setPinned(session.id, !session.pinned);
+    } catch (error) {
+      const normalized = normalizeError(error, t("agent.list.pinFailed"));
+      createErrorMessage = normalized.hint ?? normalized.message;
+    }
+  }
+
+  async function toggleArchived(session: AgentSession) {
+    cancelHoverCard();
+    contextMenu = null;
+    createErrorMessage = null;
+    // Archiving the open session keeps it open in the main pane; only its
+    // sidebar placement changes, so there is no navigation here.
+    try {
+      await agentSessionActions.setArchived(session.id, !session.archived);
+    } catch (error) {
+      const normalized = normalizeError(error, t("agent.list.archiveFailed"));
+      createErrorMessage = normalized.hint ?? normalized.message;
+    }
   }
 
   // One contextMenu state discriminated by kind: only one menu can be on
@@ -153,6 +388,9 @@
     event.preventDefault();
     // Don't bubble to the window oncontextmenu, which would close the menu.
     event.stopPropagation();
+    // The menu owns the interaction from here; a card underneath it would only
+    // fight for the same space.
+    cancelHoverCard();
     contextMenu = {
       kind: "session",
       session,
@@ -188,6 +426,7 @@
   function startRename() {
     if (contextMenu?.kind !== "session") return;
     const session = contextMenu.session;
+    cancelHoverCard();
     renamingSessionId = session.id;
     renameValue = session.name;
     contextMenu = null;
@@ -517,13 +756,21 @@
       />
     </div>
   {:else}
-    <button
-      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 {session.id ===
+    {@const showControls = activeRowSessionId === session.id}
+    <div
+      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
+      role="button"
+      tabindex="0"
       onclick={() => handleSessionClick(session)}
+      onkeydown={(event) => handleSessionRowKeydown(event, session)}
       oncontextmenu={(event) => handleSessionContextMenu(event, session)}
+      onmouseenter={(event) => handleRowEnter(event, session)}
+      onmouseleave={(event) => handleRowLeave(event, session)}
+      onfocusin={() => handleRowFocusIn(session)}
+      onfocusout={(event) => handleRowFocusOut(event, session)}
     >
       <span class="truncate flex-1">{session.name}</span>
       {#if generatingTitleId === session.id}
@@ -531,12 +778,57 @@
           size={12}
           class="flex-shrink-0 animate-spin text-base-content/40"
         />
+      {:else if showControls}
+        <!-- Hover / focus swaps the relative time for the row's own controls. -->
+        <span class="flex flex-shrink-0 items-center gap-0.5">
+          {#if !session.archived}
+            <button
+              class="p-0.5 rounded text-base-content/55 hover:text-base-content hover:bg-base-content/10"
+              title={session.pinned ? t("agent.list.unpin") : t("agent.list.pin")}
+              aria-label={session.pinned
+                ? t("agent.list.unpin")
+                : t("agent.list.pin")}
+              onclick={(event) => {
+                event.stopPropagation();
+                togglePinned(session);
+              }}
+            >
+              {#if session.pinned}
+                <PinOff size={14} />
+              {:else}
+                <Pin size={14} />
+              {/if}
+            </button>
+          {/if}
+          <button
+            class="p-0.5 rounded text-base-content/55 hover:text-base-content hover:bg-base-content/10"
+            title={session.archived
+              ? t("agent.list.unarchive")
+              : t("agent.list.archive")}
+            aria-label={session.archived
+              ? t("agent.list.unarchive")
+              : t("agent.list.archive")}
+            onclick={(event) => {
+              event.stopPropagation();
+              toggleArchived(session);
+            }}
+          >
+            {#if session.archived}
+              <ArchiveRestore size={14} />
+            {:else}
+              <Archive size={14} />
+            {/if}
+          </button>
+        </span>
       {:else}
+        {#if session.pinned}
+          <Pin size={12} class="flex-shrink-0 text-base-content/45" />
+        {/if}
         <span class="flex-shrink-0 text-[11px] text-base-content/55">
           {formatRelativeTime(sessionActivityKey(session))}
         </span>
       {/if}
-    </button>
+    </div>
   {/if}
 {/snippet}
 
@@ -625,7 +917,13 @@
 
   <!-- Grouped list (Agent → Project → Session; sessions without a source agent
        fall into the trailing Chats bucket). -->
-  <div class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-2">
+  <div
+    bind:this={listEl}
+    class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-2"
+    onscroll={handleListScroll}
+    onwheel={noteReaderInput}
+    ontouchmove={noteReaderInput}
+  >
     {#if !initialLoadDone}
       <div class="px-2 py-1 text-[12px] leading-[18px] text-base-content/50">
         {t("common.loading")}
@@ -699,9 +997,49 @@
           {/if}
         </div>
       {/each}
+
+      <!-- Archived sessions: flat, out of the Agent → Project tree, collapsed
+           by default and absent entirely while nothing is archived. -->
+      {#if archivedSessions.length > 0}
+        <div class="space-y-0.5">
+          <button
+            class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
+            aria-expanded={archivedExpanded}
+            onclick={() => (archivedExpanded = !archivedExpanded)}
+          >
+            <Archive size={14} class="flex-shrink-0 text-base-content/60" />
+            <span class="truncate flex-1">{t("agent.list.archived")}</span>
+            <span class="flex-shrink-0 text-[11px] text-base-content/45">
+              {archivedSessions.length}
+            </span>
+            <ChevronRight
+              size={14}
+              class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {archivedExpanded
+                ? 'rotate-90'
+                : ''}"
+            />
+          </button>
+          {#if archivedExpanded}
+            <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
+              {#each archivedSessions as session (session.id)}
+                {@render sessionRow(session, "pl-7", "pl-5")}
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
+
+<!-- Session summary shown beside the hovered row (informational, never focusable). -->
+{#if hoverCard}
+  <SessionHoverCard
+    session={hoverCard.session}
+    x={hoverCard.x}
+    y={hoverCard.y}
+  />
+{/if}
 
 <!-- Context menu, dispatched by kind (session row / project header). -->
 {#if contextMenu?.kind === "project"}
@@ -735,12 +1073,13 @@
     </button>
   </div>
 {:else if contextMenu?.kind === "session"}
+  {@const menuSession = contextMenu.session}
   <div
     class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
   >
     <!-- Generate title: only offered when the session has messages to distill. -->
-    {#if contextMenu.session.messageCount > 0}
+    {#if menuSession.messageCount > 0}
       <button
         class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
         onclick={handleGenerateTitle}
@@ -764,6 +1103,37 @@
     >
       <Copy size={14} />
       {t("agent.list.copyId")}
+    </button>
+
+    <div class="border-t border-base-300 my-1 mx-2"></div>
+
+    <!-- Same two actions as the row's hover controls, for right-click users. -->
+    {#if !menuSession.archived}
+      <button
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+        onclick={() => togglePinned(menuSession)}
+      >
+        {#if menuSession.pinned}
+          <PinOff size={14} />
+          {t("agent.list.unpin")}
+        {:else}
+          <Pin size={14} />
+          {t("agent.list.pin")}
+        {/if}
+      </button>
+    {/if}
+
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+      onclick={() => toggleArchived(menuSession)}
+    >
+      {#if menuSession.archived}
+        <ArchiveRestore size={14} />
+        {t("agent.list.unarchive")}
+      {:else}
+        <Archive size={14} />
+        {t("agent.list.archive")}
+      {/if}
     </button>
 
     <div class="border-t border-base-300 my-1 mx-2"></div>

@@ -73,14 +73,16 @@ export interface WebSearchSettings {
 export interface AgentSettings {
   defaultEnabledTools: string[]; // Enabled by default for new sessions (registration names, incl. extension tools).
   defaultEditorId?: string | null; // Default "Open in ..." target id (see api/openIn.ts).
+  defaultModelId?: string | null; // Model new sessions start on; unset = the composer asks for one.
+  defaultProviderId?: string | null; // Provider owning defaultModelId; always written as a pair.
   webSearch?: WebSearchSettings; // Absent = unconfigured.
 }
 
+// The overlay runs on the app-wide default model (see AgentSettings), so this
+// section only covers how it is summoned.
 export interface QuickActionSettings {
   enabled?: boolean; // Absent = true; when disabled the global shortcut is not registered.
   shortcut?: string; // Global shortcut that summons the quick-action panel.
-  modelId?: string | null; // Unset falls back to the default-model resolver.
-  providerId?: string | null; // Unset falls back to the default-model resolver.
 }
 
 // When a session's title is regenerated automatically. The manual "generate

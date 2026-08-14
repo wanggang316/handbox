@@ -20,6 +20,7 @@ import {
   Globe,
   PanelTop,
   AppWindow,
+  MessageCircleQuestionMark,
   Sparkles,
 } from "@lucide/svelte";
 import type { MessageKey } from "$lib/i18n";
@@ -46,6 +47,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   { id: "web_search", labelKey: "agent.tool.web_search", icon: Globe, requiresWorkingDir: false },
   { id: "render_card", labelKey: "agent.tool.render_card", icon: PanelTop, requiresWorkingDir: false },
   { id: "render_app", labelKey: "agent.tool.render_app", icon: AppWindow, requiresWorkingDir: false },
+  { id: "ask_question", labelKey: "agent.tool.ask_question", icon: MessageCircleQuestionMark, requiresWorkingDir: false },
   { id: "skill", labelKey: "agent.tool.skill", icon: Sparkles, requiresWorkingDir: false },
 ];
 

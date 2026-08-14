@@ -76,6 +76,8 @@ impl AgentSessionService {
             tool_execution_mode: request.tool_execution_mode,
             message_count: 0,
             last_message_at: None,
+            pinned: false,
+            archived: false,
             created_at: now,
             updated_at: now,
         };
@@ -298,6 +300,32 @@ impl AgentSessionService {
         self.get_session(session_id).await
     }
 
+    /// Toggles the sidebar pin. Kept off `update_session_field` on purpose: the
+    /// flag has no place in the generic read-modify-write path (see
+    /// [`AgentSessionRepository::set_session_pinned`]).
+    pub async fn set_session_pinned(
+        &self,
+        session_id: UUID,
+        pinned: bool,
+    ) -> Result<AgentSession, AppError> {
+        self.repository
+            .set_session_pinned(&session_id, pinned)
+            .await?;
+        self.get_session(session_id).await
+    }
+
+    /// Toggles the archive flag; same rationale as [`set_session_pinned`].
+    pub async fn set_session_archived(
+        &self,
+        session_id: UUID,
+        archived: bool,
+    ) -> Result<AgentSession, AppError> {
+        self.repository
+            .set_session_archived(&session_id, archived)
+            .await?;
+        self.get_session(session_id).await
+    }
+
     /// Single entry point for updating one session field (mirrors
     /// `agent_update_field`).
     pub async fn update_session_field(
@@ -467,9 +495,11 @@ mod tests {
             .await
             .expect("instantiate builtin-coding");
 
+        // The 7 coding built-ins plus `ask_question`, which migration 066 grants
+        // to both builtin definitions so a coding agent can also ask before it acts.
         assert_eq!(
             session.enabled_tools,
-            vec!["read", "write", "edit", "bash", "grep", "find", "ls"]
+            vec!["read", "write", "edit", "bash", "grep", "find", "ls", "ask_question"]
         );
         assert_eq!(session.tool_execution_mode.as_deref(), Some("manual"));
         assert_eq!(session.working_dir, Some(canonical));
@@ -519,9 +549,13 @@ mod tests {
             .await
             .expect("instantiate builtin-chat");
 
-        assert!(
-            session.enabled_tools.is_empty(),
-            "chat-class registers no builtin tools"
+        // Chat registers no FILE/SHELL tools; `ask_question` is the one exception
+        // (migration 066) — it needs no working dir and is what lets a plain chat
+        // ask the user before guessing.
+        assert_eq!(
+            session.enabled_tools,
+            vec!["ask_question"],
+            "chat-class registers no builtin tools beyond ask_question"
         );
         assert_eq!(
             session.working_dir, None,
@@ -609,7 +643,11 @@ mod tests {
         assert_eq!(count_rows(&db, "agent_sessions").await, 1, "no new row");
         assert_eq!(chat.agent_definition_id.as_deref(), Some("builtin-chat"));
         // Capability set re-snapshotted from the new (chat) definition.
-        assert!(chat.enabled_tools.is_empty(), "chat clears builtin tools");
+        assert_eq!(
+            chat.enabled_tools,
+            vec!["ask_question"],
+            "chat clears the coding built-ins, keeping only ask_question"
+        );
         assert_eq!(chat.working_dir, None, "none-mode chat drops working dir");
         assert_eq!(chat.name, "通用对话", "name adopts the new definition");
         // Model/provider preserved: builtin-chat pins none, so the session keeps its own.
@@ -619,7 +657,7 @@ mod tests {
         // The persisted row matches the returned session (read-back).
         let reread = service.get_session(session_id).await.expect("get session");
         assert_eq!(reread.agent_definition_id.as_deref(), Some("builtin-chat"));
-        assert!(reread.enabled_tools.is_empty());
+        assert_eq!(reread.enabled_tools, vec!["ask_question"]);
     }
 
     /// An unknown definition id on reinstantiate is a NOT_FOUND and leaves the

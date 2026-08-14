@@ -27,8 +27,8 @@ impl AgentSessionRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid mcp servers: {}", e)))?;
 
         let query = r#"
-            INSERT INTO agent_sessions (id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            INSERT INTO agent_sessions (id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, pinned, archived, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         "#;
 
         sqlx::query(query)
@@ -48,6 +48,8 @@ impl AgentSessionRepository {
             .bind(&session.tool_execution_mode)
             .bind(session.message_count)
             .bind(session.last_message_at)
+            .bind(session.pinned)
+            .bind(session.archived)
             .bind(session.created_at)
             .bind(session.updated_at)
             .execute(self.db.pool())
@@ -65,7 +67,7 @@ impl AgentSessionRepository {
         offset: i32,
     ) -> Result<Vec<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, pinned, archived, created_at, updated_at
             FROM agent_sessions ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -91,7 +93,7 @@ impl AgentSessionRepository {
         session_id: &UUID,
     ) -> Result<Option<AgentSession>, AppError> {
         let query = r#"
-            SELECT id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, created_at, updated_at
+            SELECT id, name, project_id, agent_definition_id, model_id, provider_id, system_prompt, thinking_level, temperature, max_tokens, working_dir, enabled_tools, mcp_servers, tool_execution_mode, message_count, last_message_at, pinned, archived, created_at, updated_at
             FROM agent_sessions WHERE id = $1
         "#;
 
@@ -130,6 +132,11 @@ impl AgentSessionRepository {
         // `agent_definition_id` is OMITTED for the same reason: the originating
         // definition is a write-once provenance link set at instantiation; a session
         // never gets re-pointed at a different definition through field edits.
+        //
+        // `pinned` / `archived` are OMITTED too, for the read-modify-write reason:
+        // toggling them is a one-column write ([`set_session_pinned`] /
+        // [`set_session_archived`]), so a field edit built from a snapshot taken
+        // before the toggle can never write the stale flag back.
         let query = r#"
             UPDATE agent_sessions SET name = $1, model_id = $2, provider_id = $3, system_prompt = $4, thinking_level = $5, temperature = $6, max_tokens = $7, working_dir = $8, enabled_tools = $9, mcp_servers = $10, tool_execution_mode = $11, updated_at = $12
             WHERE id = $13
@@ -231,6 +238,68 @@ impl AgentSessionRepository {
                 .await
                 .map_err(|e| {
                     AppError::internal_error(&format!("Failed to rename agent session: {}", e))
+                })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Agent session not found: {}",
+                session_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Sets the sidebar pin flag.
+    ///
+    /// A single-column write rather than a read-modify-write through
+    /// [`update_session`]: pinning is triggered from a hover control that may fire
+    /// while a run streams, and only the flag may change. `updated_at` is bumped
+    /// like [`rename_session`] does; sidebar order is driven by the activity key
+    /// (`last_message_at` / `created_at`), so this cannot reorder anything by itself.
+    pub async fn set_session_pinned(
+        &self,
+        session_id: &UUID,
+        pinned: bool,
+    ) -> Result<(), AppError> {
+        let result =
+            sqlx::query("UPDATE agent_sessions SET pinned = $1, updated_at = $2 WHERE id = $3")
+                .bind(pinned)
+                .bind(Self::now_ms())
+                .bind(session_id)
+                .execute(self.db.pool())
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to pin agent session: {}", e))
+                })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Agent session not found: {}",
+                session_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Sets the archive flag. Same single-column discipline as
+    /// [`set_session_pinned`]; the row and its transcript are left intact, so
+    /// unarchiving restores the session exactly as it was.
+    pub async fn set_session_archived(
+        &self,
+        session_id: &UUID,
+        archived: bool,
+    ) -> Result<(), AppError> {
+        let result =
+            sqlx::query("UPDATE agent_sessions SET archived = $1, updated_at = $2 WHERE id = $3")
+                .bind(archived)
+                .bind(Self::now_ms())
+                .bind(session_id)
+                .execute(self.db.pool())
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to archive agent session: {}", e))
                 })?;
 
         if result.rows_affected() == 0 {
@@ -469,6 +538,10 @@ impl AgentSessionRepository {
             tool_execution_mode: row.try_get::<Option<String>, _>("tool_execution_mode")?,
             message_count: row.try_get("message_count")?,
             last_message_at: row.try_get::<Option<i64>, _>("last_message_at")?,
+            // NOT NULL DEFAULT 0 columns, so a plain `bool` decode is safe here —
+            // there is no NULL for the footgun above to turn into `false`.
+            pinned: row.try_get("pinned")?,
+            archived: row.try_get("archived")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -593,6 +666,8 @@ mod tests {
             tool_execution_mode: Some("auto".to_string()),
             message_count: 0,
             last_message_at: None,
+            pinned: false,
+            archived: false,
             created_at: now,
             updated_at: now,
         }
@@ -686,6 +761,8 @@ mod tests {
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
+            pinned: false,
+            archived: false,
             created_at: now,
             updated_at: now,
         };
@@ -755,6 +832,86 @@ mod tests {
             after.agent_definition_id,
             Some("builtin-coding".to_string()),
             "agent_definition_id is write-once and must survive a generic update"
+        );
+    }
+
+    /// The sidebar flags default to false, round-trip through the dedicated
+    /// setters, and — like `project_id` — are NOT rewritable through the generic
+    /// `update_session` path, so a field edit built from a pre-toggle snapshot
+    /// cannot revert a pin/archive.
+    #[tokio::test]
+    async fn test_pinned_archived_default_false_and_survive_generic_update() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentSessionRepository::new(Arc::new(db));
+        let now = now_ms();
+
+        let session = sample_session(&uuid::Uuid::new_v4().to_string(), "Flagged", now);
+        repo.create_session(&session).await.unwrap();
+
+        // A legacy row inserted without the columns also reads back as false.
+        sqlx::query(
+            "INSERT INTO agent_sessions (id, name, message_count, created_at, updated_at) \
+             VALUES ('legacy-flags', 'Legacy', 0, $1, $1)",
+        )
+        .bind(now)
+        .execute(repo.db.pool())
+        .await
+        .unwrap();
+        let legacy = repo
+            .get_session_by_id(&"legacy-flags".to_string())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!legacy.pinned);
+        assert!(!legacy.archived);
+
+        // Capture the pre-toggle snapshot the generic update path would write back.
+        let stale = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert!(!stale.pinned);
+        assert!(!stale.archived);
+
+        repo.set_session_pinned(&session.id, true).await.unwrap();
+        repo.set_session_archived(&session.id, true).await.unwrap();
+
+        let toggled = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert!(toggled.pinned);
+        assert!(toggled.archived);
+        let listed = repo.list_sessions(10, 0).await.unwrap();
+        let listed = listed.iter().find(|s| s.id == session.id).unwrap();
+        assert!(listed.pinned, "list must carry the flags too");
+        assert!(listed.archived);
+
+        // The stale-snapshot write-back leaves both flags alone.
+        let mut edit = stale;
+        edit.name = "Renamed".to_string();
+        edit.updated_at = now + 1000;
+        repo.update_session(&edit).await.unwrap();
+
+        let reloaded = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert_eq!(reloaded.name, "Renamed");
+        assert!(reloaded.pinned, "update_session must not clear pinned");
+        assert!(reloaded.archived, "update_session must not clear archived");
+
+        // Toggling back off works, and an unknown id is a clean NotFound.
+        repo.set_session_pinned(&session.id, false).await.unwrap();
+        repo.set_session_archived(&session.id, false).await.unwrap();
+        let cleared = repo.get_session_by_id(&session.id).await.unwrap().unwrap();
+        assert!(!cleared.pinned);
+        assert!(!cleared.archived);
+
+        assert_eq!(
+            repo.set_session_pinned(&"nope".to_string(), true)
+                .await
+                .unwrap_err()
+                .code,
+            "NOT_FOUND"
+        );
+        assert_eq!(
+            repo.set_session_archived(&"nope".to_string(), true)
+                .await
+                .unwrap_err()
+                .code,
+            "NOT_FOUND"
         );
     }
 

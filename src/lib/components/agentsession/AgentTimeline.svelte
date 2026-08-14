@@ -1,3 +1,16 @@
+<script module lang="ts">
+  /**
+   * Where each session was left, keyed by session id. Module-level so it
+   * outlives the component: entering settings tears the timeline down, and the
+   * reader expects to come back to the spot they were reading.
+   *
+   * A reader parked at the end is remembered as "bottom" rather than as pixels,
+   * so a session that grew while they were away still opens at its newest turn.
+   */
+  type ScrollAnchor = "bottom" | { index: number; offset: number };
+  const scrollMemory = new Map<string, ScrollAnchor>();
+</script>
+
 <script lang="ts">
   import { tick, untrack } from "svelte";
   import { ChartNoAxesColumn, Check, Copy } from "@lucide/svelte";
@@ -244,72 +257,74 @@
         liveAssistantIndex >= 0),
   );
 
-  // ── Scroll orchestration ─────────────────────────────────────────────────
+  let messagesContainer: HTMLDivElement;
+
+  function scrollToBottom() {
+    if (messagesContainer) {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+  }
+
+  // Progressive mount. Entering the session view (cold start, session switch,
+  // returning from settings) rebuilds the whole transcript at once — hundreds
+  // of rows, tool cards and thinking blocks in a single task, which locks the
+  // window for as long as it takes. Only the tail is mounted up front; the rest
+  // fills in one idle chunk at a time, so the first paint costs a viewport.
+  const INITIAL_WINDOW = 20;
+  const FILL_CHUNK = 40;
+  // Slack for "parked at the end": sub-pixel scroll offsets and a growing last
+  // turn should still read as being at the bottom.
+  const BOTTOM_EPSILON = 24;
+
+  // Where the first render should start: the tail, or the remembered row when
+  // the reader left mid-transcript (that row and everything under it must exist
+  // before the position means anything). Pure — no rune reads — so the fill loop
+  // can call it without making its caller's effect depend on `windowStart`.
+  function windowStartFor(id: string, total: number): number {
+    const tailStart = Math.max(0, total - INITIAL_WINDOW);
+    const anchor = scrollMemory.get(id);
+    if (!anchor || anchor === "bottom") return tailStart;
+    return Math.min(anchor.index, tailStart);
+  }
+
+  // First rendered message index; 0 once the whole transcript is mounted.
+  // Seeded at init, not from an effect: effects run after the first render, so
+  // starting at 0 would build the entire transcript and immediately throw it
+  // away — exactly the cost this avoids.
+  let windowStart = $state(
+    untrack(() => windowStartFor(sessionId, runState.messages.length)),
+  );
+
+  // Whether the reader is parked at the end. Plain `let`, not `$state`: it
+  // gates imperative scrolling and must not invalidate anything when it flips.
+  let stickToBottom = true;
+
+  // ── Pinning a question to the top ────────────────────────────────────────
   //
-  // Two modes. `stick` follows the bottom so a running turn stays in view —
-  // the default, and what restoring a session lands in. Pinning puts one
-  // question at the top of the viewport and leaves it there: sending enters it
-  // (the question you just asked heads the screen while the answer grows under
-  // it) and so does clicking the nav rail.
+  // Sending puts the question just asked at the top of the viewport and lets
+  // the answer grow under it, rather than dropping the reader at the bottom of
+  // a reply they have not started reading. Clicking the nav rail does the same
+  // for any earlier question.
   //
   // Pinning the *last* question needs slack below it — otherwise the scroll
   // range ends before the question reaches the top. `spacer` supplies exactly
-  // that much, and shrinks as the answer fills it, so the pinned question does
-  // not drift while the reply streams.
+  // that much and shrinks as the answer fills it, so the pinned question does
+  // not drift while the reply streams. It sits outside the measured column, so
+  // its own height never feeds back into the measurement.
 
   /** Gap left above a pinned question. Matches the column's top padding. */
   const TOP_PAD = 16;
-  /** Distance from the bottom that still counts as "at the bottom". */
-  const BOTTOM_EPS = 24;
-  // Width at which the rail clears the chat column's text. The column caps at
-  // 832px (--chat-column + gutters) and centres, so the free strip is
-  // (width - 832) / 2; the rail needs ~48px of it plus breathing room. The
-  // default window lands just above this, so the rail is there out of the box.
+  /** Free space beside the chat column needed before the rail is shown. */
   const RAIL_MIN_WIDTH = 920;
 
-  // Reactive refs: the ResizeObserver is wired in an effect that must re-run
-  // once the bindings land, never silently no-op on an unbound element.
-  let scrollEl = $state<HTMLDivElement>();
   let contentEl = $state<HTMLDivElement>();
-
   let spacer = $state(0);
   let scrollWidth = $state(0);
   let activeNavIndex = $state(-1);
 
-  // Scroll policy is imperative bookkeeping, deliberately outside $state: it is
-  // read by handlers, never by the template, and reactivity here would only
-  // feed effects back into themselves.
-  let stick = true;
+  // Which question is held at the top, if any. Plain `let` for the same reason
+  // as `stickToBottom`: handlers read it, the template never does.
   let pinnedIndex: number | null = null;
-  // Set by real input events only, so a programmatic scroll can never be
-  // mistaken for the user asking to follow the bottom again.
-  let userIntent = false;
-
-  // Question anchors by message index, registered by the rendered bubbles.
-  const anchorEls = new Map<number, HTMLElement>();
-
-  function anchor(node: HTMLElement, index: number) {
-    anchorEls.set(index, node);
-    return {
-      update(next: number) {
-        anchorEls.delete(index);
-        index = next;
-        anchorEls.set(index, node);
-      },
-      destroy() {
-        anchorEls.delete(index);
-      },
-    };
-  }
-
-  /** Offset of a question from the top of the scrollable content. */
-  function anchorOffset(index: number): number | null {
-    const el = anchorEls.get(index);
-    if (!el || !contentEl) {
-      return null;
-    }
-    return el.getBoundingClientRect().top - contentEl.getBoundingClientRect().top;
-  }
 
   const lastUserIndex = $derived.by(() => {
     for (let i = runState.messages.length - 1; i >= 0; i -= 1) {
@@ -320,28 +335,29 @@
     return -1;
   });
 
-  function scrollToBottom() {
-    if (scrollEl) {
-      scrollEl.scrollTop = scrollEl.scrollHeight;
-    }
+  function rowFor(index: number): HTMLElement | null {
+    return (
+      contentEl?.querySelector<HTMLElement>(
+        `[data-message-index="${index}"]`,
+      ) ?? null
+    );
   }
 
-  // Slack below the last question, needed only while it is the pinned one.
-  // `spacer` lives outside the measured column, so the natural content height
-  // is read directly and the two never chase each other.
+  // Slack below the last question, sized so it can still reach the top; zero
+  // unless a pin is holding it there.
   function recomputeSpacer() {
-    if (!scrollEl || !contentEl) {
+    const el = messagesContainer;
+    if (!el || !contentEl) {
       return;
     }
     let next = 0;
     if (pinnedIndex !== null && pinnedIndex === lastUserIndex) {
-      const top = anchorOffset(pinnedIndex);
-      if (top !== null) {
+      const row = rowFor(pinnedIndex);
+      if (row) {
+        const contentTop = contentEl.getBoundingClientRect().top;
+        const top = row.getBoundingClientRect().top - contentTop;
         const natural = contentEl.getBoundingClientRect().height;
-        next = Math.max(
-          0,
-          Math.round(top - TOP_PAD + scrollEl.clientHeight - natural),
-        );
+        next = Math.max(0, Math.round(top - TOP_PAD + el.clientHeight - natural));
       }
       // The slack is spent: the running turn has filled the screen below its
       // question. Holding the pin from here on would freeze the view while
@@ -350,7 +366,7 @@
       // is a deliberate jump and must survive whatever the run appends.
       if (next === 0 && runState.isRunning) {
         pinnedIndex = null;
-        stick = true;
+        stickToBottom = true;
       }
     }
     spacer = next;
@@ -358,94 +374,223 @@
 
   async function pinTo(index: number) {
     pinnedIndex = index;
-    stick = false;
-    userIntent = false;
-    // Two flushes, both load-bearing: the question's own bubble must exist
-    // before it can be measured, and the slack that measurement produces must
-    // be in the DOM before the scroll — otherwise the target is out of range
-    // and the browser clamps it back.
+    stickToBottom = false;
+    // The reader has taken over: openWindow must stop re-asserting whatever
+    // position it was restoring, or it will pull the view back under them.
+    readerMoved = true;
+    // The transcript mounts tail-first; an older question may not exist yet.
+    if (!rowFor(index) && index < windowStart) {
+      windowStart = index;
+    }
+    // Two flushes, both load-bearing: the question's own row must exist before
+    // it can be measured, and the slack that measurement produces must be in
+    // the DOM before the scroll — otherwise the target is out of range and the
+    // browser clamps it back.
     await tick();
     recomputeSpacer();
     await tick();
-    const top = anchorOffset(index);
-    if (top === null || !scrollEl) {
+    const el = messagesContainer;
+    const row = rowFor(index);
+    if (!el || !row) {
       return;
     }
-    scrollEl.scrollTo({ top: Math.max(0, top - TOP_PAD), behavior: "smooth" });
-  }
-
-  // The rail highlights the last question that has passed the top edge.
-  let activeRaf = 0;
-  function scheduleActiveUpdate() {
-    if (activeRaf) {
-      return;
-    }
-    activeRaf = requestAnimationFrame(() => {
-      activeRaf = 0;
-      if (!scrollEl || !contentEl) {
-        return;
-      }
-      const contentTop = contentEl.getBoundingClientRect().top;
-      const threshold = scrollEl.scrollTop + TOP_PAD + 8;
-      let active = -1;
-      let first = -1;
-      for (const [index, el] of anchorEls) {
-        if (first < 0 || index < first) {
-          first = index;
-        }
-        if (el.getBoundingClientRect().top - contentTop <= threshold) {
-          active = Math.max(active, index);
-        }
-      }
-      // Above the first question the rail still points at it, never at nothing.
-      activeNavIndex = active < 0 ? first : active;
+    const offset =
+      row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTo({
+      top: Math.max(0, el.scrollTop + offset - TOP_PAD),
+      behavior: "smooth",
     });
   }
 
-  function markUserIntent() {
-    userIntent = true;
+  // True while openWindow is positioning the view. Programmatic scrolling fires
+  // the same scroll events the reader's own does, and treating those as intent
+  // would overwrite the very position being restored.
+  let opening = false;
+
+  // Real input during the open sequence: the reader has taken over, so stop
+  // re-asserting the anchor under them.
+  let readerMoved = false;
+
+  function noteReaderInput() {
+    readerMoved = true;
   }
 
+  // Auto-scroll (new turn, streaming text, hook notice) applies only to a
+  // reader who is already at the end — otherwise reading history mid-run, or a
+  // just-restored position, gets yanked to the bottom.
+  function pinToBottom() {
+    if (stickToBottom) {
+      scrollToBottom();
+    }
+  }
+
+  // The reader's position as a message row plus its offset from the container's
+  // top edge, which survives the older messages mounting in later — a pixel
+  // scrollTop would not.
+  function readAnchor(): ScrollAnchor {
+    const el = messagesContainer;
+    if (!el) return "bottom";
+    if (el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_EPSILON) {
+      return "bottom";
+    }
+    const top = el.getBoundingClientRect().top;
+    for (const row of el.querySelectorAll<HTMLElement>("[data-message-index]")) {
+      const box = row.getBoundingClientRect();
+      // First row still visible: the one straddling the top edge, so its offset
+      // is negative and restoring reproduces the same partial row.
+      if (box.bottom > top) {
+        return {
+          index: Number(row.dataset.messageIndex),
+          offset: box.top - top,
+        };
+      }
+    }
+    return "bottom";
+  }
+
+  function restoreAnchor(anchor: ScrollAnchor) {
+    const el = messagesContainer;
+    if (!el) return;
+    if (anchor === "bottom") {
+      scrollToBottom();
+      return;
+    }
+    const row = el.querySelector<HTMLElement>(
+      `[data-message-index="${anchor.index}"]`,
+    );
+    if (!row) {
+      // The remembered row is gone (transcript compacted, session cleared).
+      scrollToBottom();
+      return;
+    }
+    el.scrollTop +=
+      row.getBoundingClientRect().top -
+      el.getBoundingClientRect().top -
+      anchor.offset;
+  }
+
+  let scrollFrame = 0;
+
+  // rAF-throttled: scroll fires far more often than the memory needs updating,
+  // and reading layout on every event would trade one jank for another.
   function handleScroll() {
-    // A pinned view already rests at the end of its scroll range, so "at the
-    // bottom" says nothing about intent while a pin holds — the user is
-    // resting against the slack, not the end of the conversation. The pin
-    // outlives any gesture: it is handed back to bottom-following when the
-    // answer outgrows the slack, and replaced when the next question is sent.
-    // Blank space under a short reply is the cost, and it is a small one.
-    if (userIntent && scrollEl && pinnedIndex === null) {
-      stick =
-        scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight <
-        BOTTOM_EPS;
-    }
-    scheduleActiveUpdate();
+    if (opening || scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      const anchor = readAnchor();
+      // A pinned view already rests at the end of its scroll range, so "at the
+      // bottom" says nothing about intent while a pin holds — the reader is
+      // resting against the slack, not the end of the conversation. Reading it
+      // as intent would collapse the slack under their finger and drop the
+      // transcript to the bottom in one frame.
+      if (pinnedIndex === null) {
+        stickToBottom = anchor === "bottom";
+      }
+      scrollMemory.set(sessionId, anchor);
+      updateActiveNav();
+    });
   }
 
-  // Content growth (streaming text, tool cards, late markdown/image layout) is
-  // observed rather than guessed at with timers: re-pin the bottom when
-  // following, and keep the spacer sized to whatever is left of the slack.
-  $effect(() => {
-    const scroller = scrollEl;
-    if (!scroller || !contentEl) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      scrollWidth = scroller.clientWidth;
-      recomputeSpacer();
-      if (stick) {
-        scrollToBottom();
+  $effect(() => () => cancelAnimationFrame(scrollFrame));
+
+  const visibleMessages = $derived(
+    windowStart > 0 ? runState.messages.slice(windowStart) : runState.messages,
+  );
+
+  function idle(): Promise<void> {
+    return new Promise((resolve) => {
+      if (typeof window !== "undefined" && window.requestIdleCallback) {
+        // timeout: never let a busy main thread stall the fill indefinitely.
+        window.requestIdleCallback(() => resolve(), { timeout: 200 });
+      } else {
+        setTimeout(resolve, 16);
       }
-      scheduleActiveUpdate();
     });
-    observer.observe(contentEl);
-    observer.observe(scroller);
-    return () => observer.disconnect();
+  }
+
+  function raf(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  /**
+   * Open the session at `anchor`, then widen the window upwards a chunk at a
+   * time until the whole transcript is mounted.
+   *
+   * `from` is passed in rather than read off `windowStart`: this function's
+   * first statements run synchronously inside the caller's effect, and reading
+   * the rune there would make that effect depend on the state this loop writes
+   * — a reset/refill cycle that never lands on 0.
+   *
+   * The anchor is re-asserted after every mutation instead of preserving a
+   * pixel offset. Each chunk prepends content above the reader, and a one-shot
+   * placement cannot survive that, nor the late layout (images, KaTeX, code
+   * blocks) that keeps changing heights for a few frames afterwards.
+   */
+  async function openWindow(
+    cancelled: () => boolean,
+    from: number,
+    anchor: ScrollAnchor,
+  ) {
+    const stop = () => cancelled() || readerMoved || !messagesContainer;
+
+    opening = true;
+    readerMoved = false;
+    try {
+      let start = from;
+      await tick();
+      if (stop()) return;
+      restoreAnchor(anchor);
+
+      while (!stop() && start > 0) {
+        await idle();
+        if (stop()) return;
+        start = Math.max(0, start - FILL_CHUNK);
+        windowStart = start;
+        await tick();
+        if (stop()) return;
+        restoreAnchor(anchor);
+      }
+
+      for (let frame = 0; frame < 3; frame += 1) {
+        await raf();
+        if (stop()) return;
+        restoreAnchor(anchor);
+      }
+    } finally {
+      opening = false;
+    }
+  }
+
+  // Re-window on session switch and when a restore lands the transcript in one
+  // shot (`hydrated`). Message count is read untracked: streaming appends must
+  // not reset the window mid-run.
+  $effect(() => {
+    const id = sessionId;
+    void runState.hydrated;
+
+    const total = untrack(() => runState.messages.length);
+    const anchor = scrollMemory.get(id) ?? "bottom";
+    stickToBottom = anchor === "bottom";
+    // A pin belongs to the turn that created it, never to the session being
+    // opened: openWindow owns this position.
+    pinnedIndex = null;
+    spacer = 0;
+
+    const start = windowStartFor(id, total);
+    windowStart = start;
+
+    let stopped = false;
+    void openWindow(() => stopped, start, anchor);
+    return () => {
+      stopped = true;
+    };
   });
 
-  $effect(() => () => cancelAnimationFrame(activeRaf));
-
-  // Session switch, transcript restore, and new messages each land in a
-  // different mode, so the policy is applied from the message sequence itself.
+  // What a new message does to the view. A question the reader just sent goes
+  // to the top and holds there; anything else keeps the newest content in view,
+  // with a delayed re-pin for late layout (markdown / images growing the
+  // content). Session switches and restores are positioned by openWindow, so
+  // they only re-baseline the counters here.
   let seenSession = "";
   let seenCount = 0;
   let seenHydrated = false;
@@ -455,42 +600,13 @@
     messages: AgentMessage[],
     hydrated: boolean,
   ) {
-    // Switching sessions reuses this component instance, which still holds the
-    // previous conversation's scroll position: land at the bottom, synchronously.
-    if (id !== seenSession) {
+    if (id !== seenSession || hydrated !== seenHydrated) {
       seenSession = id;
-      seenCount = messages.length;
       seenHydrated = hydrated;
-      pinnedIndex = null;
-      stick = true;
-      userIntent = false;
-      spacer = 0;
-      // Mounting into a turn already in flight (the first send of a session
-      // mounts this component, and sessions can be switched mid-run): the
-      // question that turn is answering belongs at the top, same as if the
-      // send had happened here.
-      const last = messages.length - 1;
-      if (last >= 0 && messages[last].role === "user" && runState.isRunning) {
-        void pinTo(last);
-      } else {
-        scrollToBottom();
-      }
-      scheduleActiveUpdate();
-      return;
-    }
-    // Restore replaces the whole sequence at once; that is history arriving,
-    // not a turn being taken, so it must not pin its last question.
-    if (hydrated && !seenHydrated) {
-      seenHydrated = true;
       seenCount = messages.length;
-      pinnedIndex = null;
-      stick = true;
-      spacer = 0;
-      scrollToBottom();
-      scheduleActiveUpdate();
       return;
     }
-    if (messages.length === seenCount) {
+    if (messages.length <= seenCount) {
       return;
     }
     const previousCount = seenCount;
@@ -498,14 +614,13 @@
     for (let i = messages.length - 1; i >= previousCount; i -= 1) {
       if (messages[i].role === "user") {
         void pinTo(i);
-        scheduleActiveUpdate();
+        scheduleActiveNav();
         return;
       }
     }
-    if (stick) {
-      scrollToBottom();
-    }
-    scheduleActiveUpdate();
+    pinToBottom();
+    setTimeout(pinToBottom, 100);
+    scheduleActiveNav();
   }
 
   $effect(() => {
@@ -515,7 +630,25 @@
     untrack(() => applyScrollPolicy(id, messages, hydrated));
   });
 
-  // Rail entries: every question, paired with the reply that followed it.
+  // Scroll as streaming text/thinking grows.
+  $effect(() => {
+    if (runState.streamingText || runState.thinkingText) {
+      setTimeout(pinToBottom, 50);
+    }
+  });
+
+  // A hook notice appended at the bottom must not land below the fold.
+  $effect(() => {
+    if (runState.hookNotices.length > 0) {
+      setTimeout(pinToBottom, 50);
+    }
+  });
+
+  // ── Navigation rail ──────────────────────────────────────────────────────
+
+  // One entry per question, paired with the reply that followed it. Built from
+  // the whole transcript, not the mounted window: the rail is a map of the
+  // conversation, and rows it points at are mounted on demand by pinTo.
   const navItems = $derived.by(() => {
     const items: MessageNavItem[] = [];
     const messages = runState.messages;
@@ -541,13 +674,68 @@
 
   // A single question is its own navigation; the rail earns its space from two.
   // Below the width threshold it would overlap the transcript instead of
-  // floating beside it. The setting is the user's own veto over both — it
+  // floating beside it. The setting is the reader's own veto over both — it
   // reads `?? true` so a config written before the field existed keeps it.
   const showNavRail = $derived(
     (settingsState.settings?.general.messageNav ?? true) &&
       navItems.length > 1 &&
       scrollWidth >= RAIL_MIN_WIDTH,
   );
+
+  // The rail highlights the last question that has passed the top edge.
+  function updateActiveNav() {
+    const el = messagesContainer;
+    if (!el || !contentEl) {
+      return;
+    }
+    const edge = el.getBoundingClientRect().top + TOP_PAD + 8;
+    let active = -1;
+    let first = -1;
+    for (const row of contentEl.querySelectorAll<HTMLElement>("[data-question]")) {
+      const index = Number(row.dataset.messageIndex);
+      if (first < 0) {
+        first = index;
+      }
+      if (row.getBoundingClientRect().top <= edge) {
+        active = index;
+      }
+    }
+    // Above the first mounted question the rail still points at it, never at
+    // nothing.
+    activeNavIndex = active < 0 ? first : active;
+  }
+
+  let navFrame = 0;
+  function scheduleActiveNav() {
+    if (navFrame) {
+      return;
+    }
+    navFrame = requestAnimationFrame(() => {
+      navFrame = 0;
+      updateActiveNav();
+    });
+  }
+
+  $effect(() => () => cancelAnimationFrame(navFrame));
+
+  // Content growth (streaming text, tool cards, a widening mount window, late
+  // markdown layout) is observed rather than guessed at with timers: it is what
+  // eats into the pin's slack and what moves the rail's active tick.
+  $effect(() => {
+    const column = contentEl;
+    const el = messagesContainer;
+    if (!column || !el) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      scrollWidth = el.clientWidth;
+      recomputeSpacer();
+      scheduleActiveNav();
+    });
+    observer.observe(column);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
 </script>
 
 {#snippet hookIdentity(notice: HookRuleNotification)}
@@ -599,12 +787,11 @@
   <!-- The message stream is content: bubbles, markdown replies, tool-card bodies
        and error text must all be selectable (buttons stay unselectable globally). -->
   <div
-    bind:this={scrollEl}
+    bind:this={messagesContainer}
     class="flex-1 overflow-y-auto select-text scroll-column"
     onscroll={handleScroll}
-    onwheel={markUserIntent}
-    ontouchmove={markUserIntent}
-    onpointerdown={markUserIntent}
+    onwheel={noteReaderInput}
+    ontouchmove={noteReaderInput}
   >
     <div bind:this={contentEl} class="chat-column py-4 space-y-6">
       <!-- Hook firings that preceded every message (a prompt rule on the first turn). -->
@@ -612,13 +799,20 @@
         {@render hookNoticeRow(entry.notice)}
       {/each}
 
-      <!-- Committed messages. messages is append-only (the reducer only appends
-           or finalizes in place, never reorders), so index keys reuse DOM safely;
+      <!-- Committed messages, from `windowStart` to the end (see the progressive
+           mount above). messages is append-only (the reducer only appends or
+           finalizes in place, never reorders), so absolute index keys reuse DOM
+           safely — including when the window widens and prepends older rows;
            cards key by toolCallId so their state never shifts with the index. -->
-      {#each runState.messages as message, i (i)}
+      {#each visibleMessages as message, offset (windowStart + offset)}
+        {@const i = windowStart + offset}
         {#if message.role === "user"}
-          <!-- Scroll anchor: the pin target on send, and the rail's jump target. -->
-          <div class="flex justify-end" use:anchor={i}>
+          <!-- data-message-index anchors the reader's position across a teardown
+               (see scrollMemory): the row, not a pixel offset, is what survives
+               older messages mounting in later. -->
+          <!-- data-question marks it as a rail stop as well: the pin target on
+               send, and where a tick jumps to. -->
+          <div class="flex justify-end" data-message-index={i} data-question>
             <div class="flex flex-col items-end">
               <div
                 class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
@@ -634,7 +828,7 @@
         {:else if message.role === "assistant" && i !== liveAssistantIndex}
           <!-- Finished assistant message; the in-progress skeleton renders in the
                LIVE view below and is skipped here. -->
-          <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-2" data-message-index={i}>
             <div class="flex-1 min-w-0">
               {#if assistantThinking(message)}
                 <AgentThinkingBlock thinking={assistantThinking(message)} />

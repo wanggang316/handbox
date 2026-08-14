@@ -27,6 +27,12 @@ pub struct AgentSession {
     pub tool_execution_mode: Option<String>,
     pub message_count: i32,
     pub last_message_at: Option<Timestamp>,
+    /// Sidebar pin: the session sorts ahead of its unpinned siblings and lifts
+    /// its project / agent group along with it.
+    pub pinned: bool,
+    /// Archived sessions leave the main sidebar tree for the collapsed
+    /// "Archived" group; the row and its transcript are untouched.
+    pub archived: bool,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -128,6 +134,8 @@ mod tests {
             tool_execution_mode: Some("auto".to_string()),
             message_count: 3,
             last_message_at: Some(2000),
+            pinned: true,
+            archived: false,
             created_at: 1000,
             updated_at: 2000,
         };
@@ -142,6 +150,9 @@ mod tests {
         assert!(!json.contains("\"enabledSkills\""));
         assert!(json.contains("\"messageCount\""));
         assert!(json.contains("\"lastMessageAt\""));
+        // The sidebar flags travel as plain booleans, not 0/1.
+        assert!(json.contains("\"pinned\":true"));
+        assert!(json.contains("\"archived\":false"));
 
         let deserialized: AgentSession = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(session.id, deserialized.id);
@@ -150,6 +161,8 @@ mod tests {
         assert_eq!(session.agent_definition_id, deserialized.agent_definition_id);
         assert_eq!(session.enabled_tools, deserialized.enabled_tools);
         assert_eq!(session.message_count, deserialized.message_count);
+        assert!(deserialized.pinned);
+        assert!(!deserialized.archived);
     }
 
     /// A messageless session must serialize `lastMessageAt` as JSON null — never 0.
@@ -175,6 +188,8 @@ mod tests {
             tool_execution_mode: None,
             message_count: 0,
             last_message_at: None,
+            pinned: false,
+            archived: false,
             created_at: 1000,
             updated_at: 1000,
         };

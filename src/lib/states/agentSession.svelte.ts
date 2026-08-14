@@ -17,8 +17,13 @@ import type { AgentSessionField, TitleScope } from "../api/agentSession";
 import type { TitleGenerationRule } from "../types/settings";
 import * as agentSessionApi from "../api/agentSession";
 import { normalizeError } from "../utils/error";
+import {
+  applyDefaultModel,
+  resolveAgentDefaultModel,
+} from "../utils/defaultModel";
 import { agentState } from "./agent.svelte";
 import { settingsState } from "./settings.svelte";
+import { getAllModels, providerActions } from "./provider.svelte";
 
 let sessions = $state<AgentSession[]>([]);
 let currentSession = $state<AgentSession | null>(null);
@@ -36,6 +41,42 @@ const manuallyRenamedSessions = new Set<string>();
 /** Falls back to the historical behaviour while settings are still loading. */
 function titleGenerationRule(): TitleGenerationRule {
   return settingsState.settings?.session?.titleGeneration ?? "firstMessage";
+}
+
+/**
+ * Stamp the configured default model (settings > Agent) onto instantiation
+ * overrides that do not pin one, so a freshly created session is runnable
+ * without opening the model picker.
+ *
+ * Definitions carry no model, so without this every new session starts blank.
+ * Callers that resolved their own model (quick action, selection) pass the pair
+ * explicitly and are left untouched. The catalog is loaded on demand because
+ * helper windows skip the main window's preload; a dangling or unset default
+ * simply leaves the session model-less.
+ */
+async function withDefaultModel(
+  overrides?: InstantiateAgentSessionRequest,
+): Promise<InstantiateAgentSessionRequest | undefined> {
+  if (overrides?.modelId && overrides.providerId) return overrides;
+
+  const preference = settingsState.settings?.agent;
+  if (!preference?.defaultModelId || !preference.defaultProviderId) {
+    return overrides;
+  }
+
+  if (getAllModels().length === 0) {
+    try {
+      await providerActions.loadProvidersWithModels();
+    } catch (error) {
+      // Catalog unavailable: fall through and create the session model-less.
+      console.error("Failed to load model catalog for default model:", error);
+    }
+  }
+
+  return applyDefaultModel(
+    overrides,
+    resolveAgentDefaultModel(preference, getAllModels()),
+  );
 }
 
 /**
@@ -82,6 +123,36 @@ async function maybeAutoGenerateTitle(
     autoTitledSessions.delete(id);
     console.warn("Auto title generation failed:", error);
   }
+}
+
+/** Writes a session object into the list and, when it is current, there too. */
+function applySession(id: UUID, session: AgentSession): void {
+  const index = sessions.findIndex((item) => item.id === id);
+  if (index !== -1) {
+    sessions[index] = session;
+  }
+  if (currentSession?.id === id) {
+    currentSession = session;
+  }
+}
+
+/**
+ * Optimistically merges sidebar flags into the local session and returns the
+ * undo. A session that is not (or no longer) listed yields a no-op undo, so a
+ * failed toggle on a deleted session cannot resurrect it.
+ */
+function applySessionFlags(
+  id: UUID,
+  patch: { pinned?: boolean; archived?: boolean },
+): () => void {
+  const previous = sessions.find((session) => session.id === id);
+  if (!previous) return () => {};
+  applySession(id, { ...previous, ...patch });
+  return () => {
+    if (sessions.some((session) => session.id === id)) {
+      applySession(id, previous);
+    }
+  };
 }
 
 export const agentSessionState = {
@@ -146,7 +217,8 @@ export const agentSessionActions = {
    *
    * The single "use this agent" entry point. The capability snapshot and
    * working-dir policy are decided by the backend from the definition;
-   * `overrides` only covers name/project/workingDir/model/provider.
+   * `overrides` only covers name/project/workingDir/model/provider. An
+   * override without a model pair inherits the configured default model.
    */
   async createSessionFromDefinition(
     definitionId: UUID,
@@ -156,7 +228,7 @@ export const agentSessionActions = {
       isLoading = true;
       const session = await agentSessionApi.createSessionFromDefinition(
         definitionId,
-        overrides,
+        await withDefaultModel(overrides),
       );
       const existing = Array.isArray(sessions) ? sessions : [];
       sessions = [session, ...existing];
@@ -178,16 +250,28 @@ export const agentSessionActions = {
    * reuses the session id while the backend re-snapshots capabilities and
    * parameters and rewrites provenance. Replaces the list entry in place and
    * syncs the current session (same id, no reorder).
+   *
+   * The re-snapshot drops the model along with the rest of the old parameters,
+   * so the session's current model is carried over when the caller pins none —
+   * switching agents must not silently blank the composer's model.
    */
   async reinstantiateFromDefinition(
     sessionId: UUID,
     definitionId: UUID,
     overrides?: InstantiateAgentSessionRequest,
   ): Promise<AgentSession> {
+    const previous =
+      sessions.find((session) => session.id === sessionId) ??
+      (currentSession?.id === sessionId ? currentSession : undefined);
+    const carried: InstantiateAgentSessionRequest = {
+      modelId: previous?.modelId,
+      providerId: previous?.providerId,
+      ...overrides,
+    };
     const updated = await agentSessionApi.reinstantiateSessionFromDefinition(
       sessionId,
       definitionId,
-      overrides,
+      await withDefaultModel(carried),
     );
     const index = sessions.findIndex((session) => session.id === sessionId);
     if (index !== -1) {
@@ -228,6 +312,38 @@ export const agentSessionActions = {
       currentSession = updated;
     }
     return updated;
+  },
+
+  /**
+   * Pin / unpin a session. Optimistic: the flag flips locally first so the row
+   * reorders under the cursor without a round-trip, then the backend's returned
+   * session replaces the entry. A failure rolls the flag back and rethrows so
+   * the caller can surface it.
+   */
+  async setPinned(id: UUID, pinned: boolean): Promise<void> {
+    const rollback = applySessionFlags(id, { pinned });
+    try {
+      applySession(id, await agentSessionApi.setAgentSessionPinned(id, pinned));
+    } catch (error) {
+      rollback();
+      console.error("Failed to pin agent session:", error);
+      throw error;
+    }
+  },
+
+  /** Archive / unarchive a session; same optimistic contract as `setPinned`. */
+  async setArchived(id: UUID, archived: boolean): Promise<void> {
+    const rollback = applySessionFlags(id, { archived });
+    try {
+      applySession(
+        id,
+        await agentSessionApi.setAgentSessionArchived(id, archived),
+      );
+    } catch (error) {
+      rollback();
+      console.error("Failed to archive agent session:", error);
+      throw error;
+    }
   },
 
   /** Delete a session: remove from the list; clear current if it was current. */

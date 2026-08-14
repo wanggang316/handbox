@@ -716,6 +716,7 @@ mod tests {
                 "web_search",
                 "render_card",
                 "render_app",
+                "ask_question",
                 "skill"
             ]
         );
@@ -749,6 +750,7 @@ mod tests {
                 "web_search",
                 "render_card",
                 "render_app",
+                "ask_question",
                 "skill"
             ]
         );
@@ -787,6 +789,7 @@ mod tests {
                 "web_search",
                 "render_card",
                 "render_app",
+                "ask_question",
                 "skill"
             ]
         );
@@ -1058,24 +1061,24 @@ mod tests {
         );
     }
 
-    // Fresh environment: quickAction.modelId / providerId default to None and
-    // are absent (or null) in the auto-written config.json.
+    // Fresh environment: the agent default-model pair is unset, so a new
+    // session is created model-less until the user picks a default.
     #[test]
-    fn fresh_env_defaults_to_no_quick_action_model_or_provider() {
+    fn fresh_env_defaults_to_no_agent_default_model() {
         let dir = TempDir::new().unwrap();
         let settings = service(&dir).get_settings().unwrap();
-        assert_eq!(settings.quick_action.model_id, None);
-        assert_eq!(settings.quick_action.provider_id, None);
+        assert_eq!(settings.agent.default_model_id, None);
+        assert_eq!(settings.agent.default_provider_id, None);
     }
 
-    // A valid config.json whose `quickAction` section omits the model/provider
-    // fields parses without error → both fall back to None (old configs that
-    // only carry a shortcut upgrade cleanly).
+    // A valid config.json whose `agent` section omits the default-model fields
+    // parses without error → both fall back to None (configs written before the
+    // setting existed upgrade cleanly).
     #[test]
-    fn quick_action_missing_model_provider_keys_parse_as_none() {
+    fn agent_missing_default_model_keys_parse_as_none() {
         let dir = TempDir::new().unwrap();
         let mut value = serde_json::to_value(default_settings()).unwrap();
-        value["quickAction"] = serde_json::json!({ "shortcut": "Alt+Space" });
+        value["agent"] = serde_json::json!({ "defaultEnabledTools": ["read"] });
         fs::write(
             config_path(&dir),
             serde_json::to_string_pretty(&value).unwrap(),
@@ -1083,93 +1086,108 @@ mod tests {
         .unwrap();
 
         let settings = service(&dir).get_settings().unwrap();
-        assert_eq!(settings.quick_action.shortcut, "Alt+Space");
-        assert_eq!(settings.quick_action.model_id, None);
-        assert_eq!(settings.quick_action.provider_id, None);
+        assert_eq!(
+            settings.agent.default_enabled_tools,
+            vec!["read".to_string()]
+        );
+        assert_eq!(settings.agent.default_model_id, None);
+        assert_eq!(settings.agent.default_provider_id, None);
     }
 
-    // modelId / providerId round-trip through update → config.json → a fresh
-    // service (the durable store).
+    // defaultModelId / defaultProviderId round-trip through update →
+    // config.json → a fresh service (the durable store).
     #[test]
-    fn quick_action_model_provider_round_trip_through_config() {
+    fn agent_default_model_round_trip_through_config() {
         let dir = TempDir::new().unwrap();
         let svc = service(&dir);
 
         let updated = svc
             .update_settings(UpdateSettingsRequest {
-                section: "quickAction".to_string(),
-                data: serde_json::json!({ "modelId": "gpt-4o", "providerId": "openai" }),
+                section: "agent".to_string(),
+                data: serde_json::json!({
+                    "defaultModelId": "gpt-4o",
+                    "defaultProviderId": "openai",
+                }),
             })
             .unwrap();
-        assert_eq!(updated.quick_action.model_id.as_deref(), Some("gpt-4o"));
-        assert_eq!(updated.quick_action.provider_id.as_deref(), Some("openai"));
+        assert_eq!(updated.agent.default_model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(updated.agent.default_provider_id.as_deref(), Some("openai"));
 
         let reread = service(&dir).get_settings().unwrap();
-        assert_eq!(reread.quick_action.model_id.as_deref(), Some("gpt-4o"));
-        assert_eq!(reread.quick_action.provider_id.as_deref(), Some("openai"));
+        assert_eq!(reread.agent.default_model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(reread.agent.default_provider_id.as_deref(), Some("openai"));
 
         let written: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(config_path(&dir)).unwrap()).unwrap();
-        assert_eq!(written["quickAction"]["modelId"], "gpt-4o");
-        assert_eq!(written["quickAction"]["providerId"], "openai");
+        assert_eq!(written["agent"]["defaultModelId"], "gpt-4o");
+        assert_eq!(written["agent"]["defaultProviderId"], "openai");
     }
 
-    // A shallow quickAction merge that patches only modelId leaves the existing
-    // shortcut untouched (merge_json only overwrites keys present in the patch).
+    // A shallow agent merge that patches only the default model leaves the
+    // enabled-tool set untouched (merge_json only overwrites keys present in
+    // the patch).
     #[test]
-    fn quick_action_patch_model_only_keeps_shortcut() {
+    fn agent_default_model_patch_keeps_enabled_tools() {
         let dir = TempDir::new().unwrap();
         let svc = service(&dir);
 
         svc.update_settings(UpdateSettingsRequest {
-            section: "quickAction".to_string(),
-            data: serde_json::json!({ "shortcut": "Alt+Space" }),
+            section: "agent".to_string(),
+            data: serde_json::json!({ "defaultEnabledTools": ["read", "grep"] }),
         })
         .unwrap();
 
         let updated = svc
             .update_settings(UpdateSettingsRequest {
-                section: "quickAction".to_string(),
-                data: serde_json::json!({ "modelId": "gpt-4o" }),
+                section: "agent".to_string(),
+                data: serde_json::json!({
+                    "defaultModelId": "gpt-4o",
+                    "defaultProviderId": "openai",
+                }),
             })
             .unwrap();
         assert_eq!(
-            updated.quick_action.shortcut, "Alt+Space",
-            "a model-only patch must not snap the shortcut back to default"
+            updated.agent.default_enabled_tools,
+            vec!["read".to_string(), "grep".to_string()],
+            "a model-only patch must not snap the tool set back to default"
         );
-        assert_eq!(updated.quick_action.model_id.as_deref(), Some("gpt-4o"));
-        assert_eq!(updated.quick_action.provider_id, None);
+        assert_eq!(updated.agent.default_model_id.as_deref(), Some("gpt-4o"));
     }
 
-    // The mirror case: patching only the shortcut leaves an existing modelId /
-    // providerId untouched.
+    // The mirror case: toggling a tool leaves an existing default model alone.
     #[test]
-    fn quick_action_patch_shortcut_only_keeps_model_and_provider() {
+    fn agent_tools_patch_keeps_default_model() {
         let dir = TempDir::new().unwrap();
         let svc = service(&dir);
 
         svc.update_settings(UpdateSettingsRequest {
-            section: "quickAction".to_string(),
-            data: serde_json::json!({ "modelId": "gpt-4o", "providerId": "openai" }),
+            section: "agent".to_string(),
+            data: serde_json::json!({
+                "defaultModelId": "gpt-4o",
+                "defaultProviderId": "openai",
+            }),
         })
         .unwrap();
 
         let updated = svc
             .update_settings(UpdateSettingsRequest {
-                section: "quickAction".to_string(),
-                data: serde_json::json!({ "shortcut": "Alt+Space" }),
+                section: "agent".to_string(),
+                data: serde_json::json!({ "defaultEnabledTools": ["read"] }),
             })
             .unwrap();
-        assert_eq!(updated.quick_action.shortcut, "Alt+Space");
         assert_eq!(
-            updated.quick_action.model_id.as_deref(),
+            updated.agent.default_enabled_tools,
+            vec!["read".to_string()]
+        );
+        assert_eq!(
+            updated.agent.default_model_id.as_deref(),
             Some("gpt-4o"),
-            "a shortcut-only patch must not clear the model id"
+            "a tools-only patch must not clear the default model id"
         );
         assert_eq!(
-            updated.quick_action.provider_id.as_deref(),
+            updated.agent.default_provider_id.as_deref(),
             Some("openai"),
-            "a shortcut-only patch must not clear the provider id"
+            "a tools-only patch must not clear the default provider id"
         );
     }
 

@@ -25,8 +25,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   // Sidebar
   "settings.sidebar.backToApp": "Back to app",
   "settings.sidebar.search": "Search settings...",
-  "settings.sidebar.group.personal": "Personal",
-  "settings.sidebar.group.features": "Features",
+  "settings.sidebar.group.general": "General",
+  "settings.sidebar.group.agents": "Agents",
   "settings.sidebar.group.other": "Other",
   "settings.sidebar.account": "Account",
   "settings.sidebar.general": "General",
@@ -83,7 +83,17 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   // Agent Tools page
   "settings.agentTools.title": "Agent Tools",
   "settings.agentTools.description":
-    "Tools enabled by default for new Agent sessions. Existing sessions are unaffected.",
+    "Model and tools new Agent sessions start with. Existing sessions are unaffected.",
+  "settings.agentTools.defaultModel.title": "Default model",
+  "settings.agentTools.defaultModel.label": "Model for new sessions",
+  "settings.agentTools.defaultModel.hint":
+    "Model picked automatically when a new Agent session is created; you can still switch inside the session.",
+  "settings.agentTools.defaultModel.none": "Not selected",
+  "settings.agentTools.defaultModel.unavailable":
+    "The selected model is no longer available — pick another",
+  "settings.agentTools.defaultModel.emptyCatalog":
+    "Enable a provider and add a model under Models first.",
+  "settings.agentTools.defaultModel.openModels": "Open model settings",
   "settings.agentTools.webSearch.title": "Web Search",
   "settings.agentTools.webSearch.provider": "Search provider",
   "settings.agentTools.webSearch.apiKey": "API Key",
@@ -95,6 +105,8 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
     "Render interactive HTML cards inline in the conversation",
   "settings.agentTools.renderAppDesc":
     "Build full HTML apps in a side panel (preview + source)",
+  "settings.agentTools.askQuestionDesc":
+    "Let the model pause and ask you structured questions before continuing",
   "settings.agentTools.skillDesc":
     "Let the model discover and load skills on demand",
 
