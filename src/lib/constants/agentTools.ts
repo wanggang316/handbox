@@ -37,18 +37,78 @@ export interface BuiltinTool {
 }
 
 export const BUILTIN_TOOLS: BuiltinTool[] = [
-  { id: "read", labelKey: "agent.tool.read", icon: FileText, requiresWorkingDir: true },
-  { id: "write", labelKey: "agent.tool.write", icon: FilePlus, requiresWorkingDir: true },
-  { id: "edit", labelKey: "agent.tool.edit", icon: FilePen, requiresWorkingDir: true },
-  { id: "bash", labelKey: "agent.tool.bash", icon: Terminal, requiresWorkingDir: true },
-  { id: "grep", labelKey: "agent.tool.grep", icon: Search, requiresWorkingDir: true },
-  { id: "find", labelKey: "agent.tool.find", icon: FileSearch, requiresWorkingDir: true },
-  { id: "ls", labelKey: "agent.tool.ls", icon: FolderTree, requiresWorkingDir: true },
-  { id: "web_search", labelKey: "agent.tool.web_search", icon: Globe, requiresWorkingDir: false },
-  { id: "render_card", labelKey: "agent.tool.render_card", icon: PanelTop, requiresWorkingDir: false },
-  { id: "render_app", labelKey: "agent.tool.render_app", icon: AppWindow, requiresWorkingDir: false },
-  { id: "ask_question", labelKey: "agent.tool.ask_question", icon: MessageCircleQuestionMark, requiresWorkingDir: false },
-  { id: "skill", labelKey: "agent.tool.skill", icon: Sparkles, requiresWorkingDir: false },
+  {
+    id: "read",
+    labelKey: "agent.tool.read",
+    icon: FileText,
+    requiresWorkingDir: true,
+  },
+  {
+    id: "write",
+    labelKey: "agent.tool.write",
+    icon: FilePlus,
+    requiresWorkingDir: true,
+  },
+  {
+    id: "edit",
+    labelKey: "agent.tool.edit",
+    icon: FilePen,
+    requiresWorkingDir: true,
+  },
+  {
+    id: "bash",
+    labelKey: "agent.tool.bash",
+    icon: Terminal,
+    requiresWorkingDir: true,
+  },
+  {
+    id: "grep",
+    labelKey: "agent.tool.grep",
+    icon: Search,
+    requiresWorkingDir: true,
+  },
+  {
+    id: "find",
+    labelKey: "agent.tool.find",
+    icon: FileSearch,
+    requiresWorkingDir: true,
+  },
+  {
+    id: "ls",
+    labelKey: "agent.tool.ls",
+    icon: FolderTree,
+    requiresWorkingDir: true,
+  },
+  {
+    id: "web_search",
+    labelKey: "agent.tool.web_search",
+    icon: Globe,
+    requiresWorkingDir: false,
+  },
+  {
+    id: "render_card",
+    labelKey: "agent.tool.render_card",
+    icon: PanelTop,
+    requiresWorkingDir: false,
+  },
+  {
+    id: "render_app",
+    labelKey: "agent.tool.render_app",
+    icon: AppWindow,
+    requiresWorkingDir: false,
+  },
+  {
+    id: "ask_question",
+    labelKey: "agent.tool.ask_question",
+    icon: MessageCircleQuestionMark,
+    requiresWorkingDir: false,
+  },
+  {
+    id: "skill",
+    labelKey: "agent.tool.skill",
+    icon: Sparkles,
+    requiresWorkingDir: false,
+  },
 ];
 
 /**

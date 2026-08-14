@@ -176,7 +176,9 @@ describe("canSubmit", () => {
 
   it("blocks until every required question carries a value", () => {
     expect(canSubmit([requiredSingle, text], {}, {})).toBe(false);
-    expect(canSubmit([requiredSingle, text], { q0: ["SQLite"] }, {})).toBe(true);
+    expect(canSubmit([requiredSingle, text], { q0: ["SQLite"] }, {})).toBe(
+      true,
+    );
   });
 
   it("ignores optional questions when deciding", () => {
@@ -192,11 +194,15 @@ describe("canSubmit", () => {
   });
 
   it("requires ALL required questions, not just one", () => {
-    expect(canSubmit([requiredSingle, requiredText], { q0: ["SQLite"] }, {})).toBe(
-      false,
-    );
     expect(
-      canSubmit([requiredSingle, requiredText], { q0: ["SQLite"] }, { q2: "ok" }),
+      canSubmit([requiredSingle, requiredText], { q0: ["SQLite"] }, {}),
+    ).toBe(false);
+    expect(
+      canSubmit(
+        [requiredSingle, requiredText],
+        { q0: ["SQLite"] },
+        { q2: "ok" },
+      ),
     ).toBe(true);
   });
 });
