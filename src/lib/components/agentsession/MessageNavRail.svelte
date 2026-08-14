@@ -102,10 +102,11 @@
         onblur={closePreview}
         onclick={() => onSelect(item.index)}
       >
-        <!-- Every tick is the same length; position in the conversation is
-             carried by colour alone, so the rail stays a straight edge. -->
+        <!-- At rest every tick is the same length and colour alone marks where
+             you are, so the rail reads as a straight edge. Width is reserved
+             for hover: the tick under the pointer extends to answer it. -->
         <span
-          class="h-[2px] w-5 rounded-full transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] {active
+          class="h-[2px] w-3.5 rounded-full transition-[width,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] group-hover:w-6 {active
             ? 'bg-base-content/75'
             : 'bg-base-content/20 group-hover:bg-base-content/45'}"
         ></span>
