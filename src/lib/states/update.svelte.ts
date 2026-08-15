@@ -6,6 +6,12 @@
  * via a Tauri event, so a manual check in the settings window also lights up
  * the main window's sidebar entry. The auto-check preference persists in
  * localStorage (same as theme).
+ *
+ * The silent check runs on every main-window mount, but the dialog it opens is
+ * throttled by the user-chosen prompt interval (default hourly; timestamp in
+ * localStorage, so relaunches and window re-entries share it). Outside that
+ * window the update only shows up as the sidebar entry, which the user can
+ * open on their own terms.
  */
 
 import {
@@ -33,7 +39,33 @@ export interface UpdateInfo {
 }
 
 const AUTO_CHECK_KEY = 'update.autoCheck';
+const PROMPT_INTERVAL_KEY = 'update.promptInterval';
+const AUTO_PROMPT_AT_KEY = 'update.autoPromptAt';
 const UPDATE_AVAILABLE_EVENT = 'update://available';
+
+/** How often an available update may auto-open the dialog; ordered for the UI. */
+export const PROMPT_INTERVALS = ['launch', 'hourly', 'daily', 'weekly', 'never'] as const;
+
+export type PromptInterval = (typeof PROMPT_INTERVALS)[number];
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** Shortest gap between two auto-opened dialogs, per interval choice. */
+const PROMPT_INTERVAL_MS: Record<PromptInterval, number> = {
+  launch: 0,
+  hourly: HOUR_MS,
+  daily: 24 * HOUR_MS,
+  weekly: 7 * 24 * HOUR_MS,
+  never: Number.POSITIVE_INFINITY,
+};
+
+const DEFAULT_PROMPT_INTERVAL: PromptInterval = 'hourly';
+
+function parsePromptInterval(value: string | null): PromptInterval {
+  return value !== null && value in PROMPT_INTERVAL_MS
+    ? (value as PromptInterval)
+    : DEFAULT_PROMPT_INTERVAL;
+}
 
 interface UpdateStateData {
   status: UpdateStatus;
@@ -43,6 +75,7 @@ interface UpdateStateData {
   downloaded: number;
   contentLength: number;
   autoCheck: boolean;
+  promptInterval: PromptInterval;
   error: string | null;
 }
 
@@ -55,6 +88,7 @@ class UpdateState {
     downloaded: 0,
     contentLength: 0,
     autoCheck: true,
+    promptInterval: DEFAULT_PROMPT_INTERVAL,
     error: null,
   });
 
@@ -77,6 +111,9 @@ class UpdateState {
   }
   get autoCheck() {
     return this.state.autoCheck;
+  }
+  get promptInterval() {
+    return this.state.promptInterval;
   }
   get error() {
     return this.state.error;
@@ -101,6 +138,9 @@ class UpdateState {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem(AUTO_CHECK_KEY);
       this.state.autoCheck = saved === null ? true : saved === 'true';
+      this.state.promptInterval = parsePromptInterval(
+        localStorage.getItem(PROMPT_INTERVAL_KEY)
+      );
     }
     try {
       this.state.currentVersion = await getVersion();
@@ -113,6 +153,15 @@ class UpdateState {
     this.state.autoCheck = enabled;
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(AUTO_CHECK_KEY, String(enabled));
+    }
+  }
+
+  setPromptInterval(interval: PromptInterval): void {
+    this.state.promptInterval = interval;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PROMPT_INTERVAL_KEY, interval);
+      // A shorter interval should take effect now, not after the old one lapses.
+      localStorage.removeItem(AUTO_PROMPT_AT_KEY);
     }
   }
 
@@ -144,12 +193,34 @@ class UpdateState {
     });
 
     if (this.state.autoCheck) {
-      this.checkForUpdate({ notifyNoUpdate: false, openOnFound: true }).catch((error) =>
-        console.error('Auto update check failed:', error)
-      );
+      const prompt = this.autoPromptDue();
+      this.checkForUpdate({ notifyNoUpdate: false, openOnFound: prompt })
+        .then((found) => {
+          if (found && prompt) this.markAutoPrompted();
+        })
+        .catch((error) => console.error('Auto update check failed:', error));
     }
 
     return unlisten;
+  }
+
+  /** Whether enough time has passed since the last auto-opened dialog. */
+  private autoPromptDue(): boolean {
+    const interval = PROMPT_INTERVAL_MS[this.state.promptInterval];
+    if (interval === 0) return true;
+    if (!Number.isFinite(interval)) return false; // never
+    if (typeof localStorage === 'undefined') return true;
+    const saved = Number(localStorage.getItem(AUTO_PROMPT_AT_KEY));
+    if (!Number.isFinite(saved) || saved <= 0) return true;
+    const elapsed = Date.now() - saved;
+    // A clock moved backwards would otherwise mute the prompt indefinitely.
+    if (elapsed < 0) return true;
+    return elapsed >= interval;
+  }
+
+  private markAutoPrompted(): void {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(AUTO_PROMPT_AT_KEY, String(Date.now()));
   }
 
   /**
