@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.5.4] - 2026-08-16
+
+### Added
+- Choose how often the update reminder appears — every launch, hourly, daily,
+  weekly, or never — in Settings → About.
+
+### Fixed
+- The update dialog no longer reopens every time you return to the app home; it
+  now waits for the reminder interval you picked (hourly by default). The
+  sidebar still flags a new version as soon as one is available.
+
+
 ## [0.5.3] - 2026-08-15
 
 ### Added
