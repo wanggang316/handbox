@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Sparkles } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import type { SkillInfo } from "$lib/types";
 
@@ -36,12 +37,12 @@
 -->
 <div
   bind:this={listRef}
-  class="max-h-60 w-72 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-200 py-1 shadow-lg"
+  class="max-h-72 w-56 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
   role="listbox"
   aria-label={t("agent.slash.ariaLabel")}
 >
   {#if items.length === 0}
-    <div class="px-3 py-2 text-xs text-base-content/50">
+    <div class="px-2 py-1.5 text-xs text-base-content/50">
       {t("agent.slash.noMatch")}
     </div>
   {:else}
@@ -51,8 +52,8 @@
         type="button"
         role="option"
         aria-selected={active}
-        class={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left transition-colors ${
-          active ? "bg-info/15 text-info" : "text-base-content/80 hover:bg-base-300"
+        class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+          active ? "bg-base-300" : ""
         }`}
         onmousedown={(event) => {
           // mousedown (not click) so the textarea doesn't blur first and close the popover.
@@ -61,12 +62,10 @@
         }}
         onmouseenter={() => onHover(index)}
       >
-        <span class="truncate text-sm font-medium">{skill.name}</span>
-        {#if skill.description}
-          <span class="truncate text-xs text-base-content/50">
-            {skill.description}
-          </span>
-        {/if}
+        <Sparkles size={16} class="shrink-0 text-base-content/70" />
+        <span class="min-w-0 flex-1 truncate text-sm text-base-content">
+          {skill.name}
+        </span>
       </button>
     {/each}
   {/if}
