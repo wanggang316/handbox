@@ -43,6 +43,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.addImage": "Add photos",
   "agent.input.skills": "Skills",
   "agent.input.noSkills": "No skills available",
+  "agent.input.mcp": "MCP",
+  "agent.input.mcpUpdateFailed": "Failed to update MCP server bindings",
   "agent.input.stop": "Stop",
   "agent.input.send": "Send",
   "agent.input.autoExecution": "Auto",

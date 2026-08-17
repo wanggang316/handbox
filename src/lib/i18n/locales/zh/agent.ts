@@ -34,6 +34,8 @@ export const agentZh = {
   "agent.input.addImage": "添加图片",
   "agent.input.skills": "Skills",
   "agent.input.noSkills": "暂无可用 Skill",
+  "agent.input.mcp": "MCP",
+  "agent.input.mcpUpdateFailed": "更新 MCP 服务器绑定失败",
   "agent.input.stop": "停止",
   "agent.input.send": "发送",
   "agent.input.autoExecution": "自动执行",

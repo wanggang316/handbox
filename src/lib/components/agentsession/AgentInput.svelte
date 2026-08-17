@@ -12,6 +12,7 @@
     ChevronsUpDown,
     Check,
     Folder,
+    Zap,
     SignalLow,
     SignalMedium,
     SignalHigh,
@@ -26,6 +27,7 @@
   import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
+  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { agentQuestionStore } from "$lib/states/agentQuestion.svelte";
@@ -41,6 +43,7 @@
     AgentRunAttachment,
     AgentQuestionRequest,
     AgentQuestionResponse,
+    McpServer,
     SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
@@ -500,11 +503,21 @@
     syncSlashState(fromPaste);
   }
 
-  // "+" menu: attachments plus a Skills submenu listing every enabled skill.
-  // Same skill source as the slash popover, so both stay in sync.
+  // "+" menu: attachments plus Skills and MCP submenus. Skills come from the
+  // same source as the slash popover, so both stay in sync.
   let addMenuOpen = $state(false);
-  let skillsSubmenuOpen = $state(false);
+  // At most one submenu is open at a time.
+  let openSubmenu = $state<"skills" | "mcp" | null>(null);
   const menuSkills = $derived(availableSkills.filter((s) => !s.disabled));
+
+  // Only ready servers exposing tools can contribute anything to a run, so the
+  // submenu lists those (same filter as the Agent editor's MCP picker).
+  const availableMcpServers = $derived(
+    mcpState.servers.filter(
+      (s) => s.enabled && s.status === "ready" && s.enabledTools.length > 0,
+    ),
+  );
+  const sessionMcpServers = $derived(session.mcpServers ?? []);
 
   // Close on outside click; clicks inside the menu stopPropagation and never reach window.
   $effect(() => {
@@ -516,7 +529,7 @@
 
   function closeAddMenu() {
     addMenuOpen = false;
-    skillsSubmenuOpen = false;
+    openSubmenu = null;
   }
 
   function toggleAddMenu(event: MouseEvent) {
@@ -524,10 +537,39 @@
     // stopPropagation defeats the other popovers' outside-click close, so close them explicitly.
     thinkingMenuOpen = false;
     agentMenuOpen = false;
-    skillsSubmenuOpen = false;
+    openSubmenu = null;
     addMenuOpen = !addMenuOpen;
-    // The submenu needs the list before it is hovered.
-    if (addMenuOpen) void loadAvailableSkills();
+    // The submenus need their lists before they are hovered.
+    if (addMenuOpen) {
+      void loadAvailableSkills();
+      mcpActions
+        .loadServers(mcpState.needsRefresh)
+        .catch((error) => console.error("Failed to load MCP servers:", error));
+    }
+  }
+
+  // Bind / unbind a server for this session. The binding carries the server's
+  // own tool selection (an empty list would expose no tools) and defaults to
+  // auto execution; the menu stays open so several can be toggled in a row.
+  async function toggleMcpServer(server: McpServer) {
+    const bound = sessionMcpServers.some((c) => c.serverId === server.id);
+    const next = bound
+      ? sessionMcpServers.filter((c) => c.serverId !== server.id)
+      : [
+          ...sessionMcpServers,
+          {
+            serverId: server.id,
+            executionMode: "auto" as const,
+            enabledTools: server.enabledTools,
+          },
+        ];
+    try {
+      modelPrompt = null;
+      await agentSessionActions.updateField(session.id, "mcpServers", next);
+    } catch (error) {
+      console.error("Failed to update session MCP servers:", error);
+      modelPrompt = t("agent.input.mcpUpdateFailed");
+    }
   }
 
   function handleAddAttachment(event?: MouseEvent) {
@@ -948,18 +990,19 @@
             <div
               class="relative"
               role="none"
-              onmouseenter={() => (skillsSubmenuOpen = true)}
-              onmouseleave={() => (skillsSubmenuOpen = false)}
+              onmouseenter={() => (openSubmenu = "skills")}
+              onmouseleave={() => (openSubmenu = null)}
             >
               <button
                 type="button"
                 role="menuitem"
                 aria-haspopup="menu"
-                aria-expanded={skillsSubmenuOpen}
+                aria-expanded={openSubmenu === "skills"}
                 class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
-                  skillsSubmenuOpen ? "bg-base-300" : ""
+                  openSubmenu === "skills" ? "bg-base-300" : ""
                 }`}
-                onclick={() => (skillsSubmenuOpen = !skillsSubmenuOpen)}
+                onclick={() =>
+                  (openSubmenu = openSubmenu === "skills" ? null : "skills")}
               >
                 <Sparkles size={16} class="shrink-0 text-base-content/70" />
                 <span class="min-w-0 flex-1 truncate text-sm text-base-content">
@@ -968,7 +1011,7 @@
                 <ChevronRight size={14} class="shrink-0 opacity-60" />
               </button>
 
-              {#if skillsSubmenuOpen}
+              {#if openSubmenu === "skills"}
                 <!-- pl-1 (not ml-1) so the gap to the parent menu stays inside
                      the hover area and crossing it doesn't close the submenu. -->
                 <div class="absolute bottom-0 left-full z-50 pl-1">
@@ -998,6 +1041,77 @@
                           >
                             {skill.name}
                           </span>
+                        </button>
+                      {/each}
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <!-- MCP row: the submenu is a checklist of this session's server
+                 bindings, so it stays open while several are toggled. -->
+            <div
+              class="relative"
+              role="none"
+              onmouseenter={() => (openSubmenu = "mcp")}
+              onmouseleave={() => (openSubmenu = null)}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={openSubmenu === "mcp"}
+                class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+                  openSubmenu === "mcp" ? "bg-base-300" : ""
+                }`}
+                onclick={() =>
+                  (openSubmenu = openSubmenu === "mcp" ? null : "mcp")}
+              >
+                <Zap size={16} class="shrink-0 text-base-content/70" />
+                <span class="min-w-0 flex-1 truncate text-sm text-base-content">
+                  {t("agent.input.mcp")}
+                </span>
+                {#if sessionMcpServers.length}
+                  <span class="shrink-0 text-xs text-base-content/45">
+                    {sessionMcpServers.length}
+                  </span>
+                {/if}
+                <ChevronRight size={14} class="shrink-0 opacity-60" />
+              </button>
+
+              {#if openSubmenu === "mcp"}
+                <div class="absolute bottom-0 left-full z-50 pl-1">
+                  <div
+                    class="max-h-72 w-56 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+                    role="menu"
+                    tabindex="-1"
+                  >
+                    {#if availableMcpServers.length === 0}
+                      <div class="px-2 py-1.5 text-xs text-base-content/50">
+                        {t("agent.input.noAvailableMcpServers")}
+                      </div>
+                    {:else}
+                      {#each availableMcpServers as server (server.id)}
+                        {@const bound = sessionMcpServers.some(
+                          (c) => c.serverId === server.id,
+                        )}
+                        <button
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={bound}
+                          class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300"
+                          onclick={() => toggleMcpServer(server)}
+                        >
+                          <Zap size={16} class="shrink-0 text-base-content/70" />
+                          <span
+                            class="min-w-0 flex-1 truncate text-sm text-base-content"
+                          >
+                            {server.displayName ?? server.name}
+                          </span>
+                          {#if bound}
+                            <Check size={14} class="shrink-0 text-primary" />
+                          {/if}
                         </button>
                       {/each}
                     {/if}
