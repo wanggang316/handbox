@@ -29,6 +29,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.selectModelFirst": "Select a model first",
   "agent.input.runFailed": "Failed to start the agent run",
   "agent.input.removeImage": "Remove image",
+  "agent.input.removeQuote": "Remove quote",
   "agent.input.awaitingApprovalPlaceholder":
     "Awaiting approval — allow or deny in the dialog",
   "agent.input.placeholder": "Type a message, press Enter to send",
@@ -75,6 +76,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.usageOutput": "Output {count}",
   "agent.timeline.copy": "Copy",
   "agent.timeline.copied": "Copied",
+  "agent.timeline.quoteReply": "Quote",
 
   "agent.nav.label": "Message navigation",
   "agent.nav.jumpTo": "Jump to question {index}",

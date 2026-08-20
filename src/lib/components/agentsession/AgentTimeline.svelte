@@ -37,6 +37,7 @@
   import AppPill from "./AppPill.svelte";
   import { RENDER_APP_TOOL_NAME } from "./renderApp";
   import MessageNavRail, { type MessageNavItem } from "./MessageNavRail.svelte";
+  import SelectionReplyButton from "./SelectionReplyButton.svelte";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -48,9 +49,15 @@
     sessionId: string;
     /** Folded render_app artifact title (from +page); AppPill fallback. */
     appTitle?: string;
+    /**
+     * Receives text the reader selected in the transcript and chose to quote.
+     * Omitted where there is no composer to hand it to (the quick panel), which
+     * also keeps the floating affordance out of read-only surfaces.
+     */
+    onQuote?: (text: string) => void;
   }
 
-  let { sessionId, appTitle }: Props = $props();
+  let { sessionId, appTitle, onQuote }: Props = $props();
 
   const runState = $derived(agentRunStore.runStateFor(sessionId));
 
@@ -1024,6 +1031,12 @@
          its height never feeds back into the measurement. -->
     <div style="height: {spacer}px" aria-hidden="true"></div>
   </div>
+
+  <!-- Selection affordance: anchored to `contentEl`, so only transcript text
+       (never the trailing spacer or the rail) can be quoted. -->
+  {#if onQuote}
+    <SelectionReplyButton container={contentEl} onReply={onQuote} />
+  {/if}
 
   {#if showNavRail}
     <MessageNavRail

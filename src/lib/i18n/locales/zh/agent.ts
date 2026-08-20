@@ -24,6 +24,7 @@ export const agentZh = {
   "agent.input.selectModelFirst": "请先选择模型",
   "agent.input.runFailed": "启动 Agent 运行失败",
   "agent.input.removeImage": "移除图片",
+  "agent.input.removeQuote": "移除引用",
   "agent.input.awaitingApprovalPlaceholder": "等待审批中，请在弹窗中允许或拒绝",
   "agent.input.placeholder": "在这里输入消息，按 Enter 发送",
   "agent.input.awaitingApprovalHint": "等待工具审批，对话已暂停",
@@ -65,6 +66,7 @@ export const agentZh = {
   "agent.timeline.genuiStreaming": "生成界面中…",
   "agent.timeline.copy": "复制",
   "agent.timeline.copied": "已复制",
+  "agent.timeline.quoteReply": "引用",
 
   // Message navigation rail (MessageNavRail)
   "agent.nav.label": "消息导航",
