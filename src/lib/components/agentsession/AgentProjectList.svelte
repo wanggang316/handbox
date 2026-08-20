@@ -772,6 +772,13 @@
       onfocusin={() => handleRowFocusIn(session)}
       onfocusout={(event) => handleRowFocusOut(event, session)}
     >
+      {#if agentRunStore.isRunning(session.id)}
+        <!-- Same breathing dot as the timeline's in-run progress indicator. -->
+        <span
+          class="flex-shrink-0 h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+          aria-hidden="true"
+        ></span>
+      {/if}
       <span class="truncate flex-1">{session.name}</span>
       {#if generatingTitleId === session.id}
         <Loader2
