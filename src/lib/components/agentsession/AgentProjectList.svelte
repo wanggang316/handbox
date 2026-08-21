@@ -775,11 +775,12 @@
     >
       {#if agentRunStore.isRunning(session.id)}
         <!-- Same breathing dot as the timeline's in-run progress indicator,
-             absolutely positioned in the indent gutter so it never shifts the
-             title. The wrapper centers via flex: the dot's own animation owns
-             `transform`, so translate-based centering would be overridden. -->
+             absolutely positioned so it never shifts the title. The wrapper is
+             icon-sized (14px) at the parent header's icon offset, centering the
+             dot on that icon column. Centering is flex-based: the dot's own
+             animation owns `transform`, so translate would be overridden. -->
         <span
-          class="absolute {dotIndent} inset-y-0 flex items-center"
+          class="absolute {dotIndent} inset-y-0 w-3.5 flex items-center justify-center"
           aria-hidden="true"
         >
           <span
@@ -915,7 +916,7 @@
   {#if !collapsed}
     <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
       {#each sessions as session (session.id)}
-        {@render sessionRow(session, "pl-12", "pl-10", "left-9")}
+        {@render sessionRow(session, "pl-12", "pl-10", "left-7")}
       {/each}
     </div>
   {/if}
@@ -1005,7 +1006,7 @@
                 {#if child.kind === "project"}
                   {@render projectGroup(bucket, child.project, child.sessions)}
                 {:else}
-                  {@render sessionRow(child.session, "pl-7", "pl-5", "left-4")}
+                  {@render sessionRow(child.session, "pl-7", "pl-5", "left-2")}
                 {/if}
               {/each}
             </div>
@@ -1037,7 +1038,7 @@
           {#if archivedExpanded}
             <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
               {#each archivedSessions as session (session.id)}
-                {@render sessionRow(session, "pl-7", "pl-5", "left-4")}
+                {@render sessionRow(session, "pl-7", "pl-5", "left-2")}
               {/each}
             </div>
           {/if}
