@@ -742,6 +742,7 @@
   session: AgentSession,
   rowIndent: string,
   inputIndent: string,
+  dotIndent: string,
 )}
   {#if renamingSessionId === session.id}
     <!-- Rename input: Enter/blur commits, Escape cancels. -->
@@ -758,7 +759,7 @@
   {:else}
     {@const showControls = activeRowSessionId === session.id}
     <div
-      class="w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
+      class="relative w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
@@ -772,6 +773,21 @@
       onfocusin={() => handleRowFocusIn(session)}
       onfocusout={(event) => handleRowFocusOut(event, session)}
     >
+      {#if agentRunStore.isRunning(session.id)}
+        <!-- Same breathing dot as the timeline's in-run progress indicator,
+             absolutely positioned so it never shifts the title. The wrapper is
+             icon-sized (14px) at the parent header's icon offset, centering the
+             dot on that icon column. Centering is flex-based: the dot's own
+             animation owns `transform`, so translate would be overridden. -->
+        <span
+          class="absolute {dotIndent} inset-y-0 w-3.5 flex items-center justify-center"
+          aria-hidden="true"
+        >
+          <span
+            class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+          ></span>
+        </span>
+      {/if}
       <span class="truncate flex-1">{session.name}</span>
       {#if generatingTitleId === session.id}
         <Loader2
@@ -900,7 +916,7 @@
   {#if !collapsed}
     <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
       {#each sessions as session (session.id)}
-        {@render sessionRow(session, "pl-12", "pl-10")}
+        {@render sessionRow(session, "pl-12", "pl-10", "left-7")}
       {/each}
     </div>
   {/if}
@@ -990,7 +1006,7 @@
                 {#if child.kind === "project"}
                   {@render projectGroup(bucket, child.project, child.sessions)}
                 {:else}
-                  {@render sessionRow(child.session, "pl-7", "pl-5")}
+                  {@render sessionRow(child.session, "pl-7", "pl-5", "left-2")}
                 {/if}
               {/each}
             </div>
@@ -1022,7 +1038,7 @@
           {#if archivedExpanded}
             <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
               {#each archivedSessions as session (session.id)}
-                {@render sessionRow(session, "pl-7", "pl-5")}
+                {@render sessionRow(session, "pl-7", "pl-5", "left-2")}
               {/each}
             </div>
           {/if}
