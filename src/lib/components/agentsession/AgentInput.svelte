@@ -26,6 +26,8 @@
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { agentQuestionStore } from "$lib/states/agentQuestion.svelte";
+  import { agentQuoteStore } from "$lib/states/agentQuote.svelte";
+  import { withQuote } from "./quote";
   import AgentQuestionPanel from "./AgentQuestionPanel.svelte";
   import { getAllModels, getProviderIconById } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
@@ -252,6 +254,21 @@
     }
   }
 
+  // Transcript text the reader quoted from the timeline; rendered as a card
+  // above the textarea and prepended to the message as a blockquote on send.
+  const quote = $derived(agentQuoteStore.quoteFor(session.id));
+
+  function removeQuote() {
+    agentQuoteStore.clear(session.id);
+  }
+
+  // Quoting is a request to write about that text, so the keyboard follows it
+  // into the composer.
+  $effect(() => {
+    if (quote === null) return;
+    textareaRef?.focus();
+  });
+
   // Active run for this session drives the Send <-> Stop toggle.
   const running = $derived(agentRunStore.isRunning(session.id));
 
@@ -408,6 +425,14 @@
       }
     }
 
+    // Escape drops the quote once the popover is out of the way, so the reader
+    // can undo a mis-quote without reaching for the card's button.
+    if (event.key === "Escape" && quote !== null) {
+      event.preventDefault();
+      removeQuote();
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendAgentRun();
@@ -530,11 +555,12 @@
     // parsed as a forced skill. An active run always has a model, so this
     // branch safely precedes the model guard.
     if (running) {
-      // Whitespace-only input: no-op.
-      if (!input.trim()) return;
+      // Whitespace-only input with nothing quoted: no-op.
+      if (!input.trim() && quote === null) return;
       modelPrompt = null;
-      const text = input;
+      const text = withQuote(input, quote);
       resetAttachments();
+      removeQuote();
       input = "";
       adjustTextareaHeight();
       try {
@@ -550,8 +576,8 @@
       return;
     }
 
-    // Empty input with no attachments: no run, no bubble.
-    if (!input.trim() && attachments.length === 0) return;
+    // Empty input with no attachments and nothing quoted: no run, no bubble.
+    if (!input.trim() && attachments.length === 0 && quote === null) return;
 
     // No model: prompt and block (defensive; created sessions normally have one).
     if (!session.modelId || !session.providerId) {
@@ -560,7 +586,11 @@
     }
 
     modelPrompt = null;
-    const text = input;
+    // The typed text and the quote are kept apart from the composed message:
+    // a failed start restores exactly what the user had, card included.
+    const typed = input;
+    const quoted = quote;
+    const text = withQuote(typed, quoted);
     // Snapshot attachments for sending (Uint8Array -> number[] to match the
     // backend Vec<u8> IPC shape), then clear input. The user bubble comes from
     // the backend's user message_end event; no optimistic insert to avoid dupes.
@@ -570,12 +600,14 @@
       data: Array.from(a.data),
     }));
     const sentAttachments = attachments;
-    // Forced skill names come from the leading `/<name>`: the text is the
-    // single source of truth, so restoring input on failure also restores them.
+    // Forced skill names come from the leading `/<name>` of what the user typed
+    // (a quote sits in front of it in the sent text): the input is the single
+    // source of truth, so restoring it on failure also restores them.
     // `/<name>` is sent to the model verbatim; the backend injects skill bodies.
-    const forcedSkillNames = leadingForcedSkillNames(text);
+    const forcedSkillNames = leadingForcedSkillNames(typed);
     input = "";
     attachments = [];
+    removeQuote();
     adjustTextareaHeight();
     try {
       await runAgentStream(
@@ -591,10 +623,13 @@
         }
       });
     } catch (error) {
-      // Start failed: restore input and attachments (the leading `/<name>`
-      // restores the forced skill) and surface the error for retry.
-      input = text;
+      // Start failed: restore input, attachments and quote (the leading
+      // `/<name>` restores the forced skill) and surface the error for retry.
+      input = typed;
       attachments = sentAttachments;
+      if (quoted !== null) {
+        agentQuoteStore.set(session.id, quoted);
+      }
       adjustTextareaHeight();
       modelPrompt =
         error instanceof Error ? error.message : t("agent.input.runFailed");
@@ -726,6 +761,33 @@
 <div
   class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] w-full"
 >
+  <!-- Quoted transcript text, inside the box and above the textarea: it is part
+       of the message being composed, not a notice about the conversation.
+       Clamped to a few lines — it is a reference to a passage, not the passage. -->
+  {#if quote !== null}
+    <div class="px-4 pt-3">
+      <div
+        class="relative rounded-md border border-[var(--hairline)] bg-base-200/40 py-2 pl-2.5 pr-8"
+        transition:fly={{ y: -4, duration: 130 }}
+      >
+        <p
+          class="line-clamp-3 border-l-2 border-base-content/25 pl-2 text-xs leading-[1.55] whitespace-pre-wrap break-words text-base-content/65"
+        >
+          {quote}
+        </p>
+        <button
+          type="button"
+          class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-base-300 hover:text-base-content"
+          aria-label={t("agent.input.removeQuote")}
+          title={t("agent.input.removeQuote")}
+          onclick={removeQuote}
+        >
+          <X size={12} />
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Relative container anchors the popover, which opens upward (bottom-full) to stay on-screen. -->
   <div class="relative">
     {#if slashOpen}
