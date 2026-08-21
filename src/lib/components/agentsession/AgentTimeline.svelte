@@ -38,6 +38,7 @@
   import { RENDER_APP_TOOL_NAME } from "./renderApp";
   import MessageNavRail, { type MessageNavItem } from "./MessageNavRail.svelte";
   import SelectionReplyButton from "./SelectionReplyButton.svelte";
+  import { splitQuote } from "./quote";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -675,7 +676,14 @@
           answer = assistantText(next);
         }
       }
-      items.push({ index: i, question: userText(message), answer });
+      // The rail lists questions, so a quoted passage is only the fallback
+      // when the reader sent one with nothing of their own.
+      const parts = splitQuote(userText(message));
+      items.push({
+        index: i,
+        question: parts.text.trim() || (parts.quote ?? ""),
+        answer,
+      });
     }
     return items;
   });
@@ -815,6 +823,7 @@
       {#each visibleMessages as message, offset (windowStart + offset)}
         {@const i = windowStart + offset}
         {#if message.role === "user"}
+          {@const parts = splitQuote(userText(message))}
           <!-- data-message-index anchors the reader's position across a teardown
                (see scrollMemory): the row, not a pixel offset, is what survives
                older messages mounting in later. -->
@@ -833,11 +842,23 @@
               <div
                 class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
               >
-                <div
-                  class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
-                >
-                  {userText(message)}
-                </div>
+                <!-- A quoted passage reads as a quote, not as part of the
+                     question: the envelope it travels in is a wire format for
+                     the model (see quote.ts), never something to show raw. -->
+                {#if parts.quote}
+                  <div
+                    class="mb-2 border-l-2 border-base-content/25 pl-2 whitespace-pre-wrap break-words text-[13px] leading-[1.55] text-left text-base-content/55"
+                  >
+                    {parts.quote}
+                  </div>
+                {/if}
+                {#if parts.text}
+                  <div
+                    class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+                  >
+                    {parts.text}
+                  </div>
+                {/if}
               </div>
             </div>
           </div>
