@@ -66,7 +66,23 @@
       node.nodeType === Node.ELEMENT_NODE
         ? (node as Element)
         : node.parentElement;
-    if (!anchor || !el.contains(anchor) || anchor.closest("[data-no-quote]")) {
+    if (!anchor || !el.contains(anchor)) {
+      return null;
+    }
+    // A selection drawn wholly inside one excluded region never reaches the
+    // test below — its common ancestor is that region's own text node.
+    if (anchor.closest("[data-no-quote]")) {
+      return null;
+    }
+    // Otherwise it can still cover nothing but excluded regions: dragging over
+    // a user bubble usually starts in the column around it, which puts the
+    // common ancestor outside. Strip those regions out of a copy of the range
+    // and see whether any text is left to quote.
+    const remainder = range.cloneContents();
+    for (const excluded of remainder.querySelectorAll("[data-no-quote]")) {
+      excluded.remove();
+    }
+    if (!(remainder.textContent ?? "").trim()) {
       return null;
     }
     // First client rect, not the bounding box: a multi-line selection anchors
