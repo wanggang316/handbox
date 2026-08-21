@@ -568,6 +568,24 @@ export const agentSessionActions = {
     }
   },
 
+  /**
+   * Fork a session at an assistant reply (steering): the backend clones the
+   * config row and truncates the transcript copy at that message. Inserts the
+   * new session at the top of the list; the caller navigates to it, which
+   * sets it current via the ?id= sync. Errors propagate for the caller to
+   * surface.
+   */
+  async forkSession(
+    id: UUID,
+    seq: number,
+    timestamp: number,
+  ): Promise<AgentSession> {
+    const session = await agentSessionApi.forkAgentSession(id, seq, timestamp);
+    const existing = Array.isArray(sessions) ? sessions : [];
+    sessions = [session, ...existing];
+    return session;
+  },
+
   /** Delete a session: remove from the list; clear current if it was current. */
   async deleteSession(id: UUID): Promise<void> {
     try {

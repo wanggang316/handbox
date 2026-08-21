@@ -13,16 +13,19 @@
 
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import { ChartNoAxesColumn, Check, Copy } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
+  import { ChartNoAxesColumn, Check, Copy, GitBranchPlus } from "@lucide/svelte";
   import {
     renderMarkdown,
     markdownInteractions,
     copyToClipboard,
+    showAppError,
   } from "$lib/utils";
   import { t } from "$lib/i18n";
   import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
   import type { HookRuleNotification } from "$lib/types";
   import type {
@@ -128,6 +131,35 @@
   }
 
   $effect(() => () => clearTimeout(copiedTimer));
+
+  // Steering: fork the session at an assistant reply and continue in the new
+  // session from that point. One fork at a time — the guard swallows double
+  // clicks while the backend copies the transcript.
+  let forkingIndex = $state<number | null>(null);
+
+  async function forkFrom(
+    index: number,
+    message: Extract<AgentMessage, { role: "assistant" }>,
+  ) {
+    if (forkingIndex !== null) {
+      return;
+    }
+    forkingIndex = index;
+    try {
+      // index + the message's own timestamp identify the cut; the backend
+      // rejects a stale pairing instead of cutting the wrong node.
+      const session = await agentSessionActions.forkSession(
+        sessionId,
+        index,
+        message.timestamp,
+      );
+      await goto(`/agent?id=${session.id}`);
+    } catch (error) {
+      showAppError(error, { fallbackMessage: t("agent.timeline.forkFailed") });
+    } finally {
+      forkingIndex = null;
+    }
+  }
 
   // Tool-call blocks keep the assistant content's source order, so parallel
   // calls render as cards in issue order, not completion order.
@@ -957,6 +989,24 @@
                         {:else}
                           <Copy size={14} />
                         {/if}
+                      </Button>
+                    </Tooltip>
+                  {/if}
+
+                  <!-- Steering: fork a new session ending at this reply. Hidden
+                       while a run is streaming — the transcript is mid-append
+                       and the cut point would be a moving target. -->
+                  {#if !runState.isRunning}
+                    <Tooltip content={t("agent.timeline.forkFromHere")}>
+                      <Button
+                        variant="clear"
+                        size="icon-sm"
+                        class="text-base-content/40 enabled:hover:text-base-content"
+                        ariaLabel={t("agent.timeline.forkFromHere")}
+                        disabled={forkingIndex !== null}
+                        onclick={() => forkFrom(i, message)}
+                      >
+                        <GitBranchPlus size={14} />
                       </Button>
                     </Tooltip>
                   {/if}

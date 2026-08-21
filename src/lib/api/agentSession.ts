@@ -177,6 +177,26 @@ export async function deleteAgentSession(sessionId: UUID): Promise<void> {
   return apiCall<void>("agent_session_delete", { sessionId });
 }
 
+/**
+ * Forks a session at an assistant reply (steering): the new session's
+ * transcript ends at that message, so the conversation can branch off in a
+ * different direction from there. `seq` is the message's index in the
+ * committed timeline and `timestamp` its own millisecond timestamp — the
+ * backend cross-checks both and rejects a stale view (e.g. after an in-run
+ * compaction) instead of cutting the wrong node.
+ */
+export async function forkAgentSession(
+  sessionId: UUID,
+  seq: number,
+  timestamp: number,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_fork", {
+    sessionId,
+    seq,
+    timestamp,
+  });
+}
+
 export async function getAgentSessionMessages(
   sessionId: UUID,
 ): Promise<AgentSessionMessage[]> {

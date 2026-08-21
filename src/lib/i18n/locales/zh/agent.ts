@@ -74,6 +74,8 @@ export const agentZh = {
   "agent.timeline.copy": "复制",
   "agent.timeline.copied": "已复制",
   "agent.timeline.quoteReply": "引用",
+  "agent.timeline.forkFromHere": "从此处新建会话",
+  "agent.timeline.forkFailed": "从此处新建会话失败",
 
   // Message navigation rail (MessageNavRail)
   "agent.nav.label": "消息导航",
