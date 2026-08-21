@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.5.5] - 2026-08-22
+
+### Added
+- Sessions still working show a breathing dot in the sidebar, so you can tell at
+  a glance which conversations are running without opening them.
+
+
 ## [0.5.4] - 2026-08-16
 
 ### Added
