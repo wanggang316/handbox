@@ -220,6 +220,7 @@ pub fn run() {
             agent_session_set_archived,
             agent_session_set_project,
             agent_session_delete,
+            agent_session_fork,
             agent_session_messages,
             // Agent projects: sessions grouped by working directory
             agent_project_create,
