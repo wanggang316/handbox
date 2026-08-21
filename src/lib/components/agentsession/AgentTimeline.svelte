@@ -264,7 +264,9 @@
         liveAssistantIndex >= 0),
   );
 
-  let messagesContainer: HTMLDivElement;
+  // $state so children reading it as a prop (the selection pill's viewport)
+  // see it once `bind:this` lands.
+  let messagesContainer = $state<HTMLDivElement>();
 
   function scrollToBottom() {
     if (messagesContainer) {
@@ -818,7 +820,15 @@
                older messages mounting in later. -->
           <!-- data-question marks it as a rail stop as well: the pin target on
                send, and where a tick jumps to. -->
-          <div class="flex justify-end" data-message-index={i} data-question>
+          <!-- data-no-quote: quoting is for what the agent said. The reader's
+               own words are already in the transcript above the composer, so
+               offering to quote them back is noise. -->
+          <div
+            class="flex justify-end"
+            data-message-index={i}
+            data-question
+            data-no-quote
+          >
             <div class="flex flex-col items-end">
               <div
                 class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
@@ -1033,9 +1043,14 @@
   </div>
 
   <!-- Selection affordance: anchored to `contentEl`, so only transcript text
-       (never the trailing spacer or the rail) can be quoted. -->
+       (never the trailing spacer or the rail) can be quoted, and kept inside
+       the scroller so it never lands under the window's drag region. -->
   {#if onQuote}
-    <SelectionReplyButton container={contentEl} onReply={onQuote} />
+    <SelectionReplyButton
+      container={contentEl}
+      viewport={messagesContainer}
+      onReply={onQuote}
+    />
   {/if}
 
   {#if showNavRail}

@@ -3,34 +3,41 @@
    * Floating "quote this" affordance for transcript text selections.
    *
    * Watches the document selection and, whenever it lands inside `container`,
-   * parks a small pill next to it; clicking hands the selected text to the
-   * composer. The text is captured when the pill appears, so a click never
-   * depends on the selection surviving the interaction.
+   * parks a small pill next to it; pressing it hands the selected text to the
+   * composer. The text is captured when the pill appears, so the action never
+   * depends on the selection surviving the press.
    */
   import { Reply } from "@lucide/svelte";
-  import { fly } from "svelte/transition";
   import { t } from "$lib/i18n";
 
   interface Props {
-    /** Selections outside this element are ignored (the transcript column). */
+    /**
+     * Selections outside this element are ignored (the transcript content).
+     * Anything under a `data-no-quote` ancestor is excluded as well.
+     */
     container: HTMLElement | undefined;
+    /**
+     * Visible region the pill must stay inside — the transcript scroller. The
+     * window's top 50px is a Tauri drag region (see TitleBar): a pill parked
+     * under it is dead, because macOS turns the press into a window drag, and a
+     * window drag neither clicks nor collapses the selection that keeps it up.
+     */
+    viewport: HTMLElement | undefined;
     onReply: (text: string) => void;
   }
 
-  let { container, onReply }: Props = $props();
+  let { container, viewport, onReply }: Props = $props();
 
-  // Distance between the selection and the pill, and the headroom the pill
-  // needs above the selection before it flips below it.
+  // Gap between the selection and the pill. Its height is fixed (`h-7`) rather
+  // than measured: placement has to be decided before the pill is in the DOM.
   const GAP = 8;
-  const FLIP_MARGIN = 44;
+  const PILL_HEIGHT = 28;
   // Right-edge clamp uses a fixed estimate: the pill is a two-element label of
   // known size, and measuring it would require a render pass per placement.
   const PILL_WIDTH = 120;
 
   let quoted = $state("");
-  let placement = $state<{ top: number; left: number; above: boolean } | null>(
-    null,
-  );
+  let placement = $state<{ top: number; left: number } | null>(null);
   let buttonEl = $state<HTMLButtonElement>();
 
   function hide() {
@@ -38,7 +45,8 @@
     quoted = "";
   }
 
-  // The live selection, or null unless it is a non-empty range inside `container`.
+  // The live selection, or null unless it is a non-empty range inside
+  // `container` and outside every `data-no-quote` region.
   function readSelection(): { text: string; rect: DOMRect } | null {
     const el = container;
     if (!el) {
@@ -58,7 +66,7 @@
       node.nodeType === Node.ELEMENT_NODE
         ? (node as Element)
         : node.parentElement;
-    if (!anchor || !el.contains(anchor)) {
+    if (!anchor || !el.contains(anchor) || anchor.closest("[data-no-quote]")) {
       return null;
     }
     // First client rect, not the bounding box: a multi-line selection anchors
@@ -67,32 +75,50 @@
     return { text, rect };
   }
 
+  // Above the selection when it fits inside the viewport, below it otherwise,
+  // then clamped so the pill can never leave the viewport on any edge.
+  function place(rect: DOMRect): { top: number; left: number } {
+    const bounds = viewport?.getBoundingClientRect();
+    const minTop = (bounds?.top ?? 0) + GAP;
+    const maxTop = (bounds?.bottom ?? window.innerHeight) - PILL_HEIGHT - GAP;
+    const above = rect.top - GAP - PILL_HEIGHT;
+    const top = above >= minTop ? above : rect.bottom + GAP;
+    return {
+      top: Math.min(Math.max(top, minTop), Math.max(minTop, maxTop)),
+      left: Math.min(
+        Math.max(GAP, rect.left),
+        Math.max(GAP, window.innerWidth - PILL_WIDTH - GAP),
+      ),
+    };
+  }
+
   function syncFromSelection() {
     const found = readSelection();
     if (!found) {
       hide();
       return;
     }
-    const { text, rect } = found;
-    const above = rect.top > FLIP_MARGIN;
-    quoted = text;
-    placement = {
-      top: above ? rect.top - GAP : rect.bottom + GAP,
-      left: Math.min(
-        Math.max(GAP, rect.left),
-        Math.max(GAP, window.innerWidth - PILL_WIDTH - GAP),
-      ),
-      above,
-    };
+    quoted = found.text;
+    placement = place(found.rect);
   }
 
-  function handleClick() {
+  function takeQuote() {
     const text = quoted;
     hide();
     window.getSelection()?.removeAllRanges();
     if (text) {
       onReply(text);
     }
+  }
+
+  // Pointer path: acting on pointerdown (rather than click) keeps the quote one
+  // press away even where a later click would be swallowed, and the
+  // preventDefault suppresses the mouse events that would move focus and
+  // collapse the selection. The click handler is the keyboard path — the two
+  // never both fire, since the pill unmounts on the first of them.
+  function handlePointerDown(event: PointerEvent) {
+    event.preventDefault();
+    takeQuote();
   }
 
   $effect(() => {
@@ -112,8 +138,16 @@
         syncFromSelection();
       }
     };
+    // Selection changes only ever take the pill away: showing it mid-drag would
+    // have it chase the pointer. This is also the backstop that keeps it from
+    // getting stuck — whatever collapses the selection also dismisses the pill.
+    const onSelectionChange = () => {
+      if (placement && !readSelection()) {
+        hide();
+      }
+    };
     // A new press starts a new interaction, so the pill goes away — except when
-    // the press is the click that consumes it.
+    // the press is the one consuming it.
     const onMouseDown = (event: MouseEvent) => {
       const target = event.target;
       if (target instanceof Node && buttonEl?.contains(target)) {
@@ -134,6 +168,7 @@
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("selectionchange", onSelectionChange);
     document.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll);
 
@@ -143,6 +178,7 @@
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("selectionchange", onSelectionChange);
       document.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onScroll);
     };
@@ -156,13 +192,10 @@
     bind:this={buttonEl}
     type="button"
     style={`top: ${placement.top}px; left: ${placement.left}px;`}
-    class={`fixed z-[var(--z-popover)] flex items-center gap-1.5 rounded-md border border-[var(--hairline)] bg-[var(--bg-card)] px-2.5 py-1.5 text-xs text-base-content/80 shadow-lg transition-colors hover:bg-base-300 ${
-      placement.above ? "-translate-y-full" : ""
-    }`}
+    class="fixed z-[var(--z-popover)] flex h-7 items-center gap-1.5 rounded-md border border-[var(--hairline)] bg-[var(--bg-card)] px-2.5 text-xs text-base-content/80 shadow-lg transition-colors hover:bg-base-300"
     aria-label={t("agent.timeline.quoteReply")}
-    onmousedown={(event) => event.preventDefault()}
-    onclick={handleClick}
-    transition:fly={{ y: placement.above ? 4 : -4, duration: 120 }}
+    onpointerdown={handlePointerDown}
+    onclick={takeQuote}
   >
     <Reply size={13} class="shrink-0" />
     <span>{t("agent.timeline.quoteReply")}</span>
