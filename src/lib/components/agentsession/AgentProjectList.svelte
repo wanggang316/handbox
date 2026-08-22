@@ -110,8 +110,8 @@
   );
 
   // Set when any fetch fails: rendering sessions without their projects would
-  // dump them all into "Ungrouped", so show an error bar with retry instead of
-  // the grouped list.
+  // dump them all into the ungrouped bucket, so show an error bar with retry
+  // instead of the grouped list.
   let loadError = $state(false);
 
   // Refetch agents/projects/sessions on every mount (retry reuses this).
@@ -1043,8 +1043,8 @@
             {@render projectGroup(bucket.project, bucket.sessions)}
           {:else}
             {@const collapsed = agentProjectCollapse.isCollapsed(bucket.key)}
-            <!-- Ungrouped: sessions attached to no project. No "+" — a session
-                 with no project is created from the sidebar's New chat. -->
+            <!-- Sessions attached to no project. No "+" here: a session with
+                 no project is created from the sidebar's New entry. -->
             <button
               class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
               aria-expanded={!collapsed}

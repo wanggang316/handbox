@@ -168,7 +168,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.loadFailed": "Failed to load list",
   "agent.list.emptyHint": "No sessions yet — start one from Agents",
   "agent.list.noChats": "No chats",
-  "agent.list.ungrouped": "Ungrouped",
+  "agent.list.ungrouped": "Chats",
   "agent.list.newProject": "New project",
   "agent.list.newSession": "New session",
   "agent.list.newSessionInProject": "New session in project {name}",

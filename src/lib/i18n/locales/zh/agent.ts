@@ -158,7 +158,7 @@ export const agentZh = {
   "agent.list.loadFailed": "列表加载失败",
   "agent.list.emptyHint": "还没有会话——从 Agents 开始一个",
   "agent.list.noChats": "No chats",
-  "agent.list.ungrouped": "未分组",
+  "agent.list.ungrouped": "对话",
   "agent.list.newProject": "新建项目",
   "agent.list.newSession": "新建会话",
   "agent.list.newSessionInProject": "在项目 {name} 中新建会话",

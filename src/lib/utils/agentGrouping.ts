@@ -3,7 +3,7 @@
  *
  * Hierarchy: the top level is the project (`session.projectId`); every project
  * is a bucket, and sessions with no or dangling project fall into a trailing
- * "Ungrouped" bucket. The source agent is not a level — it rides along on the
+ * ungrouped bucket. The source agent is not a level — it rides along on the
  * session row as an icon — so a project shows all of its work in one place
  * regardless of which agent produced it.
  *
@@ -19,7 +19,7 @@
  *    must land at the top, not below every populated one.
  *  - Empty projects are kept: a project the user just created has to be visible
  *    (and clickable) before it holds anything.
- *  - The "Ungrouped" bucket always comes last — even when it holds a pin, so the
+ *  - The ungrouped bucket always comes last — even when it holds a pin, so the
  *    hierarchy's shape never depends on pin state — and is absent when empty.
  *  - Archived sessions are the caller's business: pass only the sessions that
  *    belong in the tree (see [`partitionArchivedSessions`]).
@@ -30,13 +30,13 @@ import type { Timestamp } from "../types";
 import type { AgentSession } from "../types/agentSession";
 import type { AgentProject } from "../types/agentProject";
 
-/** Reserved key for the "Ungrouped" bucket (never collides with a UUID). */
+/** Reserved key for the ungrouped bucket (never collides with a UUID). */
 export const UNGROUPED_BUCKET_KEY = "__ungrouped__";
 
 export interface AgentProjectBucket {
   /** Stable key for collapse state / keyed each: project.id or `UNGROUPED_BUCKET_KEY`. */
   key: string;
-  /** Owning project; null means the "Ungrouped" bucket. */
+  /** Owning project; null means the ungrouped bucket. */
   project: AgentProject | null;
   /** Members, pinned first then activity desc. */
   sessions: AgentSession[];
@@ -96,8 +96,8 @@ function bucketActivityKey(bucket: AgentProjectBucket): Timestamp {
  * Group sessions into sorted Project → Session buckets.
  *
  *  - Every project gets a bucket, sessions or not.
- *  - Sessions with an empty or dangling projectId go to "Ungrouped", which is
- *    appended last and omitted when it would be empty.
+ *  - Sessions with an empty or dangling projectId go to the ungrouped bucket,
+ *    which is appended last and omitted when it would be empty.
  *  - Buckets holding a pinned session sort first, then by latest activity desc,
  *    ties by project name asc.
  *
