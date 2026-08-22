@@ -346,6 +346,23 @@ export const agentSessionActions = {
     }
   },
 
+  /**
+   * Move a session into a project (`null` detaches it). Not optimistic: the
+   * backend rejects a missing project, and a row that jumped to a group it never
+   * reached would be worse than a short wait.
+   */
+  async setProject(id: UUID, projectId: UUID | null): Promise<void> {
+    try {
+      applySession(
+        id,
+        await agentSessionApi.setAgentSessionProject(id, projectId),
+      );
+    } catch (error) {
+      console.error("Failed to set agent session project:", error);
+      throw error;
+    }
+  },
+
   /** Delete a session: remove from the list; clear current if it was current. */
   async deleteSession(id: UUID): Promise<void> {
     try {
