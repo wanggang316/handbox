@@ -75,6 +75,11 @@ pub struct HandBoxAgentSessionConfig {
     /// of manual-execution MCP servers. Populated by agent_run; empty default =
     /// no MCP approval gating (the jobs/tests path).
     pub mcp_approval_tools: HashSet<String>,
+    /// The session's `tool_execution_mode` resolved to a bool: `true` only for
+    /// an explicit `"auto"`, which drops the approval gate on the dangerous
+    /// built-ins (write/edit/bash). Unset / `"manual"` / anything unknown keeps
+    /// the gate, so the safe mode is also the fallback.
+    pub auto_tool_execution: bool,
     /// The user's enabled hook rules, as a snapshot taken when this config is
     /// assembled. Empty = no rule extension is registered at all. Populated by
     /// the callers that have a database handle; see
@@ -231,7 +236,8 @@ pub fn build_agent_session(
     // and always-allow consent persists across turns.
     session.register_extension(Arc::new(
         PermissionExtension::new(config.session_id.clone(), approval)
-            .with_approval_tools(config.mcp_approval_tools.clone()),
+            .with_approval_tools(config.mcp_approval_tools.clone())
+            .with_dangerous_gate(!config.auto_tool_execution),
     ));
 
     Ok(session)
@@ -337,6 +343,9 @@ pub fn config_from_rows(
         enabled_tools: session.enabled_tools.clone(),
         // agent_run fills this from manual-server MCP bindings; empty otherwise.
         mcp_approval_tools: HashSet::new(),
+        // Only an explicit "auto" lifts the approval gate; a legacy row with no
+        // mode keeps prompting, as it did before the mode was honoured.
+        auto_tool_execution: session.tool_execution_mode.as_deref() == Some("auto"),
         // Filled by callers holding a database handle; empty here so a config
         // built for a test or a probe carries no rules.
         hook_rules: Vec::new(),
@@ -372,6 +381,8 @@ mod tests {
             thinking_level: None,
             enabled_tools: vec![],
             mcp_approval_tools: HashSet::new(),
+            // Gated by default, like a session that never chose a mode.
+            auto_tool_execution: false,
             hook_rules: Vec::new(),
         }
     }
@@ -858,6 +869,33 @@ mod tests {
         assert_eq!(config.temperature, Some(0.5));
         assert_eq!(config.max_tokens, Some(1024));
         assert_eq!(config.thinking_level, Some("high".to_string()));
+    }
+
+    /// Only an explicit `"auto"` lifts the approval gate. `"manual"`, a legacy
+    /// row with no mode, and an unknown value all keep it — the safe mode is the
+    /// fallback, so honouring the column cannot silently un-gate old sessions.
+    #[test]
+    fn config_from_rows_maps_only_auto_mode_to_auto_tool_execution() {
+        let data = TempDir::new().unwrap();
+        let provider = sample_provider_row();
+
+        for (mode, expected) in [
+            (Some("auto"), true),
+            (Some("manual"), false),
+            (Some("something-else"), false),
+            (None, false),
+        ] {
+            let mut session = sample_session_row(Some("gpt-4o"), Some("/tmp/project"));
+            session.tool_execution_mode = mode.map(str::to_string);
+
+            let config = config_from_rows(&session, &provider, data.path().to_path_buf())
+                .expect("rows assemble into a config");
+
+            assert_eq!(
+                config.auto_tool_execution, expected,
+                "tool_execution_mode {mode:?} must map to auto_tool_execution={expected}"
+            );
+        }
     }
 
     /// A negative `max_tokens` cannot become a `u32`; `try_from` drops it to
