@@ -17,7 +17,6 @@
     ChevronRight,
     Copy,
     Folder,
-    FolderOpen,
     FolderPlus,
     FolderInput,
     Loader2,
@@ -918,11 +917,6 @@
     <div
       class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-[12px] leading-[18px]"
     >
-      {#if collapsed}
-        <Folder size={14} class="flex-shrink-0 text-base-content/60" />
-      {:else}
-        <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
-      {/if}
       <span data-group-control class="flex-1 min-w-0">
         <input
           data-project-id={project.id}
@@ -945,11 +939,6 @@
       onkeydown={(event) => handleGroupHeaderKeydown(event, project.id)}
       oncontextmenu={(event) => handleProjectContextMenu(event, project)}
     >
-      {#if collapsed}
-        <Folder size={14} class="flex-shrink-0 text-base-content/60" />
-      {:else}
-        <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
-      {/if}
       <span class="truncate flex-1">{project.name}</span>
       <!-- Hover "+" opens the agent picker; the project is already decided. -->
       <span data-group-control class="flex items-center flex-shrink-0">
@@ -1057,10 +1046,6 @@
               aria-expanded={!collapsed}
               onclick={() => agentProjectCollapse.toggle(bucket.key)}
             >
-              <MessagesSquare
-                size={14}
-                class="flex-shrink-0 text-base-content/60"
-              />
               <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
               <ChevronRight
                 size={14}
@@ -1089,7 +1074,6 @@
             aria-expanded={archivedExpanded}
             onclick={() => (archivedExpanded = !archivedExpanded)}
           >
-            <Archive size={14} class="flex-shrink-0 text-base-content/60" />
             <span class="truncate flex-1">{t("agent.list.archived")}</span>
             <span class="flex-shrink-0 text-[11px] text-base-content/45">
               {archivedSessions.length}
