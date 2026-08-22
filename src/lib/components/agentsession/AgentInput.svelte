@@ -1107,7 +1107,7 @@
                           <span
                             class="min-w-0 flex-1 truncate text-sm text-base-content"
                           >
-                            {server.displayName ?? server.name}
+                            {server.displayName || server.name}
                           </span>
                           {#if bound}
                             <Check size={14} class="shrink-0 text-primary" />
