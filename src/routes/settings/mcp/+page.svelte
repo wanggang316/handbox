@@ -13,11 +13,8 @@
     UpdateMcpServerRequest,
   } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
-  import {
-    Puzzle,
-    ChevronsUpDown,
-    Settings2,
-  } from "@lucide/svelte";
+  import { ChevronsUpDown, Settings2 } from "@lucide/svelte";
+  import McpIcon from "$lib/components/ui/McpIcon.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import { t } from "$lib/i18n";
 
@@ -190,7 +187,7 @@
 
       {#if !mcpState.isLoading && mcpState.servers.length === 0}
         <div class="p-8 text-center">
-          <Puzzle class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
+          <McpIcon class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
           <p class="text-base text-base-content/70 mb-4">
             {t("provider.mcpEmptyHint")}
           </p>
