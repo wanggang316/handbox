@@ -46,7 +46,9 @@
     groupSessionsByProject,
     partitionArchivedSessions,
     sessionActivityKey,
+    UNGROUPED_BUCKET_KEY,
   } from "$lib/utils/agentGrouping";
+  import type { AgentProjectBucket } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
   import { normalizeError } from "$lib/utils/error";
   import { onDestroy, onMount } from "svelte";
@@ -73,6 +75,25 @@
   const archivedSessions = $derived(partitioned.archived);
   const isEmpty = $derived(
     buckets.length === 0 && archivedSessions.length === 0,
+  );
+
+  // The two halves render under separate headings, so they are split here
+  // rather than branched on inside one loop.
+  const projectBuckets = $derived(
+    buckets.filter(
+      (bucket): bucket is AgentProjectBucket & { project: AgentProject } =>
+        bucket.project !== null,
+    ),
+  );
+  const chatsBucket = $derived(
+    buckets.find((bucket) => bucket.project === null),
+  );
+
+  // Collapse key of the Projects heading, which folds every project at once.
+  // Reserved like the ungrouped bucket's, so it cannot collide with a UUID.
+  const PROJECTS_SECTION_KEY = "__projects__";
+  const projectsCollapsed = $derived(
+    agentProjectCollapse.isCollapsed(PROJECTS_SECTION_KEY),
   );
 
   // The source agent is no longer a grouping level: each row wears its agent's
@@ -208,13 +229,19 @@
     return undefined;
   });
 
-  // Auto-expand the active session's group. The collapse read goes through
-  // untrack: the effect only tracks activeBucketKey, so manually collapsing the
-  // active group is not immediately reverted.
+  // Auto-expand the active session's group, and the Projects section holding
+  // it. The collapse reads go through untrack: the effect only tracks
+  // activeBucketKey, so manually collapsing the active group is not
+  // immediately reverted.
   $effect(() => {
     const key = activeBucketKey;
     if (key) {
-      untrack(() => agentProjectCollapse.expand(key));
+      untrack(() => {
+        agentProjectCollapse.expand(key);
+        if (key !== UNGROUPED_BUCKET_KEY) {
+          agentProjectCollapse.expand(PROJECTS_SECTION_KEY);
+        }
+      });
     }
   });
 
@@ -797,6 +824,19 @@
   }
 </script>
 
+<!-- Collapse indicator, riding right after a group's name rather than at the
+     row's far edge — the name is what it belongs to, and the right edge is the
+     "+"'s. Hidden until the host row is hovered or focused; the row itself owns
+     the click, so this stays a plain glyph. -->
+{#snippet collapseChevron(collapsed: boolean, revealClass: string)}
+  <ChevronRight
+    size={14}
+    class="flex-shrink-0 opacity-0 text-base-content/40 transition-[transform,opacity] duration-[var(--dur-fast)] {revealClass} {collapsed
+      ? ''
+      : 'rotate-90'}"
+  />
+{/snippet}
+
 {#snippet sessionRow(session: AgentSession)}
   {#if renamingSessionId === session.id}
     <!-- Rename input: Enter/blur commits, Escape cancels. -->
@@ -939,11 +979,15 @@
       onkeydown={(event) => handleGroupHeaderKeydown(event, project.id)}
       oncontextmenu={(event) => handleProjectContextMenu(event, project)}
     >
-      <span class="truncate flex-1">{project.name}</span>
+      <span class="truncate min-w-0">{project.name}</span>
+      {@render collapseChevron(
+        collapsed,
+        "group-hover/proj:opacity-100 group-focus-within/proj:opacity-100",
+      )}
       <!-- Hover "+" opens the agent picker; the project is already decided. -->
-      <span data-group-control class="flex items-center flex-shrink-0">
+      <span data-group-control class="ml-auto flex items-center flex-shrink-0">
         <button
-          class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+          class="-mr-0.5 p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
           title={t("agent.list.newSession")}
           aria-label={t("agent.list.newSessionInProject", {
             name: project.name,
@@ -960,12 +1004,6 @@
           <Plus size={14} />
         </button>
       </span>
-      <ChevronRight
-        size={14}
-        class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {collapsed
-          ? ''
-          : 'rotate-90'}"
-      />
     </div>
   {/if}
   {#if !collapsed && sessions.length > 0}
@@ -986,29 +1024,42 @@
     </div>
   {/if}
 
-  <!-- List heading + the only entry point for creating a project.
-       px-4 and the button's -mr-0.5 reproduce a group row's insets (the scroll
-       container's px-2 plus the row's own px-2, less the button's own padding),
-       so the label sits in the group-name column and the "+" in the chevron
-       column. -->
-  <div class="flex-shrink-0 flex items-center gap-1.5 px-4 pt-2 pb-0.5">
+  <!-- Section heading: folds every project away, and is the only entry point
+       for creating one. px-4 and the button's -mr-0.5 reproduce a group row's
+       insets (the scroll container's px-2 plus the row's own px-2, less the
+       button's own padding), so the label and the "+" share their columns with
+       the project rows below. -->
+  <div
+    class="group/head flex-shrink-0 flex items-center gap-1.5 px-4 pt-2 pb-0.5 cursor-default select-none"
+    role="button"
+    tabindex="0"
+    aria-expanded={!projectsCollapsed}
+    onclick={(event) => handleGroupHeaderClick(event, PROJECTS_SECTION_KEY)}
+    onkeydown={(event) => handleGroupHeaderKeydown(event, PROJECTS_SECTION_KEY)}
+  >
     <span
-      class="flex-1 truncate text-[11px] leading-[16px] font-medium text-base-content/40"
+      class="truncate min-w-0 text-[11px] leading-[16px] font-medium text-base-content/40"
     >
       {t("agent.list.heading")}
     </span>
-    <button
-      class="-mr-0.5 p-0.5 rounded text-base-content/50 hover:text-base-content hover:bg-base-content/10"
-      title={t("agent.list.newProject")}
-      aria-label={t("agent.list.newProject")}
-      onclick={handleNewProject}
-    >
-      <Plus size={14} />
-    </button>
+    {@render collapseChevron(
+      projectsCollapsed,
+      "group-hover/head:opacity-100 group-focus-within/head:opacity-100",
+    )}
+    <span data-group-control class="ml-auto flex items-center flex-shrink-0">
+      <button
+        class="-mr-0.5 p-0.5 rounded text-base-content/50 hover:text-base-content hover:bg-base-content/10"
+        title={t("agent.list.newProject")}
+        aria-label={t("agent.list.newProject")}
+        onclick={handleNewProject}
+      >
+        <Plus size={14} />
+      </button>
+    </span>
   </div>
 
   <!-- Grouped list (Project → Session; sessions without a project fall into the
-       trailing Ungrouped group). -->
+       trailing Chats group). -->
   <div
     bind:this={listEl}
     class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-1"
@@ -1022,7 +1073,7 @@
       </div>
     {:else if loadError}
       <!-- Partial load failure: skip grouped rendering to avoid dumping every
-           session into Ungrouped. -->
+           session into the ungrouped bucket. -->
       <div class="px-2 py-1 text-[12px] leading-[18px] text-error">
         {t("agent.list.loadFailed")}
       </div>
@@ -1037,57 +1088,60 @@
         {t("agent.list.emptyHint")}
       </div>
     {:else}
-      {#each buckets as bucket (bucket.key)}
+      {#if !projectsCollapsed}
+        <div class="space-y-1.5" transition:slide={{ duration: 160 }}>
+          {#each projectBuckets as bucket (bucket.key)}
+            <div class="space-y-0.5">
+              {@render projectGroup(bucket.project, bucket.sessions)}
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      {#if chatsBucket}
+        {@const collapsed = agentProjectCollapse.isCollapsed(chatsBucket.key)}
+        {@const chatSessions = chatsBucket.sessions}
+        <!-- Sessions attached to no project. No "+" here: a session with no
+             project is created from the sidebar's New entry. -->
         <div class="space-y-0.5">
-          {#if bucket.project}
-            {@render projectGroup(bucket.project, bucket.sessions)}
-          {:else}
-            {@const collapsed = agentProjectCollapse.isCollapsed(bucket.key)}
-            <!-- Sessions attached to no project. No "+" here: a session with
-                 no project is created from the sidebar's New entry. -->
-            <button
-              class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
-              aria-expanded={!collapsed}
-              onclick={() => agentProjectCollapse.toggle(bucket.key)}
-            >
-              <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
-              <ChevronRight
-                size={14}
-                class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {collapsed
-                  ? ''
-                  : 'rotate-90'}"
-              />
-            </button>
-            {#if !collapsed}
-              <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
-                {#each bucket.sessions as session (session.id)}
-                  {@render sessionRow(session)}
-                {/each}
-              </div>
-            {/if}
+          <button
+            class="group/chats w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
+            aria-expanded={!collapsed}
+            onclick={() => agentProjectCollapse.toggle(chatsBucket.key)}
+          >
+            <span class="truncate min-w-0">{t("agent.list.ungrouped")}</span>
+            {@render collapseChevron(
+              collapsed,
+              "group-hover/chats:opacity-100 group-focus-within/chats:opacity-100",
+            )}
+          </button>
+          {#if !collapsed}
+            <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
+              {#each chatSessions as session (session.id)}
+                {@render sessionRow(session)}
+              {/each}
+            </div>
           {/if}
         </div>
-      {/each}
+      {/if}
 
       <!-- Archived sessions: flat, out of the Project tree, collapsed by
            default and absent entirely while nothing is archived. -->
       {#if archivedSessions.length > 0}
         <div class="space-y-0.5">
           <button
-            class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
+            class="group/arch w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
             aria-expanded={archivedExpanded}
             onclick={() => (archivedExpanded = !archivedExpanded)}
           >
-            <span class="truncate flex-1">{t("agent.list.archived")}</span>
-            <span class="flex-shrink-0 text-[11px] text-base-content/45">
+            <span class="truncate min-w-0">{t("agent.list.archived")}</span>
+            {@render collapseChevron(
+              !archivedExpanded,
+              "group-hover/arch:opacity-100 group-focus-within/arch:opacity-100",
+            )}
+            <span class="ml-auto flex-shrink-0 text-[11px] text-base-content/45">
               {archivedSessions.length}
             </span>
-            <ChevronRight
-              size={14}
-              class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {archivedExpanded
-                ? 'rotate-90'
-                : ''}"
-            />
           </button>
           {#if archivedExpanded}
             <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
