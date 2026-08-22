@@ -163,7 +163,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
 
   // Project / session list (AgentProjectList)
   "agent.list.renamePlaceholder": "Enter a new name",
-  "agent.list.heading": "Sessions",
+  "agent.list.heading": "Projects",
   "agent.list.pickProjectDir": "Choose a project directory",
   "agent.list.loadFailed": "Failed to load list",
   "agent.list.emptyHint": "No sessions yet — start one from Agents",

@@ -987,7 +987,7 @@
   {/if}
 
   <!-- List heading + the only entry point for creating a project. -->
-  <div class="flex-shrink-0 flex items-center gap-1 px-2 pt-2 pb-0.5">
+  <div class="flex-shrink-0 flex items-center gap-1.5 px-2 pt-2 pb-0.5">
     <span
       class="flex-1 truncate text-[11px] leading-[16px] font-medium text-base-content/40"
     >
@@ -999,8 +999,11 @@
       aria-label={t("agent.list.newProject")}
       onclick={handleNewProject}
     >
-      <FolderPlus size={14} />
+      <Plus size={14} />
     </button>
+    <!-- Stands in for the group rows' chevron column, so this "+" lands in the
+         same column as the per-project one below it. -->
+    <span class="w-3.5 flex-shrink-0" aria-hidden="true"></span>
   </div>
 
   <!-- Grouped list (Project → Session; sessions without a project fall into the
