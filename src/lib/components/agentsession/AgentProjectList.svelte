@@ -17,7 +17,8 @@
     ChevronRight,
     Copy,
     Folder,
-    FolderOpen,
+    FolderPlus,
+    FolderInput,
     Loader2,
     MessagesSquare,
     PencilLine,
@@ -42,15 +43,17 @@
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { t } from "$lib/i18n";
   import {
-    groupSessionsByAgent,
+    groupSessionsByProject,
     partitionArchivedSessions,
     sessionActivityKey,
+    UNGROUPED_BUCKET_KEY,
   } from "$lib/utils/agentGrouping";
-  import type { AgentSessionBucket } from "$lib/utils/agentGrouping";
+  import type { AgentProjectBucket } from "$lib/utils/agentGrouping";
   import { formatRelativeTime } from "$lib/utils/date";
   import { normalizeError } from "$lib/utils/error";
   import { onDestroy, onMount } from "svelte";
   import type { AgentSession } from "$lib/types";
+  import type { Agent } from "$lib/types/agent";
   import type { AgentProject } from "$lib/types/agentProject";
 
   interface Props {
@@ -59,35 +62,65 @@
 
   let { activeId = "" }: Props = $props();
 
-  // Grouping and ordering (Agent → Project → Session) are fully delegated to
-  // the selector; the component does not re-implement them. Archived sessions
-  // are split off first — they render flat in their own group at the bottom
-  // rather than anywhere in the tree.
+  // Grouping and ordering (Project → Session) are fully delegated to the
+  // selector; the component does not re-implement them. Archived sessions are
+  // split off first — they render flat in their own group at the bottom rather
+  // than anywhere in the tree.
   const partitioned = $derived(
     partitionArchivedSessions(agentSessionState.sessions),
   );
   const buckets = $derived(
-    groupSessionsByAgent(
-      agentState.agents,
-      agentProjectState.projects,
-      partitioned.active,
-    ),
+    groupSessionsByProject(agentProjectState.projects, partitioned.active),
   );
   const archivedSessions = $derived(partitioned.archived);
   const isEmpty = $derived(
     buckets.length === 0 && archivedSessions.length === 0,
   );
 
+  // The two halves render under separate headings, so they are split here
+  // rather than branched on inside one loop.
+  const projectBuckets = $derived(
+    buckets.filter(
+      (bucket): bucket is AgentProjectBucket & { project: AgentProject } =>
+        bucket.project !== null,
+    ),
+  );
+  const chatsBucket = $derived(
+    buckets.find((bucket) => bucket.project === null),
+  );
+
+  // Collapse key of the Projects heading, which folds every project at once.
+  // Reserved like the ungrouped bucket's, so it cannot collide with a UUID.
+  const PROJECTS_SECTION_KEY = "__projects__";
+  const projectsCollapsed = $derived(
+    agentProjectCollapse.isCollapsed(PROJECTS_SECTION_KEY),
+  );
+
+  // The source agent is no longer a grouping level: each row wears its agent's
+  // icon instead, resolved through this lookup.
+  const agentById = $derived.by(() => {
+    const map = new Map<string, Agent>();
+    for (const agent of agentState.agents) {
+      if (agent.id) map.set(agent.id, agent);
+    }
+    return map;
+  });
+
+  // Agents offered when creating a session inside a project. `workingDirMode:
+  // "none"` agents (built-in chat) are pure dialog — the backend drops the
+  // project on instantiation — so offering them here would silently produce an
+  // ungrouped session.
+  const projectCapableAgents = $derived(
+    agentState.agents.filter(
+      (agent): agent is Agent & { id: string } =>
+        !!agent.id && agent.workingDirMode !== "none",
+    ),
+  );
+
   // The Archived group starts collapsed on every load and is deliberately kept
   // out of `agentProjectCollapse` (whose contract is "missing = expanded", and
   // whose persistence would defeat the point of tucking sessions away).
   let archivedExpanded = $state(false);
-
-  // A project can appear under multiple agent buckets, so collapse state is
-  // keyed by bucket+project to keep each occurrence independent.
-  function projectCollapseKey(bucketKey: string, projectId: string): string {
-    return `${bucketKey}::${projectId}`;
-  }
 
   // Show a loading placeholder until all three fetches settle, to avoid a
   // flash of empty state or mis-bucketing when sessions arrive before agents/
@@ -97,9 +130,9 @@
       agentSessionState.sessions.length > 0,
   );
 
-  // Set when any fetch fails: rendering with sessions but without agents/
-  // projects would mis-bucket them into "Chats", so show an error bar with
-  // retry instead of the grouped list.
+  // Set when any fetch fails: rendering sessions without their projects would
+  // dump them all into the ungrouped bucket, so show an error bar with retry
+  // instead of the grouped list.
   let loadError = $state(false);
 
   // Refetch agents/projects/sessions on every mount (retry reuses this).
@@ -184,38 +217,30 @@
   // A pending hover timer must not fire into a torn-down component.
   onDestroy(() => cancelHoverCard());
 
-  // Location of the active session (bucket key + optional project collapse
-  // key); undefined when there is no active session or no match.
-  const activeLocation = $derived.by(() => {
+  // Collapse key of the group holding the active session; undefined when there
+  // is no active session or no match.
+  const activeBucketKey = $derived.by(() => {
     if (!activeId) return undefined;
     for (const bucket of buckets) {
-      for (const child of bucket.children) {
-        if (child.kind === "session" && child.session.id === activeId) {
-          return { bucketKey: bucket.key, projectKey: undefined };
-        }
-        if (
-          child.kind === "project" &&
-          child.sessions.some((s) => s.id === activeId)
-        ) {
-          return {
-            bucketKey: bucket.key,
-            projectKey: projectCollapseKey(bucket.key, child.project.id),
-          };
-        }
+      if (bucket.sessions.some((session) => session.id === activeId)) {
+        return bucket.key;
       }
     }
     return undefined;
   });
 
-  // Auto-expand the active session's bucket and project group. Collapse reads
-  // go through untrack: the effect only tracks activeLocation, so manually
-  // collapsing the active group is not immediately reverted.
+  // Auto-expand the active session's group, and the Projects section holding
+  // it. The collapse reads go through untrack: the effect only tracks
+  // activeBucketKey, so manually collapsing the active group is not
+  // immediately reverted.
   $effect(() => {
-    const loc = activeLocation;
-    if (loc) {
+    const key = activeBucketKey;
+    if (key) {
       untrack(() => {
-        agentProjectCollapse.expand(loc.bucketKey);
-        if (loc.projectKey) agentProjectCollapse.expand(loc.projectKey);
+        agentProjectCollapse.expand(key);
+        if (key !== UNGROUPED_BUCKET_KEY) {
+          agentProjectCollapse.expand(PROJECTS_SECTION_KEY);
+        }
       });
     }
   });
@@ -366,8 +391,8 @@
   }
 
   // One contextMenu state discriminated by kind: only one menu can be on
-  // screen (a new right-click overwrites the old), so session and project
-  // menus are mutually exclusive by construction.
+  // screen (a new right-click or "+" overwrites the old), so the four menus are
+  // mutually exclusive by construction.
   interface SessionContextMenu {
     kind: "session";
     session: AgentSession;
@@ -380,7 +405,25 @@
     x: number;
     y: number;
   }
-  type ContextMenu = SessionContextMenu | ProjectContextMenu;
+  /** Agent picker for the project header's "+" (the project is already decided). */
+  interface AgentPickerMenu {
+    kind: "agentPicker";
+    project: AgentProject;
+    x: number;
+    y: number;
+  }
+  /** Project picker for a session's "move to project". */
+  interface MoveMenu {
+    kind: "move";
+    session: AgentSession;
+    x: number;
+    y: number;
+  }
+  type ContextMenu =
+    | SessionContextMenu
+    | ProjectContextMenu
+    | AgentPickerMenu
+    | MoveMenu;
 
   let contextMenu = $state<ContextMenu | null>(null);
 
@@ -408,6 +451,12 @@
       x: event.clientX,
       y: event.clientY,
     };
+  }
+
+  /** Anchor a menu under a control (the "+" button) rather than at the cursor. */
+  function menuAnchorFor(event: MouseEvent): { x: number; y: number } {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: rect.left, y: rect.bottom + 4 };
   }
 
   // Close the menu on click or right-click outside it (row right-clicks stopPropagation).
@@ -531,6 +580,74 @@
     }
   }
 
+  // --- Project membership ---------------------------------------------------
+
+  /** System directory picker; a cancel (non-string result) yields null. */
+  async function pickDirectory(): Promise<string | null> {
+    const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+    const picked = await openDialog({
+      directory: true,
+      title: t("agent.list.pickProjectDir"),
+    });
+    return typeof picked === "string" ? picked : null;
+  }
+
+  // Create a project from a picked directory (the backend is get-or-create by
+  // canonical path, so re-picking an existing one just reveals it).
+  async function handleNewProject() {
+    contextMenu = null;
+    createErrorMessage = null;
+    try {
+      const picked = await pickDirectory();
+      if (!picked) return;
+      const project = await agentProjectActions.createProject(picked);
+      agentProjectCollapse.expand(project.id);
+    } catch (error) {
+      console.error("Failed to create agent project:", error);
+      const normalized = normalizeError(
+        error,
+        t("agent.list.createProjectFailed"),
+      );
+      createErrorMessage = normalized.hint ?? normalized.message;
+    }
+  }
+
+  // Move a session between groups. The backend only rewrites the grouping — the
+  // session keeps running in the directory it always did.
+  async function moveSessionToProject(
+    session: AgentSession,
+    projectId: string | null,
+  ) {
+    contextMenu = null;
+    createErrorMessage = null;
+    try {
+      await agentSessionActions.setProject(session.id, projectId);
+      if (projectId) agentProjectCollapse.expand(projectId);
+    } catch (error) {
+      console.error("Failed to move agent session:", error);
+      const normalized = normalizeError(error, t("agent.list.moveFailed"));
+      createErrorMessage = normalized.hint ?? normalized.message;
+    }
+  }
+
+  async function moveSessionToNewProject(session: AgentSession) {
+    contextMenu = null;
+    createErrorMessage = null;
+    try {
+      const picked = await pickDirectory();
+      if (!picked) return;
+      const project = await agentProjectActions.createProject(picked);
+      await agentSessionActions.setProject(session.id, project.id);
+      agentProjectCollapse.expand(project.id);
+    } catch (error) {
+      console.error("Failed to move agent session to a new project:", error);
+      const normalized = normalizeError(error, t("agent.list.moveFailed"));
+      createErrorMessage = normalized.hint ?? normalized.message;
+    }
+  }
+
+  // --- Project rename / delete ----------------------------------------------
+
   // Project rename mirrors session rename: state keyed by project id so the
   // input follows its header through reorders and commits target renamingProjectId.
   let renamingProjectId = $state("");
@@ -605,11 +722,10 @@
     }
   }
 
-  // Delete project: the confirm text carries the real member-session count
-  // (snapshotted across all agents before confirming); cancel has zero side
-  // effects. On confirm the backend aborts then cascades, the store removes
-  // member sessions, per-session run state is cleared with tombstones, and an
-  // active member session navigates back to the landing page.
+  // Delete project: the confirm text carries the real member-session count;
+  // cancel has zero side effects. On confirm the backend aborts then cascades,
+  // the store removes member sessions, per-session run state is cleared with
+  // tombstones, and an active member session navigates back to the landing page.
   async function handleProjectDelete() {
     if (contextMenu?.kind !== "project") {
       contextMenu = null;
@@ -677,46 +793,17 @@
     agentProjectCollapse.toggle(groupId);
   }
 
-  // Non-blocking inline error bar shared by session-create and project-delete
-  // failures (prefers the AppError hint; cleared on the next attempt).
+  // Non-blocking inline error bar shared by session-create, move and
+  // project-create/delete failures (prefers the AppError hint; cleared on the
+  // next attempt).
   let createErrorMessage = $state<string | null>(null);
 
-  // Bucket-header "+": create a session (no project) from the agent definition;
-  // the backend resolves capabilities and working-dir policy from it.
-  async function handleCreateSessionForAgent(
-    event: MouseEvent,
-    bucket: AgentSessionBucket,
-  ) {
-    event.stopPropagation();
-    const agentId = bucket.agent?.id;
-    if (!agentId) return; // The "Chats" bucket has no source agent, so no create entry.
-    contextMenu = null;
-    createErrorMessage = null;
-    try {
-      const session =
-        await agentSessionActions.createSessionFromDefinition(agentId);
-      agentProjectCollapse.expand(bucket.key);
-      goto(`/agent?id=${session.id}`);
-    } catch (error) {
-      console.error("Failed to create agent session:", error);
-      const normalized = normalizeError(
-        error,
-        t("agent.list.createSessionFailed"),
-      );
-      createErrorMessage = normalized.hint ?? normalized.message;
-    }
-  }
-
-  // Project-header "+": create a session from the agent definition attached to
+  // Project-header "+": pick the agent, then instantiate a session attached to
   // the project; the backend overrides the working dir with project.path.
   async function handleCreateSessionInProject(
-    event: MouseEvent,
-    bucket: AgentSessionBucket,
     project: AgentProject,
+    agentId: string,
   ) {
-    event.stopPropagation();
-    const agentId = bucket.agent?.id;
-    if (!agentId) return;
     contextMenu = null;
     createErrorMessage = null;
     try {
@@ -724,8 +811,7 @@
         agentId,
         { projectId: project.id },
       );
-      agentProjectCollapse.expand(bucket.key);
-      agentProjectCollapse.expand(projectCollapseKey(bucket.key, project.id));
+      agentProjectCollapse.expand(project.id);
       goto(`/agent?id=${session.id}`);
     } catch (error) {
       console.error("Failed to create agent session in project:", error);
@@ -738,15 +824,23 @@
   }
 </script>
 
-{#snippet sessionRow(
-  session: AgentSession,
-  rowIndent: string,
-  inputIndent: string,
-  dotIndent: string,
-)}
+<!-- Collapse indicator, riding right after a group's name rather than at the
+     row's far edge — the name is what it belongs to, and the right edge is the
+     "+"'s. Hidden until the host row is hovered or focused; the row itself owns
+     the click, so this stays a plain glyph. -->
+{#snippet collapseChevron(collapsed: boolean, revealClass: string)}
+  <ChevronRight
+    size={14}
+    class="flex-shrink-0 opacity-0 text-base-content/40 transition-[transform,opacity] duration-[var(--dur-fast)] {revealClass} {collapsed
+      ? ''
+      : 'rotate-90'}"
+  />
+{/snippet}
+
+{#snippet sessionRow(session: AgentSession)}
   {#if renamingSessionId === session.id}
     <!-- Rename input: Enter/blur commits, Escape cancels. -->
-    <div class="{inputIndent} pr-2">
+    <div class="pl-5 pr-2">
       <input
         data-session-id={session.id}
         class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
@@ -758,8 +852,14 @@
     </div>
   {:else}
     {@const showControls = activeRowSessionId === session.id}
+    {@const sourceAgent = session.agentDefinitionId
+      ? agentById.get(session.agentDefinitionId)
+      : undefined}
+    {@const RowIcon = sourceAgent
+      ? resolveAgentIcon(sourceAgent.icon)
+      : MessagesSquare}
     <div
-      class="relative w-full flex items-center gap-2 py-1 {rowIndent} pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
+      class="w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
@@ -773,21 +873,22 @@
       onfocusin={() => handleRowFocusIn(session)}
       onfocusout={(event) => handleRowFocusOut(event, session)}
     >
-      {#if agentRunStore.isRunning(session.id)}
-        <!-- Same breathing dot as the timeline's in-run progress indicator,
-             absolutely positioned so it never shifts the title. The wrapper is
-             icon-sized (14px) at the parent header's icon offset, centering the
-             dot on that icon column. Centering is flex-based: the dot's own
-             animation owns `transform`, so translate would be overridden. -->
-        <span
-          class="absolute {dotIndent} inset-y-0 w-3.5 flex items-center justify-center"
-          aria-hidden="true"
-        >
+      <!-- Which agent this session runs. While a run streams, the same
+           breathing dot as the timeline's progress indicator takes the icon's
+           place, so the title never shifts. -->
+      <span
+        class="flex-shrink-0 w-3.5 h-3.5 flex items-center justify-center"
+        title={sourceAgent?.name}
+      >
+        {#if agentRunStore.isRunning(session.id)}
           <span
             class="h-2 w-2 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"
+            aria-hidden="true"
           ></span>
-        </span>
-      {/if}
+        {:else}
+          <RowIcon size={14} class="text-base-content/60" />
+        {/if}
+      </span>
       <span class="truncate flex-1">{session.name}</span>
       {#if generatingTitleId === session.id}
         <Loader2
@@ -848,22 +949,14 @@
   {/if}
 {/snippet}
 
-<!-- Project subgroup: collapsible header + session list; the host bucket is passed in for create attribution. -->
-{#snippet projectGroup(
-  bucket: AgentSessionBucket,
-  project: AgentProject,
-  sessions: AgentSession[],
-)}
-  {@const key = projectCollapseKey(bucket.key, project.id)}
-  {@const collapsed = agentProjectCollapse.isCollapsed(key)}
+<!-- Project group: collapsible header + its sessions. -->
+{#snippet projectGroup(project: AgentProject, sessions: AgentSession[])}
+  {@const collapsed = agentProjectCollapse.isCollapsed(project.id)}
   {#if renamingProjectId === project.id}
     <!-- Project rename row replaces the header; the input sits in a data-group-control exemption span. -->
-    <div class="w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-[12px] leading-[18px]">
-      {#if collapsed}
-        <Folder size={14} class="flex-shrink-0 text-base-content/60" />
-      {:else}
-        <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
-      {/if}
+    <div
+      class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-[12px] leading-[18px]"
+    >
       <span data-group-control class="flex-1 min-w-0">
         <input
           data-project-id={project.id}
@@ -878,45 +971,45 @@
   {:else}
     <div
       data-project-id={project.id}
-      class="group/proj w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 cursor-default select-none"
+      class="group/proj w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 cursor-default select-none"
       role="button"
       tabindex="0"
       aria-expanded={!collapsed}
-      onclick={(event) => handleGroupHeaderClick(event, key)}
-      onkeydown={(event) => handleGroupHeaderKeydown(event, key)}
+      onclick={(event) => handleGroupHeaderClick(event, project.id)}
+      onkeydown={(event) => handleGroupHeaderKeydown(event, project.id)}
       oncontextmenu={(event) => handleProjectContextMenu(event, project)}
     >
-      {#if collapsed}
-        <Folder size={14} class="flex-shrink-0 text-base-content/60" />
-      {:else}
-        <FolderOpen size={14} class="flex-shrink-0 text-base-content/60" />
-      {/if}
-      <span class="truncate flex-1">{project.name}</span>
-      <!-- Hover "+" creates a session for this agent + project. -->
-      <span data-group-control class="flex items-center flex-shrink-0">
+      <span class="truncate min-w-0">{project.name}</span>
+      {@render collapseChevron(
+        collapsed,
+        "group-hover/proj:opacity-100 group-focus-within/proj:opacity-100",
+      )}
+      <!-- Hover "+" opens the agent picker; the project is already decided. -->
+      <span data-group-control class="ml-auto flex items-center flex-shrink-0">
         <button
-          class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+          class="-mr-0.5 p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
           title={t("agent.list.newSession")}
           aria-label={t("agent.list.newSessionInProject", {
             name: project.name,
           })}
-          onclick={(event) => handleCreateSessionInProject(event, bucket, project)}
+          onclick={(event) => {
+            event.stopPropagation();
+            contextMenu = {
+              kind: "agentPicker",
+              project,
+              ...menuAnchorFor(event),
+            };
+          }}
         >
           <Plus size={14} />
         </button>
       </span>
-      <ChevronRight
-        size={14}
-        class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {collapsed
-          ? ''
-          : 'rotate-90'}"
-      />
     </div>
   {/if}
-  {#if !collapsed}
+  {#if !collapsed && sessions.length > 0}
     <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
       {#each sessions as session (session.id)}
-        {@render sessionRow(session, "pl-12", "pl-10", "left-7")}
+        {@render sessionRow(session)}
       {/each}
     </div>
   {/if}
@@ -931,11 +1024,45 @@
     </div>
   {/if}
 
-  <!-- Grouped list (Agent → Project → Session; sessions without a source agent
-       fall into the trailing Chats bucket). -->
+  <!-- Section heading: folds every project away, and is the only entry point
+       for creating one. px-4 and the button's -mr-0.5 reproduce a group row's
+       insets (the scroll container's px-2 plus the row's own px-2, less the
+       button's own padding), so the label and the "+" share their columns with
+       the project rows below. -->
+  <div
+    class="group/head flex-shrink-0 flex items-center gap-1.5 px-4 pt-2 pb-0.5 cursor-default select-none"
+    role="button"
+    tabindex="0"
+    aria-expanded={!projectsCollapsed}
+    onclick={(event) => handleGroupHeaderClick(event, PROJECTS_SECTION_KEY)}
+    onkeydown={(event) => handleGroupHeaderKeydown(event, PROJECTS_SECTION_KEY)}
+  >
+    <span
+      class="truncate min-w-0 text-[11px] leading-[16px] font-medium text-base-content/40"
+    >
+      {t("agent.list.heading")}
+    </span>
+    {@render collapseChevron(
+      projectsCollapsed,
+      "group-hover/head:opacity-100 group-focus-within/head:opacity-100",
+    )}
+    <span data-group-control class="ml-auto flex items-center flex-shrink-0">
+      <button
+        class="-mr-0.5 p-0.5 rounded text-base-content/50 hover:text-base-content hover:bg-base-content/10"
+        title={t("agent.list.newProject")}
+        aria-label={t("agent.list.newProject")}
+        onclick={handleNewProject}
+      >
+        <Plus size={14} />
+      </button>
+    </span>
+  </div>
+
+  <!-- Grouped list (Project → Session; sessions without a project fall into the
+       trailing Chats group). -->
   <div
     bind:this={listEl}
-    class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-2"
+    class="flex-1 overflow-y-auto space-y-1.5 px-2 pt-1"
     onscroll={handleListScroll}
     onwheel={noteReaderInput}
     ontouchmove={noteReaderInput}
@@ -945,7 +1072,8 @@
         {t("common.loading")}
       </div>
     {:else if loadError}
-      <!-- Partial load failure: skip grouped rendering to avoid mis-bucketing into Chats. -->
+      <!-- Partial load failure: skip grouped rendering to avoid dumping every
+           session into the ungrouped bucket. -->
       <div class="px-2 py-1 text-[12px] leading-[18px] text-error">
         {t("agent.list.loadFailed")}
       </div>
@@ -960,85 +1088,65 @@
         {t("agent.list.emptyHint")}
       </div>
     {:else}
-      {#each buckets as bucket (bucket.key)}
-        {@const collapsed = agentProjectCollapse.isCollapsed(bucket.key)}
+      {#if !projectsCollapsed}
+        <div class="space-y-1.5" transition:slide={{ duration: 160 }}>
+          {#each projectBuckets as bucket (bucket.key)}
+            <div class="space-y-0.5">
+              {@render projectGroup(bucket.project, bucket.sessions)}
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      {#if chatsBucket}
+        {@const collapsed = agentProjectCollapse.isCollapsed(chatsBucket.key)}
+        {@const chatSessions = chatsBucket.sessions}
+        <!-- Sessions attached to no project. No "+" here: a session with no
+             project is created from the sidebar's New entry. -->
         <div class="space-y-0.5">
-          <!-- Bucket header: an Agent (icon + name + hover "+") or the Chats bucket (no create). -->
-          <div
-            class="group/bucket w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 cursor-default select-none"
-            role="button"
-            tabindex="0"
+          <button
+            class="group/chats w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
             aria-expanded={!collapsed}
-            onclick={(event) => handleGroupHeaderClick(event, bucket.key)}
-            onkeydown={(event) => handleGroupHeaderKeydown(event, bucket.key)}
+            onclick={() => agentProjectCollapse.toggle(chatsBucket.key)}
           >
-            {#if bucket.agent}
-              {@const BucketIcon = resolveAgentIcon(bucket.agent.icon)}
-              <BucketIcon size={14} class="flex-shrink-0 text-base-content/60" />
-              <span class="truncate flex-1">{bucket.agent.name}</span>
-              <span data-group-control class="flex items-center flex-shrink-0">
-                <button
-                  class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/bucket:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
-                  title={t("agent.list.newSession")}
-                  aria-label={t("agent.list.newSession")}
-                  onclick={(event) => handleCreateSessionForAgent(event, bucket)}
-                >
-                  <Plus size={14} />
-                </button>
-              </span>
-            {:else}
-              <MessagesSquare
-                size={14}
-                class="flex-shrink-0 text-base-content/60"
-              />
-              <span class="truncate flex-1">{t("agent.list.ungrouped")}</span>
-            {/if}
-            <ChevronRight
-              size={14}
-              class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {collapsed
-                ? ''
-                : 'rotate-90'}"
-            />
-          </div>
+            <span class="truncate min-w-0">{t("agent.list.ungrouped")}</span>
+            {@render collapseChevron(
+              collapsed,
+              "group-hover/chats:opacity-100 group-focus-within/chats:opacity-100",
+            )}
+          </button>
           {#if !collapsed}
             <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
-              {#each bucket.children as child (child.kind === "project" ? `p:${child.project.id}` : `s:${child.session.id}`)}
-                {#if child.kind === "project"}
-                  {@render projectGroup(bucket, child.project, child.sessions)}
-                {:else}
-                  {@render sessionRow(child.session, "pl-7", "pl-5", "left-2")}
-                {/if}
+              {#each chatSessions as session (session.id)}
+                {@render sessionRow(session)}
               {/each}
             </div>
           {/if}
         </div>
-      {/each}
+      {/if}
 
-      <!-- Archived sessions: flat, out of the Agent → Project tree, collapsed
-           by default and absent entirely while nothing is archived. -->
+      <!-- Archived sessions: flat, out of the Project tree, collapsed by
+           default and absent entirely while nothing is archived. -->
       {#if archivedSessions.length > 0}
         <div class="space-y-0.5">
           <button
-            class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
+            class="group/arch w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 select-none"
             aria-expanded={archivedExpanded}
             onclick={() => (archivedExpanded = !archivedExpanded)}
           >
-            <Archive size={14} class="flex-shrink-0 text-base-content/60" />
-            <span class="truncate flex-1">{t("agent.list.archived")}</span>
-            <span class="flex-shrink-0 text-[11px] text-base-content/45">
+            <span class="truncate min-w-0">{t("agent.list.archived")}</span>
+            {@render collapseChevron(
+              !archivedExpanded,
+              "group-hover/arch:opacity-100 group-focus-within/arch:opacity-100",
+            )}
+            <span class="ml-auto flex-shrink-0 text-[11px] text-base-content/45">
               {archivedSessions.length}
             </span>
-            <ChevronRight
-              size={14}
-              class="flex-shrink-0 text-base-content/40 transition-transform duration-[var(--dur-fast)] {archivedExpanded
-                ? 'rotate-90'
-                : ''}"
-            />
           </button>
           {#if archivedExpanded}
             <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
               {#each archivedSessions as session (session.id)}
-                {@render sessionRow(session, "pl-7", "pl-5", "left-2")}
+                {@render sessionRow(session)}
               {/each}
             </div>
           {/if}
@@ -1057,7 +1165,7 @@
   />
 {/if}
 
-<!-- Context menu, dispatched by kind (session row / project header). -->
+<!-- Context menu, dispatched by kind (session row / project header / pickers). -->
 {#if contextMenu?.kind === "project"}
   <div
     class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
@@ -1088,11 +1196,70 @@
       {t("agent.list.deleteProject")}
     </button>
   </div>
+{:else if contextMenu?.kind === "agentPicker"}
+  {@const pickerProject = contextMenu.project}
+  <div
+    class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-40 max-h-72 overflow-y-auto"
+    style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+  >
+    {#each projectCapableAgents as agent (agent.id)}
+      {@const AgentIcon = resolveAgentIcon(agent.icon)}
+      <button
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+        onclick={() => handleCreateSessionInProject(pickerProject, agent.id)}
+      >
+        <AgentIcon size={14} />
+        <span class="truncate">{agent.name}</span>
+      </button>
+    {:else}
+      <div class="px-2 py-1 text-[12px] text-base-content/50 whitespace-nowrap">
+        {t("agent.list.noProjectAgent")}
+      </div>
+    {/each}
+  </div>
+{:else if contextMenu?.kind === "move"}
+  {@const movingSession = contextMenu.session}
+  <div
+    class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-40 max-h-72 overflow-y-auto"
+    style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+  >
+    {#each agentProjectState.projects as project (project.id)}
+      <button
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-base-content"
+        disabled={movingSession.projectId === project.id}
+        onclick={() => moveSessionToProject(movingSession, project.id)}
+      >
+        <Folder size={14} />
+        <span class="truncate">{project.name}</span>
+      </button>
+    {/each}
+
+    {#if movingSession.projectId}
+      <button
+        class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+        onclick={() => moveSessionToProject(movingSession, null)}
+      >
+        <MessagesSquare size={14} />
+        {t("agent.list.removeFromProject")}
+      </button>
+    {/if}
+
+    <div class="border-t border-base-300 my-1 mx-2"></div>
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+      onclick={() => moveSessionToNewProject(movingSession)}
+    >
+      <FolderPlus size={14} />
+      {t("agent.list.newProject")}
+    </button>
+  </div>
 {:else if contextMenu?.kind === "session"}
   {@const menuSession = contextMenu.session}
+  {@const menuX = contextMenu.x}
+  {@const menuY = contextMenu.y}
   <div
     class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
-    style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+    style="left: {menuX}px; top: {menuY}px;"
   >
     <!-- Generate title: only offered when the session has messages to distill. -->
     {#if menuSession.messageCount > 0}
@@ -1111,6 +1278,22 @@
     >
       <PencilLine size={14} />
       {t("common.rename")}
+    </button>
+
+    <!-- Re-group the session: swaps this menu for the project picker in place. -->
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+      onclick={() => {
+        contextMenu = {
+          kind: "move",
+          session: menuSession,
+          x: menuX,
+          y: menuY,
+        };
+      }}
+    >
+      <FolderInput size={14} />
+      {t("agent.list.moveToProject")}
     </button>
 
     <button

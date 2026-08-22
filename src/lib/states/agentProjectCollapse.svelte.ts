@@ -2,12 +2,11 @@
  * Sidebar group collapse state - Svelte 5 runes + localStorage persistence.
  *
  * Collapse state is remembered per opaque string key supplied by the caller:
- * agent buckets use agent.id, the "Chats" bucket uses `CHATS_BUCKET_KEY`, and
- * project subgroups use the composite `bucketKey::projectId` (the same project
- * under multiple agents collapses independently). Persisted shape is
- * `{ [key]: true }` (only collapsed entries are stored; expanded is the
- * default and never written). Corrupt / missing / invalid values all fall back
- * to expanded (empty map).
+ * project groups use project.id and the ungrouped group uses
+ * `UNGROUPED_BUCKET_KEY`. Persisted shape is `{ [key]: true }` (only collapsed
+ * entries are stored; expanded is the default and never written). Corrupt /
+ * missing / invalid values all fall back to expanded (empty map) — which is
+ * also what stale keys from an earlier grouping degrade to.
  */
 
 const COLLAPSE_STORAGE_KEY = "agentProjectCollapse";

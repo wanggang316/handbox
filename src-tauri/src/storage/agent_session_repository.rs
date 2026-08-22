@@ -126,12 +126,12 @@ impl AgentSessionRepository {
         // `append_message`, reverting the run's increments and mis-sorting the list.
         // `append_message` is therefore the SOLE writer of these two columns.
         //
-        // `project_id` is likewise deliberately OMITTED: the project attachment is
-        // write-once at `create_session` and must never be rewritten through the
-        // generic update path (no "move session between projects" semantics).
-        // `agent_definition_id` is OMITTED for the same reason: the originating
-        // definition is a write-once provenance link set at instantiation; a session
-        // never gets re-pointed at a different definition through field edits.
+        // `project_id` is likewise deliberately OMITTED: moving a session between
+        // projects is a one-column write ([`set_session_project`]), so a field edit
+        // built from a stale snapshot can never revert it.
+        // `agent_definition_id` is OMITTED because the originating definition is a
+        // write-once provenance link set at instantiation; a session never gets
+        // re-pointed at a different definition through field edits.
         //
         // `pinned` / `archived` are OMITTED too, for the read-modify-write reason:
         // toggling them is a one-column write ([`set_session_pinned`] /
@@ -300,6 +300,38 @@ impl AgentSessionRepository {
                 .await
                 .map_err(|e| {
                     AppError::internal_error(&format!("Failed to archive agent session: {}", e))
+                })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Agent session not found: {}",
+                session_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Attaches the session to a project, or detaches it with `None`.
+    ///
+    /// Same single-column discipline as [`set_session_pinned`]: the sidebar groups
+    /// by project, so re-grouping must not travel through the generic
+    /// read-modify-write path (which deliberately omits `project_id`).
+    /// `working_dir` is untouched — see [`crate::services::AgentSessionService::set_session_project`].
+    pub async fn set_session_project(
+        &self,
+        session_id: &UUID,
+        project_id: Option<&UUID>,
+    ) -> Result<(), AppError> {
+        let result =
+            sqlx::query("UPDATE agent_sessions SET project_id = $1, updated_at = $2 WHERE id = $3")
+                .bind(project_id)
+                .bind(Self::now_ms())
+                .bind(session_id)
+                .execute(self.db.pool())
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to set agent session project: {}", e))
                 })?;
 
         if result.rows_affected() == 0 {

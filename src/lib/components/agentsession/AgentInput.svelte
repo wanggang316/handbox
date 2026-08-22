@@ -26,6 +26,7 @@
   import { t } from "$lib/i18n";
   import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
+  import { agentProjectActions } from "$lib/states/agentProject.svelte";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
@@ -246,6 +247,11 @@
 
   // Pick the session working dir via the system dialog; the backend validates
   // it as an existing absolute directory. Cancel (non-string result) is a no-op.
+  //
+  // The chosen directory is also the session's project: the sidebar's top level
+  // is the project, so a dir picked here is turned into one (get-or-create by
+  // canonical path) and the session attached to it. The dir is written first —
+  // a failure to group must not leave the session running somewhere else.
   async function pickWorkingDir() {
     try {
       const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
@@ -253,6 +259,8 @@
       if (typeof picked !== "string") return;
       modelPrompt = null;
       await agentSessionActions.updateField(session.id, "workingDir", picked);
+      const project = await agentProjectActions.createProject(picked);
+      await agentSessionActions.setProject(session.id, project.id);
     } catch (error) {
       console.error("Failed to set working directory:", error);
       modelPrompt =
