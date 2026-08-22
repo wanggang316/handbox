@@ -9,6 +9,8 @@
     ChevronsUpDown,
     Check,
     Folder,
+    Hand,
+    Zap,
     SignalLow,
     SignalMedium,
     SignalHigh,
@@ -250,6 +252,71 @@
           ? error.message
           : t("agent.input.workingDirFailed");
     }
+  }
+
+  // Tool-execution mode. "auto" lets the dangerous built-ins (write/edit/bash)
+  // run unattended; every other value — including an unset one — keeps the
+  // approval gate, which is how the backend resolves the column too.
+  const toolExecutionModeOptions = $derived([
+    {
+      value: "manual",
+      label: t("agent.input.manualExecution"),
+      desc: t("agent.input.manualExecutionDesc"),
+      icon: Hand,
+    },
+    {
+      value: "auto",
+      label: t("agent.input.autoExecution"),
+      desc: t("agent.input.autoExecutionDesc"),
+      icon: Zap,
+    },
+  ]);
+  const toolExecutionMode = $derived(
+    session.toolExecutionMode === "auto" ? "auto" : "manual",
+  );
+  const toolExecutionOption = $derived(
+    toolExecutionModeOptions.find((o) => o.value === toolExecutionMode) ??
+      toolExecutionModeOptions[0],
+  );
+  const ToolExecutionIcon = $derived(toolExecutionOption.icon);
+
+  // Same hover-drives-the-footer-description shape as the thinking menu.
+  let execMenuOpen = $state(false);
+  let execMenuHover = $state<string | null>(null);
+  const execMenuDesc = $derived(
+    (
+      toolExecutionModeOptions.find(
+        (o) => o.value === (execMenuHover ?? toolExecutionMode),
+      ) ?? toolExecutionModeOptions[0]
+    ).desc,
+  );
+
+  // Close on outside click; clicks inside the menu stopPropagation and never reach window.
+  $effect(() => {
+    if (!execMenuOpen) return;
+    const handler = () => (execMenuOpen = false);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  });
+
+  function toggleExecMenu(event: MouseEvent) {
+    event.stopPropagation();
+    // stopPropagation defeats the other popovers' outside-click close, so close them explicitly.
+    thinkingMenuOpen = false;
+    agentMenuOpen = false;
+    execMenuHover = null;
+    execMenuOpen = !execMenuOpen;
+  }
+
+  function selectToolExecutionMode(value: string) {
+    execMenuOpen = false;
+    if (value === toolExecutionMode) return;
+    agentSessionActions
+      .updateField(session.id, "toolExecutionMode", value)
+      .catch((error) => {
+        console.error("Failed to update tool execution mode:", error);
+        modelPrompt = t("agent.input.toolExecutionFailed");
+      });
   }
 
   // Active run for this session drives the Send <-> Stop toggle.
@@ -659,28 +726,6 @@
   onModelSelect={handleModelSelect}
 />
 
-<!-- Working-dir picker above the composer; shown unless workingDirMode is "none". -->
-{#if showWorkingDir}
-  <div class="flex w-full pb-1">
-    <button
-      type="button"
-      class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-base-content/55 hover:bg-base-300/50 hover:text-base-content transition-colors"
-      aria-label={t("agent.input.selectWorkingDir")}
-      title={session.workingDir ?? t("agent.input.selectWorkingDir")}
-      onclick={pickWorkingDir}
-    >
-      <Folder size={13} class="shrink-0" />
-      {#if workingDirName}
-        <span class="max-w-[220px] truncate">{workingDirName}</span>
-      {:else}
-        <span class="max-w-[220px] truncate text-warning"
-          >{t("agent.input.selectWorkingDir")}</span
-        >
-      {/if}
-    </button>
-  </div>
-{/if}
-
 <!-- ask_question panel, docked directly above the composer so it reads as
      sliding up out of the input. `{#key requestId}` remounts it per request, so
      a new question set never inherits the previous one's selections. -->
@@ -972,5 +1017,94 @@
         </Button>
       {/if}
     </div>
+  </div>
+</div>
+
+<!-- Session scope row, docked UNDER the composer: where the agent operates
+     (working dir) and how much it may do unattended (tool execution). Outside
+     the box on purpose — these frame the whole session, not the message being
+     composed, and inside the box they read as extra input fields. -->
+<div class="flex w-full flex-row items-center gap-1 px-1 pt-1.5">
+  {#if showWorkingDir}
+    <button
+      type="button"
+      class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-base-content/55 hover:bg-base-300/50 hover:text-base-content transition-colors"
+      aria-label={t("agent.input.selectWorkingDir")}
+      title={session.workingDir ?? t("agent.input.selectWorkingDir")}
+      onclick={pickWorkingDir}
+    >
+      <Folder size={13} class="shrink-0" />
+      {#if workingDirName}
+        <span class="max-w-[220px] truncate">{workingDirName}</span>
+      {:else}
+        <span class="max-w-[220px] truncate text-warning"
+          >{t("agent.input.selectWorkingDir")}</span
+        >
+      {/if}
+    </button>
+  {/if}
+
+  <!-- Tool-execution menu: a popover rather than a toggle, so each mode can
+       carry the description that says what it actually permits. -->
+  <div class="relative">
+    <button
+      type="button"
+      class={`inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors ${
+        execMenuOpen
+          ? "bg-base-300/50 text-base-content"
+          : "text-base-content/55 hover:bg-base-300/50 hover:text-base-content"
+      }`}
+      aria-label={t("agent.form.toolExecution")}
+      aria-haspopup="listbox"
+      aria-expanded={execMenuOpen}
+      title={t("agent.form.toolExecution")}
+      onclick={toggleExecMenu}
+    >
+      <ToolExecutionIcon size={13} class="shrink-0" />
+      <span class="truncate">{toolExecutionOption.label}</span>
+      <ChevronDown size={12} class="shrink-0 opacity-60" />
+    </button>
+
+    {#if execMenuOpen}
+      <!-- Opens upward (bottom-full): the row sits at the window's bottom edge.
+           stopPropagation keeps inside clicks from triggering the outside close. -->
+      <div
+        transition:fly={{ y: -4, duration: 130 }}
+        class="absolute bottom-full left-0 z-40 mb-2 w-56 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+        role="listbox"
+        tabindex="-1"
+        onclick={(event) => event.stopPropagation()}
+        onkeydown={() => {}}
+      >
+        {#each toolExecutionModeOptions as opt (opt.value)}
+          {@const active = opt.value === toolExecutionMode}
+          {@const Icon = opt.icon}
+          <button
+            type="button"
+            role="option"
+            aria-selected={active}
+            class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+              active ? "bg-base-300/60" : ""
+            }`}
+            onmouseenter={() => (execMenuHover = opt.value)}
+            onmouseleave={() => (execMenuHover = null)}
+            onclick={() => selectToolExecutionMode(opt.value)}
+          >
+            <Icon size={15} class="shrink-0 text-base-content/70" />
+            <span class="min-w-0 flex-1 truncate text-sm text-base-content">
+              {opt.label}
+            </span>
+            {#if active}
+              <Check size={14} class="shrink-0 text-primary" />
+            {/if}
+          </button>
+        {/each}
+        <div
+          class="mt-1 border-t border-[var(--hairline)] px-2 pb-1 pt-1.5 text-xs text-base-content/55"
+        >
+          {execMenuDesc}
+        </div>
+      </div>
+    {/if}
   </div>
 </div>

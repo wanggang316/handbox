@@ -43,7 +43,12 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.stop": "Stop",
   "agent.input.send": "Send",
   "agent.input.autoExecution": "Auto",
+  "agent.input.autoExecutionDesc":
+    "Writes, edits and commands run without asking",
   "agent.input.manualExecution": "Manual",
+  "agent.input.manualExecutionDesc":
+    "Writes, edits and commands need your approval",
+  "agent.input.toolExecutionFailed": "Failed to set the tool execution mode",
   "agent.input.selectModel": "Select model",
   "agent.input.noAvailableMcpServers": "No available MCP servers",
   "agent.input.configureMcpInSettings":
