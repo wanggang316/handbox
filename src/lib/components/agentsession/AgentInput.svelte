@@ -3,12 +3,15 @@
     ArrowUp,
     Square,
     Paperclip,
+    Plus,
     X,
     Ban,
     ChevronDown,
+    ChevronRight,
     ChevronsUpDown,
     Check,
     Folder,
+    Zap,
     SignalLow,
     SignalMedium,
     SignalHigh,
@@ -17,6 +20,7 @@
   import { fly } from "svelte/transition";
   import { goto } from "$app/navigation";
   import Button from "$lib/components/ui/Button.svelte";
+  import McpIcon from "$lib/components/ui/McpIcon.svelte";
   import ModelSelectModal from "./ModelSelectModal.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { t } from "$lib/i18n";
@@ -24,9 +28,12 @@
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
   import { agentProjectActions } from "$lib/states/agentProject.svelte";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
+  import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
   import { agentQuestionStore } from "$lib/states/agentQuestion.svelte";
+  import { agentQuoteStore } from "$lib/states/agentQuote.svelte";
+  import { withQuote } from "./quote";
   import AgentQuestionPanel from "./AgentQuestionPanel.svelte";
   import { getAllModels, getProviderIconById } from "$lib/states/provider.svelte";
   import { runAgentStream, steerAgentRun } from "$lib/api/agentSession";
@@ -37,6 +44,7 @@
     AgentRunAttachment,
     AgentQuestionRequest,
     AgentQuestionResponse,
+    McpServer,
     SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
@@ -139,8 +147,9 @@
 
   function toggleThinkingMenu(event: MouseEvent) {
     event.stopPropagation();
-    // stopPropagation defeats the other popover's outside-click close, so close it explicitly.
+    // stopPropagation defeats the other popovers' outside-click close, so close them explicitly.
     agentMenuOpen = false;
+    closeAddMenu();
     thinkingMenuHover = null;
     thinkingMenuOpen = !thinkingMenuOpen;
   }
@@ -205,8 +214,9 @@
 
   function toggleAgentMenu(event: MouseEvent) {
     event.stopPropagation();
-    // stopPropagation defeats the other popover's outside-click close, so close it explicitly.
+    // stopPropagation defeats the other popovers' outside-click close, so close them explicitly.
     thinkingMenuOpen = false;
+    closeAddMenu();
     agentMenuOpen = !agentMenuOpen;
   }
 
@@ -259,6 +269,21 @@
           : t("agent.input.workingDirFailed");
     }
   }
+
+  // Transcript text the reader quoted from the timeline; rendered as a card
+  // above the textarea and prepended to the message as a blockquote on send.
+  const quote = $derived(agentQuoteStore.quoteFor(session.id));
+
+  function removeQuote() {
+    agentQuoteStore.clear(session.id);
+  }
+
+  // Quoting is a request to write about that text, so the keyboard follows it
+  // into the composer.
+  $effect(() => {
+    if (quote === null) return;
+    textareaRef?.focus();
+  });
 
   // Active run for this session drives the Send <-> Stop toggle.
   const running = $derived(agentRunStore.isRunning(session.id));
@@ -333,18 +358,36 @@
     adjustTextareaHeight();
   }
 
-  async function selectSkill(skill: SkillInfo) {
-    // Replace the typed /query with `/<name> `, then return focus with the
-    // caret at the end. The forced skill name is re-parsed from the leading
-    // `/<name>` on send (see leadingForcedSkillNames).
-    input = `/${skill.name} `;
-    closeSlashPopover();
+  // Return focus to the textarea with the caret at the end.
+  async function focusInputEnd() {
     await tick();
     if (!textareaRef) return;
     textareaRef.focus();
     const end = textareaRef.value.length;
     textareaRef.setSelectionRange(end, end);
     adjustTextareaHeight();
+  }
+
+  async function selectSkill(skill: SkillInfo) {
+    // Replace the typed /query with `/<name> `, then return focus with the
+    // caret at the end. The forced skill name is re-parsed from the leading
+    // `/<name>` on send (see leadingForcedSkillNames).
+    input = `/${skill.name} `;
+    closeSlashPopover();
+    await focusInputEnd();
+  }
+
+  // Picking a skill from the add menu keeps whatever is already typed: only an
+  // existing leading `/<skill>` token is swapped, since the forced skill is
+  // parsed from that token on send.
+  async function selectSkillFromMenu(skill: SkillInfo) {
+    closeAddMenu();
+    closeSlashPopover();
+    const text = input.trimStart();
+    const leading = leadingForcedSkillNames(text)[0];
+    const rest = leading ? text.slice(leading.length + 1).trimStart() : text;
+    input = rest ? `/${skill.name} ${rest}` : `/${skill.name} `;
+    await focusInputEnd();
   }
 
   // Leading `/<name>` → forced skill name; only known enabled skills match,
@@ -416,6 +459,14 @@
       }
     }
 
+    // Escape drops the quote once the popover is out of the way, so the reader
+    // can undo a mis-quote without reaching for the card's button.
+    if (event.key === "Escape" && quote !== null) {
+      event.preventDefault();
+      removeQuote();
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       sendAgentRun();
@@ -460,8 +511,78 @@
     syncSlashState(fromPaste);
   }
 
+  // "+" menu: attachments plus Skills and MCP submenus. Skills come from the
+  // same source as the slash popover, so both stay in sync.
+  let addMenuOpen = $state(false);
+  // At most one submenu is open at a time.
+  let openSubmenu = $state<"skills" | "mcp" | null>(null);
+  const menuSkills = $derived(availableSkills.filter((s) => !s.disabled));
+
+  // Only ready servers exposing tools can contribute anything to a run, so the
+  // submenu lists those (same filter as the Agent editor's MCP picker).
+  const availableMcpServers = $derived(
+    mcpState.servers.filter(
+      (s) => s.enabled && s.status === "ready" && s.enabledTools.length > 0,
+    ),
+  );
+  const sessionMcpServers = $derived(session.mcpServers ?? []);
+
+  // Close on outside click; clicks inside the menu stopPropagation and never reach window.
+  $effect(() => {
+    if (!addMenuOpen) return;
+    const handler = () => closeAddMenu();
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  });
+
+  function closeAddMenu() {
+    addMenuOpen = false;
+    openSubmenu = null;
+  }
+
+  function toggleAddMenu(event: MouseEvent) {
+    event.stopPropagation();
+    // stopPropagation defeats the other popovers' outside-click close, so close them explicitly.
+    thinkingMenuOpen = false;
+    agentMenuOpen = false;
+    openSubmenu = null;
+    addMenuOpen = !addMenuOpen;
+    // The submenus need their lists before they are hovered.
+    if (addMenuOpen) {
+      void loadAvailableSkills();
+      mcpActions
+        .loadServers(mcpState.needsRefresh)
+        .catch((error) => console.error("Failed to load MCP servers:", error));
+    }
+  }
+
+  // Bind / unbind a server for this session. The binding carries the server's
+  // own tool selection (an empty list would expose no tools) and defaults to
+  // auto execution; the menu stays open so several can be toggled in a row.
+  async function toggleMcpServer(server: McpServer) {
+    const bound = sessionMcpServers.some((c) => c.serverId === server.id);
+    const next = bound
+      ? sessionMcpServers.filter((c) => c.serverId !== server.id)
+      : [
+          ...sessionMcpServers,
+          {
+            serverId: server.id,
+            executionMode: "auto" as const,
+            enabledTools: server.enabledTools,
+          },
+        ];
+    try {
+      modelPrompt = null;
+      await agentSessionActions.updateField(session.id, "mcpServers", next);
+    } catch (error) {
+      console.error("Failed to update session MCP servers:", error);
+      modelPrompt = t("agent.input.mcpUpdateFailed");
+    }
+  }
+
   function handleAddAttachment(event?: MouseEvent) {
     event?.stopPropagation();
+    closeAddMenu();
     fileInputRef?.click();
   }
 
@@ -538,11 +659,12 @@
     // parsed as a forced skill. An active run always has a model, so this
     // branch safely precedes the model guard.
     if (running) {
-      // Whitespace-only input: no-op.
-      if (!input.trim()) return;
+      // Whitespace-only input with nothing quoted: no-op.
+      if (!input.trim() && quote === null) return;
       modelPrompt = null;
-      const text = input;
+      const text = withQuote(input, quote);
       resetAttachments();
+      removeQuote();
       input = "";
       adjustTextareaHeight();
       try {
@@ -558,8 +680,8 @@
       return;
     }
 
-    // Empty input with no attachments: no run, no bubble.
-    if (!input.trim() && attachments.length === 0) return;
+    // Empty input with no attachments and nothing quoted: no run, no bubble.
+    if (!input.trim() && attachments.length === 0 && quote === null) return;
 
     // No model: prompt and block (defensive; created sessions normally have one).
     if (!session.modelId || !session.providerId) {
@@ -568,7 +690,11 @@
     }
 
     modelPrompt = null;
-    const text = input;
+    // The typed text and the quote are kept apart from the composed message:
+    // a failed start restores exactly what the user had, card included.
+    const typed = input;
+    const quoted = quote;
+    const text = withQuote(typed, quoted);
     // Snapshot attachments for sending (Uint8Array -> number[] to match the
     // backend Vec<u8> IPC shape), then clear input. The user bubble comes from
     // the backend's user message_end event; no optimistic insert to avoid dupes.
@@ -578,12 +704,14 @@
       data: Array.from(a.data),
     }));
     const sentAttachments = attachments;
-    // Forced skill names come from the leading `/<name>`: the text is the
-    // single source of truth, so restoring input on failure also restores them.
+    // Forced skill names come from the leading `/<name>` of what the user typed
+    // (a quote sits in front of it in the sent text): the input is the single
+    // source of truth, so restoring it on failure also restores them.
     // `/<name>` is sent to the model verbatim; the backend injects skill bodies.
-    const forcedSkillNames = leadingForcedSkillNames(text);
+    const forcedSkillNames = leadingForcedSkillNames(typed);
     input = "";
     attachments = [];
+    removeQuote();
     adjustTextareaHeight();
     try {
       await runAgentStream(
@@ -599,10 +727,13 @@
         }
       });
     } catch (error) {
-      // Start failed: restore input and attachments (the leading `/<name>`
-      // restores the forced skill) and surface the error for retry.
-      input = text;
+      // Start failed: restore input, attachments and quote (the leading
+      // `/<name>` restores the forced skill) and surface the error for retry.
+      input = typed;
       attachments = sentAttachments;
+      if (quoted !== null) {
+        agentQuoteStore.set(session.id, quoted);
+      }
       adjustTextareaHeight();
       modelPrompt =
         error instanceof Error ? error.message : t("agent.input.runFailed");
@@ -734,6 +865,33 @@
 <div
   class="flex flex-col bg-[var(--bg-page)] rounded-lg border border-[var(--hairline)] w-full"
 >
+  <!-- Quoted transcript text, inside the box and above the textarea: it is part
+       of the message being composed, not a notice about the conversation.
+       Clamped to a few lines — it is a reference to a passage, not the passage. -->
+  {#if quote !== null}
+    <div class="px-4 pt-3">
+      <div
+        class="relative rounded-md border border-[var(--hairline)] bg-base-200/40 py-2 pl-2.5 pr-8"
+        transition:fly={{ y: -4, duration: 130 }}
+      >
+        <p
+          class="line-clamp-3 border-l-2 border-base-content/25 pl-2 text-xs leading-[1.55] whitespace-pre-wrap break-words text-base-content/65"
+        >
+          {quote}
+        </p>
+        <button
+          type="button"
+          class="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-md text-base-content/50 transition-colors hover:bg-base-300 hover:text-base-content"
+          aria-label={t("agent.input.removeQuote")}
+          title={t("agent.input.removeQuote")}
+          onclick={removeQuote}
+        >
+          <X size={12} />
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Relative container anchors the popover, which opens upward (bottom-full) to stay on-screen. -->
   <div class="relative">
     {#if slashOpen}
@@ -793,15 +951,185 @@
 
   <div class="flex flex-row items-center justify-between gap-3 px-4 pt-0 pb-2">
     <div class="flex flex-row flex-wrap items-center gap-2">
-      <button
-        type="button"
-        class="flex h-7 w-7 items-center justify-center rounded-md text-base-content transition-colors hover:bg-base-300/60"
-        aria-label={t("agent.input.addImage")}
-        title={t("agent.input.uploadImage")}
-        onclick={handleAddAttachment}
-      >
-        <Paperclip size={16} />
-      </button>
+      <!-- "+" menu: attachments and the Skills submenu. -->
+      <div class="relative">
+        <button
+          type="button"
+          class={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+            addMenuOpen
+              ? "bg-base-300/60 text-base-content"
+              : "text-base-content hover:bg-base-300/60"
+          }`}
+          aria-label={t("agent.input.addMenu")}
+          aria-haspopup="menu"
+          aria-expanded={addMenuOpen}
+          title={t("agent.input.addMenu")}
+          onclick={toggleAddMenu}
+        >
+          <Plus size={16} />
+        </button>
+
+        {#if addMenuOpen}
+          <!-- Opens upward (bottom-full) to stay on-screen; stopPropagation
+               keeps inside clicks from triggering the outside-click close. -->
+          <div
+            transition:fly={{ y: -4, duration: 130 }}
+            class="absolute bottom-full left-0 z-40 mb-2 w-52 rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+            role="menu"
+            tabindex="-1"
+            onclick={(event) => event.stopPropagation()}
+            onkeydown={() => {}}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300"
+              onclick={handleAddAttachment}
+            >
+              <Paperclip size={16} class="shrink-0 text-base-content/70" />
+              <span class="min-w-0 flex-1 truncate text-sm text-base-content">
+                {t("agent.input.addImage")}
+              </span>
+            </button>
+
+            <!-- Skills row: hovering the row (and the gap the submenu's padding
+                 covers) keeps the submenu open; clicking toggles it for pointers
+                 that don't hover. -->
+            <div
+              class="relative"
+              role="none"
+              onmouseenter={() => (openSubmenu = "skills")}
+              onmouseleave={() => (openSubmenu = null)}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={openSubmenu === "skills"}
+                class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+                  openSubmenu === "skills" ? "bg-base-300" : ""
+                }`}
+                onclick={() =>
+                  (openSubmenu = openSubmenu === "skills" ? null : "skills")}
+              >
+                <Zap size={16} class="shrink-0 text-base-content/70" />
+                <span class="min-w-0 flex-1 truncate text-sm text-base-content">
+                  {t("agent.input.skills")}
+                </span>
+                <ChevronRight size={14} class="shrink-0 opacity-60" />
+              </button>
+
+              {#if openSubmenu === "skills"}
+                <!-- pl-1 (not ml-1) so the gap to the parent menu stays inside
+                     the hover area and crossing it doesn't close the submenu. -->
+                <div class="absolute bottom-0 left-full z-50 pl-1">
+                  <div
+                    class="max-h-72 w-56 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+                    role="menu"
+                    tabindex="-1"
+                  >
+                    {#if menuSkills.length === 0}
+                      <div class="px-2 py-1.5 text-xs text-base-content/50">
+                        {t("agent.input.noSkills")}
+                      </div>
+                    {:else}
+                      {#each menuSkills as skill (skill.name)}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300"
+                          onclick={() => selectSkillFromMenu(skill)}
+                        >
+                          <Zap size={16} class="shrink-0 text-base-content/70" />
+                          <span
+                            class="min-w-0 flex-1 truncate text-sm text-base-content"
+                          >
+                            {skill.name}
+                          </span>
+                        </button>
+                      {/each}
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <!-- MCP row: the submenu is a checklist of this session's server
+                 bindings, so it stays open while several are toggled. -->
+            <div
+              class="relative"
+              role="none"
+              onmouseenter={() => (openSubmenu = "mcp")}
+              onmouseleave={() => (openSubmenu = null)}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={openSubmenu === "mcp"}
+                class={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300 ${
+                  openSubmenu === "mcp" ? "bg-base-300" : ""
+                }`}
+                onclick={() =>
+                  (openSubmenu = openSubmenu === "mcp" ? null : "mcp")}
+              >
+                <McpIcon size={16} class="shrink-0 text-base-content/70" />
+                <span class="min-w-0 flex-1 truncate text-sm text-base-content">
+                  {t("agent.input.mcp")}
+                </span>
+                {#if sessionMcpServers.length}
+                  <span class="shrink-0 text-xs text-base-content/45">
+                    {sessionMcpServers.length}
+                  </span>
+                {/if}
+                <ChevronRight size={14} class="shrink-0 opacity-60" />
+              </button>
+
+              {#if openSubmenu === "mcp"}
+                <div class="absolute bottom-0 left-full z-50 pl-1">
+                  <div
+                    class="max-h-72 w-56 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-base-100 p-1 shadow-lg"
+                    role="menu"
+                    tabindex="-1"
+                  >
+                    {#if availableMcpServers.length === 0}
+                      <div class="px-2 py-1.5 text-xs text-base-content/50">
+                        {t("agent.input.noAvailableMcpServers")}
+                      </div>
+                    {:else}
+                      {#each availableMcpServers as server (server.id)}
+                        {@const bound = sessionMcpServers.some(
+                          (c) => c.serverId === server.id,
+                        )}
+                        <button
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={bound}
+                          class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300"
+                          onclick={() => toggleMcpServer(server)}
+                        >
+                          <McpIcon
+                            size={16}
+                            class="shrink-0 text-base-content/70"
+                          />
+                          <span
+                            class="min-w-0 flex-1 truncate text-sm text-base-content"
+                          >
+                            {server.displayName || server.name}
+                          </span>
+                          {#if bound}
+                            <Check size={14} class="shrink-0 text-primary" />
+                          {/if}
+                        </button>
+                      {/each}
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
 
       <!-- Agent picker: selecting another definition instantiates a new session and navigates there. -->
       <div class="relative">

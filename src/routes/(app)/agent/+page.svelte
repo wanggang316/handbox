@@ -20,6 +20,7 @@
   import AppPanel from "$lib/components/agentsession/AppPanel.svelte";
   import { reconstructAppArtifact } from "$lib/components/agentsession/renderApp";
   import { agentAppPanel } from "$lib/states/agentAppPanel.svelte";
+  import { agentQuoteStore } from "$lib/states/agentQuote.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import type {
     AgentApprovalRequest,
@@ -243,7 +244,11 @@
             </p>
           </div>
         {:else if timelineReady}
-          <AgentTimeline {sessionId} appTitle={appArtifact?.title} />
+          <AgentTimeline
+            {sessionId}
+            appTitle={appArtifact?.title}
+            onQuote={(text) => agentQuoteStore.set(sessionId, text)}
+          />
         {:else}
           <!-- Placeholder so the shell paints first with a stable flex structure
                (Input stays bottom-anchored) until AgentTimeline mounts next frame. -->

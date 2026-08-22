@@ -29,6 +29,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.selectModelFirst": "Select a model first",
   "agent.input.runFailed": "Failed to start the agent run",
   "agent.input.removeImage": "Remove image",
+  "agent.input.removeQuote": "Remove quote",
   "agent.input.awaitingApprovalPlaceholder":
     "Awaiting approval — allow or deny in the dialog",
   "agent.input.placeholder": "Type a message, press Enter to send",
@@ -38,8 +39,12 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
     "Answer the questions above, or skip them",
   "agent.input.awaitingQuestionHint":
     "Awaiting your answer, conversation paused",
-  "agent.input.addImage": "Add image",
-  "agent.input.uploadImage": "Upload image",
+  "agent.input.addMenu": "Add",
+  "agent.input.addImage": "Add photos",
+  "agent.input.skills": "Skills",
+  "agent.input.noSkills": "No skills available",
+  "agent.input.mcp": "MCP",
+  "agent.input.mcpUpdateFailed": "Failed to update MCP server bindings",
   "agent.input.stop": "Stop",
   "agent.input.send": "Send",
   "agent.input.autoExecution": "Auto",
@@ -75,6 +80,7 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.usageOutput": "Output {count}",
   "agent.timeline.copy": "Copy",
   "agent.timeline.copied": "Copied",
+  "agent.timeline.quoteReply": "Quote",
 
   "agent.nav.label": "Message navigation",
   "agent.nav.jumpTo": "Jump to question {index}",

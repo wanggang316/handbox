@@ -7,7 +7,6 @@ import {
   Palette,
   Brain,
   Zap,
-  Sparkles,
   Keyboard,
   Info,
   MousePointerClick,
@@ -17,6 +16,7 @@ import {
   MessagesSquare,
 } from "@lucide/svelte";
 import type { Icon as IconType } from "@lucide/svelte";
+import McpIcon from "$lib/components/ui/McpIcon.svelte";
 import { t } from "$lib/i18n";
 
 export interface SettingsNavItem {
@@ -87,7 +87,7 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
           icon: Wrench,
           url: "/settings/agent-tools",
         },
-        { id: "mcp", title: "MCP", icon: Zap, url: "/settings/mcp" },
+        { id: "mcp", title: "MCP", icon: McpIcon, url: "/settings/mcp" },
         {
           id: "hooks",
           title: t("settings.sidebar.hooks"),
@@ -97,7 +97,7 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
         {
           id: "skills",
           title: t("settings.sidebar.skills"),
-          icon: Sparkles,
+          icon: Zap,
           url: "/settings/skills",
         },
       ],
