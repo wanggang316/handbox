@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles } from "@lucide/svelte";
+  import { Zap } from "@lucide/svelte";
   import { t } from "$lib/i18n";
   import type { SkillInfo } from "$lib/types";
 
@@ -62,7 +62,7 @@
         }}
         onmouseenter={() => onHover(index)}
       >
-        <Sparkles size={16} class="shrink-0 text-base-content/70" />
+        <Zap size={16} class="shrink-0 text-base-content/70" />
         <span class="min-w-0 flex-1 truncate text-sm text-base-content">
           {skill.name}
         </span>

@@ -4,7 +4,6 @@
     Square,
     Paperclip,
     Plus,
-    Sparkles,
     X,
     Ban,
     ChevronDown,
@@ -21,6 +20,7 @@
   import { fly } from "svelte/transition";
   import { goto } from "$app/navigation";
   import Button from "$lib/components/ui/Button.svelte";
+  import McpIcon from "$lib/components/ui/McpIcon.svelte";
   import ModelSelectModal from "./ModelSelectModal.svelte";
   import SkillSlashPopover from "./SkillSlashPopover.svelte";
   import { t } from "$lib/i18n";
@@ -1004,7 +1004,7 @@
                 onclick={() =>
                   (openSubmenu = openSubmenu === "skills" ? null : "skills")}
               >
-                <Sparkles size={16} class="shrink-0 text-base-content/70" />
+                <Zap size={16} class="shrink-0 text-base-content/70" />
                 <span class="min-w-0 flex-1 truncate text-sm text-base-content">
                   {t("agent.input.skills")}
                 </span>
@@ -1032,10 +1032,7 @@
                           class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300"
                           onclick={() => selectSkillFromMenu(skill)}
                         >
-                          <Sparkles
-                            size={16}
-                            class="shrink-0 text-base-content/70"
-                          />
+                          <Zap size={16} class="shrink-0 text-base-content/70" />
                           <span
                             class="min-w-0 flex-1 truncate text-sm text-base-content"
                           >
@@ -1068,7 +1065,7 @@
                 onclick={() =>
                   (openSubmenu = openSubmenu === "mcp" ? null : "mcp")}
               >
-                <Zap size={16} class="shrink-0 text-base-content/70" />
+                <McpIcon size={16} class="shrink-0 text-base-content/70" />
                 <span class="min-w-0 flex-1 truncate text-sm text-base-content">
                   {t("agent.input.mcp")}
                 </span>
@@ -1103,7 +1100,10 @@
                           class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-base-300"
                           onclick={() => toggleMcpServer(server)}
                         >
-                          <Zap size={16} class="shrink-0 text-base-content/70" />
+                          <McpIcon
+                            size={16}
+                            class="shrink-0 text-base-content/70"
+                          />
                           <span
                             class="min-w-0 flex-1 truncate text-sm text-base-content"
                           >
