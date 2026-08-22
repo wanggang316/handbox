@@ -1,52 +1,45 @@
 /**
- * Pure selectors grouping agent sessions into Agent → Project → Session.
+ * Pure selectors grouping agent sessions into Project → Session.
  *
- * Hierarchy: sessions are bucketed by source agent (session.agentDefinitionId);
- * inside a bucket, sessions attached to an existing project nest under a
- * project subgroup while the rest stay direct children. Sessions with no or
- * dangling agent go into a "Chats" bucket that always sorts last.
+ * Hierarchy: the top level is the project (`session.projectId`); every project
+ * is a bucket, and sessions with no or dangling project fall into a trailing
+ * "Ungrouped" bucket. The source agent is not a level — it rides along on the
+ * session row as an icon — so a project shows all of its work in one place
+ * regardless of which agent produced it.
  *
  * Sort contract:
  *  - Session activity key = coalesce(lastMessageAt, createdAt) — never
  *    updatedAt (rename/config writes bump updatedAt but are not "activity").
  *  - Pinned outranks activity at every level: a pinned session sorts ahead of
- *    its unpinned siblings, and a project subgroup / agent bucket containing one
- *    sorts ahead of those that do not. Without that lift, pinning a session
- *    inside a low-activity group would leave the pin invisible.
- *  - Bucket children (project subgroups interleaved with loose sessions) sort
- *    by activity key desc; a project subgroup's key is its latest session's.
- *  - Agent buckets sort by latest activity desc, ties broken by agent name
- *    asc; the "Chats" bucket always comes last — even when it holds a pin, so
- *    the hierarchy's shape never depends on pin state.
+ *    its unpinned siblings, and a project holding one sorts ahead of projects
+ *    that do not. Without that lift, pinning a session inside a low-activity
+ *    project would leave the pin invisible.
+ *  - A project's sort key is its latest session's activity, falling back to the
+ *    project's own createdAt while it holds none — a project created just now
+ *    must land at the top, not below every populated one.
+ *  - Empty projects are kept: a project the user just created has to be visible
+ *    (and clickable) before it holds anything.
+ *  - The "Ungrouped" bucket always comes last — even when it holds a pin, so the
+ *    hierarchy's shape never depends on pin state — and is absent when empty.
  *  - Archived sessions are the caller's business: pass only the sessions that
  *    belong in the tree (see [`partitionArchivedSessions`]).
  *  - Pure: inputs are not mutated; output order is independent of input order.
  */
 
 import type { Timestamp } from "../types";
-import type { Agent } from "../types/agent";
 import type { AgentSession } from "../types/agentSession";
 import type { AgentProject } from "../types/agentProject";
 
-/** Reserved key for the "Chats" bucket (never collides with a UUID). */
-export const CHATS_BUCKET_KEY = "__chats__";
+/** Reserved key for the "Ungrouped" bucket (never collides with a UUID). */
+export const UNGROUPED_BUCKET_KEY = "__ungrouped__";
 
-export interface AgentProjectGroup {
-  project: AgentProject;
-  sessions: AgentSession[];
-}
-
-export type AgentBucketChild =
-  | { kind: "project"; project: AgentProject; sessions: AgentSession[] }
-  | { kind: "session"; session: AgentSession };
-
-export interface AgentSessionBucket {
-  /** Stable key for collapse state / keyed each: agent.id or `CHATS_BUCKET_KEY`. */
+export interface AgentProjectBucket {
+  /** Stable key for collapse state / keyed each: project.id or `UNGROUPED_BUCKET_KEY`. */
   key: string;
-  /** Owning agent; null means the "Chats" bucket. */
-  agent: Agent | null;
-  /** Children sorted by activity key desc (project subgroups interleaved with loose sessions). */
-  children: AgentBucketChild[];
+  /** Owning project; null means the "Ungrouped" bucket. */
+  project: AgentProject | null;
+  /** Members, pinned first then activity desc. */
+  sessions: AgentSession[];
 }
 
 /**
@@ -93,144 +86,68 @@ export function partitionArchivedSessions(sessions: AgentSession[]): {
   return { active, archived: archived.sort(compareSessionsByActivityDesc) };
 }
 
-/** Session: its own key; project subgroup: latest member (sessions pre-sorted desc). */
-function childActivityKey(child: AgentBucketChild): Timestamp {
-  return child.kind === "session"
-    ? sessionActivityKey(child.session)
-    : sessionActivityKey(child.sessions[0]);
-}
-
-/** Whether a child holds a pin, which lifts it above unpinned siblings. */
-function childHasPinned(child: AgentBucketChild): boolean {
-  return child.kind === "session"
-    ? child.session.pinned
-    : child.sessions.some((session) => session.pinned);
-}
-
-/** Stable cross-kind tie-break key (project prefix sorts before session prefix). */
-function childTiebreakKey(child: AgentBucketChild): string {
-  return child.kind === "project"
-    ? `0:${child.project.id}`
-    : `1:${child.session.id}`;
-}
-
-function compareChildrenByActivityDesc(
-  a: AgentBucketChild,
-  b: AgentBucketChild,
-): number {
-  const pinnedA = childHasPinned(a);
-  const pinnedB = childHasPinned(b);
-  if (pinnedA !== pinnedB) return pinnedA ? -1 : 1;
-  const delta = childActivityKey(b) - childActivityKey(a);
-  if (delta !== 0) return delta;
-  const ka = childTiebreakKey(a);
-  const kb = childTiebreakKey(b);
-  return ka < kb ? -1 : ka > kb ? 1 : 0;
+/** Latest member activity; an empty project falls back to its own createdAt. */
+function bucketActivityKey(bucket: AgentProjectBucket): Timestamp {
+  if (bucket.sessions.length > 0) return sessionActivityKey(bucket.sessions[0]);
+  return bucket.project?.createdAt ?? 0;
 }
 
 /**
- * Split a bucket's sessions into project subgroups and loose sessions; a
- * dangling projectId falls back to loose. Everything sorts by activity desc.
- */
-function buildBucketChildren(
-  bucketSessions: AgentSession[],
-  projectById: Map<string, AgentProject>,
-): AgentBucketChild[] {
-  const byProject = new Map<string, AgentSession[]>();
-  const loose: AgentSession[] = [];
-  for (const session of bucketSessions) {
-    const project = session.projectId
-      ? projectById.get(session.projectId)
-      : undefined;
-    if (project) {
-      const list = byProject.get(project.id);
-      if (list) list.push(session);
-      else byProject.set(project.id, [session]);
-    } else {
-      loose.push(session);
-    }
-  }
-
-  const children: AgentBucketChild[] = [];
-  for (const [projectId, list] of byProject) {
-    children.push({
-      kind: "project",
-      project: projectById.get(projectId)!,
-      sessions: list.sort(compareSessionsForTree),
-    });
-  }
-  for (const session of loose) {
-    children.push({ kind: "session", session });
-  }
-  children.sort(compareChildrenByActivityDesc);
-  return children;
-}
-
-/**
- * Group sessions into sorted Agent → Project → Session buckets.
+ * Group sessions into sorted Project → Session buckets.
  *
- *  - Only agents with at least one session get a bucket.
- *  - Sessions with an empty or dangling agentDefinitionId go to "Chats".
+ *  - Every project gets a bucket, sessions or not.
+ *  - Sessions with an empty or dangling projectId go to "Ungrouped", which is
+ *    appended last and omitted when it would be empty.
  *  - Buckets holding a pinned session sort first, then by latest activity desc,
- *    ties by agent name asc; the "Chats" bucket always comes last.
+ *    ties by project name asc.
  *
  * Pure: inputs are not mutated; output order is independent of input order.
  */
-export function groupSessionsByAgent(
-  agents: Agent[],
+export function groupSessionsByProject(
   projects: AgentProject[],
   sessions: AgentSession[],
-): AgentSessionBucket[] {
-  const agentById = new Map<string, Agent>();
-  // Only persisted agents (with an id) can serve as an ownership key.
-  for (const agent of agents) {
-    if (agent.id) agentById.set(agent.id, agent);
+): AgentProjectBucket[] {
+  const projectBuckets = new Map<string, AgentProjectBucket>();
+  for (const project of projects) {
+    projectBuckets.set(project.id, { key: project.id, project, sessions: [] });
   }
-  const projectById = new Map<string, AgentProject>();
-  for (const project of projects) projectById.set(project.id, project);
 
-  // Bucket by resolved agent; missing/dangling agents fall into CHATS_BUCKET_KEY.
-  const sessionsByBucket = new Map<string, AgentSession[]>();
+  const ungrouped: AgentSession[] = [];
   for (const session of sessions) {
-    const agentId =
-      session.agentDefinitionId && agentById.has(session.agentDefinitionId)
-        ? session.agentDefinitionId
-        : CHATS_BUCKET_KEY;
-    const list = sessionsByBucket.get(agentId);
-    if (list) list.push(session);
-    else sessionsByBucket.set(agentId, [session]);
+    const bucket = session.projectId
+      ? projectBuckets.get(session.projectId)
+      : undefined;
+    if (bucket) bucket.sessions.push(session);
+    else ungrouped.push(session);
   }
 
-  const agentBuckets: AgentSessionBucket[] = [];
-  let chatsBucket: AgentSessionBucket | null = null;
-  for (const [key, bucketSessions] of sessionsByBucket) {
-    const bucket: AgentSessionBucket = {
-      key,
-      agent: key === CHATS_BUCKET_KEY ? null : (agentById.get(key) ?? null),
-      children: buildBucketChildren(bucketSessions, projectById),
-    };
-    if (key === CHATS_BUCKET_KEY) chatsBucket = bucket;
-    else agentBuckets.push(bucket);
-  }
+  const buckets = [...projectBuckets.values()];
+  for (const bucket of buckets) bucket.sessions.sort(compareSessionsForTree);
 
-  // children are sorted desc, so the first child carries the bucket's latest
-  // activity — and, since pinned children sort first, also its pin state.
-  const bucketSortKey = (bucket: AgentSessionBucket): Timestamp =>
-    bucket.children.length ? childActivityKey(bucket.children[0]) : 0;
-  const bucketHasPinned = (bucket: AgentSessionBucket): boolean =>
-    bucket.children.length > 0 && childHasPinned(bucket.children[0]);
+  // sessions are sorted desc and pinned members sort first, so the first one
+  // carries both the bucket's latest activity and its pin state.
+  const bucketHasPinned = (bucket: AgentProjectBucket): boolean =>
+    bucket.sessions.length > 0 && bucket.sessions[0].pinned;
 
-  agentBuckets.sort((a, b) => {
+  buckets.sort((a, b) => {
     const pinnedA = bucketHasPinned(a);
     const pinnedB = bucketHasPinned(b);
     if (pinnedA !== pinnedB) return pinnedA ? -1 : 1;
-    const delta = bucketSortKey(b) - bucketSortKey(a);
+    const delta = bucketActivityKey(b) - bucketActivityKey(a);
     if (delta !== 0) return delta;
-    const nameA = a.agent?.name ?? "";
-    const nameB = b.agent?.name ?? "";
+    const nameA = a.project?.name ?? "";
+    const nameB = b.project?.name ?? "";
     if (nameA !== nameB) return nameA < nameB ? -1 : 1;
     return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
   });
 
-  return chatsBucket ? [...agentBuckets, chatsBucket] : agentBuckets;
+  if (ungrouped.length === 0) return buckets;
+  return [
+    ...buckets,
+    {
+      key: UNGROUPED_BUCKET_KEY,
+      project: null,
+      sessions: ungrouped.sort(compareSessionsForTree),
+    },
+  ];
 }
