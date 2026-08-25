@@ -1220,7 +1220,7 @@
       onclick={handleProjectDelete}
     >
       <Trash2 size={14} />
-      {t("agent.list.deleteProject")}
+      {t("agent.list.removeProject")}
     </button>
   </div>
 {:else if contextMenu?.kind === "agentPicker"}

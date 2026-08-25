@@ -182,7 +182,8 @@ export const agentZh = {
   "agent.list.removeFromProject": "移出项目",
   "agent.list.moveFailed": "移动会话失败",
   "agent.list.copyPath": "复制路径",
-  "agent.list.deleteProject": "删除项目",
+  // Menu label only; the confirm dialog spells out the cascade.
+  "agent.list.removeProject": "移除",
   "agent.list.copyId": "复制ID",
   "agent.list.untitledSession": "未命名",
 

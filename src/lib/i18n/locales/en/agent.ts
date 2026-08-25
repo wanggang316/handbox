@@ -194,7 +194,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.removeFromProject": "Remove from project",
   "agent.list.moveFailed": "Failed to move the session",
   "agent.list.copyPath": "Copy path",
-  "agent.list.deleteProject": "Delete project",
+  // Menu label only; the confirm dialog spells out the cascade.
+  "agent.list.removeProject": "Remove",
   "agent.list.copyId": "Copy ID",
   "agent.list.untitledSession": "Untitled",
 
