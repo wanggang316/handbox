@@ -21,6 +21,11 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.messageNav": "Message navigation rail",
   "settings.general.messageNavDesc":
     "Show a tick per question beside the conversation; hover to preview, click to jump",
+  "settings.general.editorSection": "Editor",
+  "settings.general.defaultEditor": "Default editor",
+  "settings.general.defaultEditorDesc":
+    "The app “Open in …” uses by default; a project can override it",
+  "settings.general.defaultEditorAuto": "Choose automatically",
 
   // Sidebar
   "settings.sidebar.backToApp": "Back to app",
