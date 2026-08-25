@@ -23,15 +23,15 @@
 
   const session = $derived(agentSessionState.currentSession);
 
-  // Optional project name: projects are loaded by the sidebar AgentProjectList
-  // and read reactively here; null (no project / list not ready) shows title only.
-  const projectName = $derived.by(() => {
+  // The session's project, if any: projects are loaded by the sidebar
+  // AgentProjectList and read reactively here. null (no project / list not
+  // ready) shows title only and leaves the global editor default in charge.
+  const project = $derived.by(() => {
     const projectId = session?.projectId;
     if (!projectId) return null;
-    return (
-      agentProjectState.projects.find((p) => p.id === projectId)?.name ?? null
-    );
+    return agentProjectState.projects.find((p) => p.id === projectId) ?? null;
   });
+  const projectName = $derived(project?.name ?? null);
 
   // "Open in ..." split button: opens the session working dir in an external
   // editor / terminal / Finder. Probing, icons and launching live in the
@@ -47,12 +47,16 @@
     settingsState.settings?.agent?.defaultEditorId ?? null,
   );
 
-  // Resolve the default target: the stored default if still available, else
-  // the first editor/terminal, else the first target (usually Finder).
+  // Resolve the default target: the project's own editor first (set in the
+  // project settings panel), then the global default, then the first
+  // editor/terminal, else the first target (usually Finder). Each step falls
+  // through when its target is not installed on this machine.
   const resolvedDefault = $derived.by((): OpenInTarget | null => {
     const targets = openInTargets;
     if (!targets || targets.length === 0) return null;
+    const projectEditorId = project?.defaultEditorId ?? null;
     return (
+      targets.find((t) => t.id === projectEditorId) ??
       targets.find((t) => t.id === defaultEditorId) ??
       targets.find((t) => t.kind !== "system") ??
       targets[0] ??
@@ -241,8 +245,11 @@
             {:else if openInTargets && openInTargets.length > 0}
               {#each openInTargets as target (target.id)}
                 {@const FallbackIcon = iconForKind(target.kind)}
+                <!-- Marks the target the split button itself would open, which
+                     is the project's editor where one is set — not necessarily
+                     the global default. -->
                 {@const isDefault =
-                  target.kind !== "system" && target.id === defaultEditorId}
+                  target.kind !== "system" && target.id === resolvedDefault?.id}
                 <button
                   type="button"
                   class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"

@@ -8,8 +8,20 @@ import {
 import type { AgentProject } from "../types/agentProject";
 import type { AgentSession } from "../types/agentSession";
 
-function project(id: string, createdAt = 0, name = id): AgentProject {
-  return { id, path: `/p/${id}`, name, createdAt, updatedAt: createdAt };
+function project(
+  id: string,
+  createdAt = 0,
+  name = id,
+  opts: { pinned?: boolean } = {},
+): AgentProject {
+  return {
+    id,
+    path: `/p/${id}`,
+    name,
+    pinned: opts.pinned ?? false,
+    createdAt,
+    updatedAt: createdAt,
+  };
 }
 
 function session(
@@ -134,6 +146,31 @@ describe("groupSessionsByProject", () => {
       ],
     );
     expect(buckets.map((b) => b.key)).toEqual(["A", "B"]);
+  });
+
+  it("lifts a pinned project above a busier one even while it is empty", () => {
+    const buckets = groupSessionsByProject(
+      [project("A", 0, "A", { pinned: true }), project("B")],
+      [session("b1", 500, { projectId: "B" })],
+    );
+    expect(buckets.map((b) => b.key)).toEqual(["A", "B"]);
+  });
+
+  it("ranks pinned projects among themselves by activity", () => {
+    const buckets = groupSessionsByProject(
+      [
+        project("A", 0, "A", { pinned: true }),
+        project("B", 0, "B", { pinned: true }),
+        project("C"),
+      ],
+      [
+        session("a1", 100, { projectId: "A" }),
+        session("b1", 200, { projectId: "B" }),
+        // C is busiest but unpinned, so it still sorts below both.
+        session("c-pinned", 900, { projectId: "C" }),
+      ],
+    );
+    expect(buckets.map((b) => b.key)).toEqual(["B", "A", "C"]);
   });
 
   it("keeps Ungrouped last even when it holds the only pin", () => {

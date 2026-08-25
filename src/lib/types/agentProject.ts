@@ -11,6 +11,19 @@ export interface AgentProject {
   id: UUID;
   path: string;
   name: string;
+  /** Floats the project to the top of the sidebar's project section. */
+  pinned: boolean;
+  /** `#rrggbb` tint for the sidebar row's name; null = the default color. */
+  color?: string | null;
+  /** Per-project "Open in ..." target id; null = follow the global default. */
+  defaultEditorId?: string | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+/** The settings panel's fields, written as one group (null = unset). */
+export interface AgentProjectSettings {
+  name: string;
+  color: string | null;
+  defaultEditorId: string | null;
 }
