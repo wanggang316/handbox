@@ -9,6 +9,7 @@
   import {
     agentSessionState,
     agentSessionActions,
+    BUILTIN_CHAT_AGENT_ID,
   } from "$lib/states/agentSession.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
@@ -29,6 +30,15 @@
 
   let sessionId = $derived(
     browser && $page.url ? $page.url.searchParams.get("id") || "" : "",
+  );
+
+  // `?new=1` is the unsent session: the composer runs against an in-memory
+  // draft and the first send creates the row (see agentSession.materializeDraft),
+  // so opening New and walking away leaves nothing behind.
+  const draftMode = $derived(
+    browser && $page.url
+      ? !sessionId && $page.url.searchParams.get("new") === "1"
+      : false,
   );
 
   // Sidebar's AgentProjectList already fetched projects; read-only here to pick landing copy.
@@ -69,10 +79,24 @@
       return;
     }
     if (!sessionId) {
+      if (draftMode) {
+        // Re-entrant: returns the open draft, and seeds a fresh one after a
+        // reload (drafts are in-memory, so a reload of ?new=1 has none).
+        // untrack: it reads the draft it is about to write, which would
+        // otherwise make this effect retrigger itself.
+        untrack(() => agentSessionActions.startDraft(BUILTIN_CHAT_AGENT_ID)).catch(
+          (error) => console.error("Failed to open a draft session:", error),
+        );
+        return;
+      }
+      agentSessionActions.clearDraft();
       agentSessionState.currentSession = null;
       return;
     }
     const id = sessionId;
+    // Opening a real session abandons any unsent draft. A promoted one is
+    // already gone, so this is a no-op on the draft → session transition.
+    agentSessionActions.clearDraft();
     if (agentSessionActions.setCurrentById(id)) {
       return;
     }
@@ -103,6 +127,18 @@
   });
 
   const currentSession = $derived(agentSessionState.currentSession);
+
+  // Identity the composer is keyed on. Normally the session id, but a draft
+  // that just became a session keeps the draft's: that component instance is
+  // still awaiting its own first run, and remounting it would drop the message
+  // it would restore should the run fail to start.
+  const composerKey = $derived.by(() => {
+    const promotion = agentSessionState.lastPromotion;
+    if (!sessionId) {
+      return currentSession?.id ?? "";
+    }
+    return promotion?.sessionId === sessionId ? promotion.draftId : sessionId;
+  });
 
   // Seed the committed transcript on open (keyed per sessionId)
   $effect(() => {
@@ -223,7 +259,7 @@
 </script>
 
 <div class="flex-1 flex flex-col h-full">
-  {#if sessionId}
+  {#if sessionId || draftMode}
     <AgentSessionHeader />
 
     <!-- Left column (timeline + input) plus the optional render_app panel. -->
@@ -256,13 +292,13 @@
         {/if}
 
         <!--
-          `{#key currentSession.id}` remounts AgentInput per session: all transient
+          `{#key composerKey}` remounts AgentInput per session: all transient
           composer state (input / attachments / forced chip / slash overlay) resets
           and never leaks between sessions. A fresh mount is the correct semantics.
         -->
         <div class="shrink-0 chat-column pb-3">
           {#if currentSession}
-            {#key currentSession.id}
+            {#key composerKey}
               <AgentInput session={currentSession} />
             {/key}
           {/if}

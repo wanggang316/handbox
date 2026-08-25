@@ -19,10 +19,9 @@
   import { authState, login, logout, confirmLogout } from "$lib/states/auth.svelte";
   import { updateState } from "$lib/states/update.svelte";
   import {
-    agentSessionState,
     agentSessionActions,
+    BUILTIN_CHAT_AGENT_ID,
   } from "$lib/states/agentSession.svelte";
-  import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { toastActions } from "$lib/states/toast.svelte";
   import { normalizeError } from "$lib/utils/error";
 
@@ -40,32 +39,16 @@
     goto(`/jobs`);
   }
 
-  // Seeded general-chat AgentDefinition (working_dir_mode "none": pure dialog).
-  const BUILTIN_CHAT_AGENT_ID = "builtin-chat";
-
-  // New Chat is idempotent, Claude-style: an existing empty general-chat
-  // session (no project, no persisted turns, no active run) is reopened
-  // instead of stacking up blank sessions on repeated clicks.
+  // New Chat opens a DRAFT of the general-chat agent: no row is written until
+  // the first message is sent, so an abandoned New leaves nothing in the
+  // sidebar. Repeated clicks land on the same draft, which is the idempotence
+  // the old "reopen an empty session" branch provided.
   async function handleNewChatClick() {
-    const reusable = agentSessionState.sessions.find(
-      (session) =>
-        session.agentDefinitionId === BUILTIN_CHAT_AGENT_ID &&
-        !session.projectId &&
-        session.messageCount === 0 &&
-        !agentRunStore.runStateFor(session.id).isRunning &&
-        agentRunStore.runStateFor(session.id).messages.length === 0,
-    );
-    if (reusable) {
-      goto(`/agent?id=${reusable.id}`);
-      return;
-    }
     try {
-      const session = await agentSessionActions.createSessionFromDefinition(
-        BUILTIN_CHAT_AGENT_ID,
-      );
-      goto(`/agent?id=${session.id}`);
+      await agentSessionActions.startDraft(BUILTIN_CHAT_AGENT_ID);
+      goto("/agent?new=1");
     } catch (error) {
-      console.error("Failed to create chat session:", error);
+      console.error("Failed to open a draft chat session:", error);
       const normalized = normalizeError(error, t("agent.list.createSessionFailed"));
       toastActions.error(normalized.hint ?? normalized.message);
     }

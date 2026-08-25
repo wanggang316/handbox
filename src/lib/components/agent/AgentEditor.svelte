@@ -190,7 +190,7 @@
     description: "",
     builtinTools: [],
     workingDirMode: "optional",
-    toolExecutionMode: "auto",
+    toolExecutionMode: "manual",
   });
 
   const CurrentIcon = $derived(resolveAgentIcon(formData.icon));
@@ -351,7 +351,7 @@
           data.workingDirMode
         );
       }
-      if (data.toolExecutionMode !== (agent.toolExecutionMode ?? "auto")) {
+      if (data.toolExecutionMode !== (agent.toolExecutionMode ?? "manual")) {
         await agentActions.updateAgentField(
           agent.id,
           "toolExecutionMode",
@@ -398,7 +398,7 @@
             data.workingDirMode
           );
         }
-        if (data.toolExecutionMode !== "auto") {
+        if (data.toolExecutionMode !== "manual") {
           await agentActions.updateAgentField(
             newAgent.id,
             "toolExecutionMode",
@@ -448,7 +448,7 @@
         description: agent.description ?? "",
         builtinTools: agent.builtinTools ? [...agent.builtinTools] : [],
         workingDirMode: agent.workingDirMode ?? "optional",
-        toolExecutionMode: agent.toolExecutionMode ?? "auto",
+        toolExecutionMode: agent.toolExecutionMode ?? "manual",
       };
     } else {
       formData = {
@@ -462,7 +462,7 @@
         description: "",
         builtinTools: [],
         workingDirMode: "optional",
-        toolExecutionMode: "auto",
+        toolExecutionMode: "manual",
       };
     }
 

@@ -21,13 +21,31 @@ import {
   applyDefaultModel,
   resolveAgentDefaultModel,
 } from "../utils/defaultModel";
-import { agentState } from "./agent.svelte";
+import {
+  buildDraftSession,
+  isDraftSessionId,
+  newDraftSessionId,
+} from "./draftSession";
+import { agentState, agentActions } from "./agent.svelte";
 import { settingsState } from "./settings.svelte";
 import { getAllModels, providerActions } from "./provider.svelte";
+
+/** Seeded general-chat AgentDefinition; the agent a bare "New chat" drafts. */
+export const BUILTIN_CHAT_AGENT_ID = "builtin-chat";
 
 let sessions = $state<AgentSession[]>([]);
 let currentSession = $state<AgentSession | null>(null);
 let isLoading = $state(false);
+
+// The unsent session, if any: "New chat" configures one of these instead of
+// writing a row, and the first send promotes it (see `materializeDraft`).
+// At most one exists — a second New reuses it rather than stacking blanks.
+let draftSession = $state<AgentSession | null>(null);
+
+// The draft → session promotion that just happened, so the page can tell "the
+// user opened another session" (remount the composer) from "the draft I am
+// mounted as became real" (keep it: its first send is still in flight).
+let lastPromotion = $state<{ draftId: UUID; sessionId: UUID } | null>(null);
 
 // Session ids whose title was auto-generated (once per session; removed on
 // failure to allow a retry).
@@ -125,6 +143,61 @@ async function maybeAutoGenerateTitle(
   }
 }
 
+/**
+ * In-memory counterpart of `updateAgentSessionField` for a draft. Only the
+ * fields the composer can edit before the first send are accepted; anything
+ * else means a caller reached a draft through a path that needs a real row, so
+ * it warns rather than silently dropping the write.
+ */
+function applyDraftField(
+  id: UUID,
+  field: AgentSessionField,
+  value: string | number | string[] | McpServerConfig[] | null,
+): void {
+  const draft = draftSession;
+  if (!draft || draft.id !== id) return;
+
+  const text = typeof value === "string" && value !== "" ? value : undefined;
+  switch (field) {
+    case "name":
+      draft.name = text ?? "";
+      break;
+    case "modelId":
+      draft.modelId = text;
+      break;
+    case "providerId":
+      draft.providerId = text;
+      break;
+    case "thinkingLevel":
+      draft.thinkingLevel = text;
+      break;
+    case "workingDir":
+      draft.workingDir = text;
+      break;
+    case "toolExecutionMode":
+      draft.toolExecutionMode = text;
+      break;
+    default:
+      console.warn(`Draft session ignores the field update: ${field}`);
+      return;
+  }
+  draft.updatedAt = Date.now();
+  if (currentSession?.id === id) {
+    currentSession = draft;
+  }
+}
+
+/** In-memory counterpart of `setAgentSessionProject` for a draft. */
+function applyDraftProject(id: UUID, projectId: UUID | null): void {
+  const draft = draftSession;
+  if (!draft || draft.id !== id) return;
+  draft.projectId = projectId ?? undefined;
+  draft.updatedAt = Date.now();
+  if (currentSession?.id === id) {
+    currentSession = draft;
+  }
+}
+
 /** Writes a session object into the list and, when it is current, there too. */
 function applySession(id: UUID, session: AgentSession): void {
   const index = sessions.findIndex((item) => item.id === id);
@@ -176,6 +249,14 @@ export const agentSessionState = {
   set isLoading(value) {
     isLoading = value;
   },
+
+  get draftSession() {
+    return draftSession;
+  },
+
+  get lastPromotion() {
+    return lastPromotion;
+  },
 };
 
 export const agentSessionActions = {
@@ -209,6 +290,124 @@ export const agentSessionActions = {
     } finally {
       isLoading = false;
     }
+  },
+
+  /**
+   * Open (or re-seed) the draft session for a definition. No row is written:
+   * "New chat" only configures a session, and `materializeDraft` creates it on
+   * the first send, so abandoning a New leaves nothing behind.
+   *
+   * Re-entrant on purpose. A second New with the same definition returns the
+   * existing draft — the idempotence the old "reuse an empty session" branch
+   * provided — while switching the composer's agent re-seeds in place, keeping
+   * the draft id so the composer is not remounted mid-edit.
+   */
+  async startDraft(
+    definitionId: UUID,
+    options?: { workingDir?: string },
+  ): Promise<AgentSession> {
+    const existing = draftSession;
+    if (
+      existing &&
+      existing.agentDefinitionId === definitionId &&
+      !options?.workingDir
+    ) {
+      currentSession = existing;
+      return existing;
+    }
+
+    // The definition supplies the capability snapshot; load it if the list is
+    // cold. A failure leaves `definition` null: the draft still opens (with the
+    // caller's model pair) rather than blocking New behind a fetch.
+    if (agentState.agents.length === 0) {
+      try {
+        await agentActions.loadAgents();
+      } catch (error) {
+        console.error("Failed to load agents for the draft session:", error);
+      }
+    }
+    const definition =
+      agentState.agents.find((agent) => agent.id === definitionId) ?? null;
+    const withModel = await withDefaultModel({});
+
+    const draft = buildDraftSession({
+      id: existing?.id ?? newDraftSessionId(),
+      definitionId,
+      definition,
+      modelId: withModel?.modelId,
+      providerId: withModel?.providerId,
+      // Carried across an agent switch so a directory picked for the previous
+      // agent is not silently dropped; a "none" definition discards it.
+      workingDir: options?.workingDir ?? existing?.workingDir,
+      projectId: options?.workingDir ? undefined : existing?.projectId,
+      now: Date.now(),
+    });
+
+    draftSession = draft;
+    currentSession = draft;
+    lastPromotion = null;
+    return draft;
+  },
+
+  /** Drop the draft (navigating to a real session). Idempotent. */
+  clearDraft(): void {
+    if (!draftSession) return;
+    if (currentSession?.id === draftSession.id) {
+      currentSession = null;
+    }
+    draftSession = null;
+  },
+
+  /**
+   * Turn the draft into a real session: instantiate from its definition, then
+   * write back the fields instantiation cannot carry (thinking level, tool
+   * execution mode) only when the user moved them off the definition's value.
+   *
+   * Called from the first send, so a failure here must leave the draft intact —
+   * the composer restores the message and the user can retry.
+   */
+  async materializeDraft(): Promise<AgentSession> {
+    const draft = draftSession;
+    if (!draft?.agentDefinitionId) {
+      throw new Error("no draft session to materialize");
+    }
+
+    let session = await agentSessionApi.createSessionFromDefinition(
+      draft.agentDefinitionId,
+      {
+        // A project wins over the raw dir on the backend, which is what the
+        // composer's picker means: the dir it chose became this project.
+        projectId: draft.projectId,
+        workingDir: draft.workingDir,
+        modelId: draft.modelId,
+        providerId: draft.providerId,
+      },
+    );
+
+    const patches: [AgentSessionField, string][] = [];
+    if (draft.thinkingLevel && draft.thinkingLevel !== session.thinkingLevel) {
+      patches.push(["thinkingLevel", draft.thinkingLevel]);
+    }
+    if (
+      draft.toolExecutionMode &&
+      draft.toolExecutionMode !== session.toolExecutionMode
+    ) {
+      patches.push(["toolExecutionMode", draft.toolExecutionMode]);
+    }
+    for (const [field, value] of patches) {
+      session = await agentSessionApi.updateAgentSessionField(
+        session.id,
+        field,
+        value,
+      );
+    }
+
+    const existing = Array.isArray(sessions) ? sessions : [];
+    sessions = [session, ...existing];
+    currentSession = session;
+    lastPromotion = { draftId: draft.id, sessionId: session.id };
+    draftSession = null;
+    return session;
   },
 
   /**
@@ -352,6 +551,12 @@ export const agentSessionActions = {
    * reached would be worse than a short wait.
    */
   async setProject(id: UUID, projectId: UUID | null): Promise<void> {
+    // A draft has no row to move: it remembers the project and is created
+    // inside it on the first send.
+    if (isDraftSessionId(id)) {
+      applyDraftProject(id, projectId);
+      return;
+    }
     try {
       applySession(
         id,
@@ -386,6 +591,12 @@ export const agentSessionActions = {
     field: AgentSessionField,
     value: string | number | string[] | McpServerConfig[] | null,
   ): Promise<void> {
+    // A draft has no row to update: the composer edits it in memory and the
+    // values ride into creation on the first send.
+    if (isDraftSessionId(id)) {
+      applyDraftField(id, field, value);
+      return;
+    }
     const updated = await agentSessionApi.updateAgentSessionField(
       id,
       field,
