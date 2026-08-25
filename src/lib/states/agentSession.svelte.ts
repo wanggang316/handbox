@@ -187,6 +187,17 @@ function applyDraftField(
   }
 }
 
+/** In-memory counterpart of `setAgentSessionProject` for a draft. */
+function applyDraftProject(id: UUID, projectId: UUID | null): void {
+  const draft = draftSession;
+  if (!draft || draft.id !== id) return;
+  draft.projectId = projectId ?? undefined;
+  draft.updatedAt = Date.now();
+  if (currentSession?.id === id) {
+    currentSession = draft;
+  }
+}
+
 /** Writes a session object into the list and, when it is current, there too. */
 function applySession(id: UUID, session: AgentSession): void {
   const index = sessions.findIndex((item) => item.id === id);
@@ -328,6 +339,7 @@ export const agentSessionActions = {
       // Carried across an agent switch so a directory picked for the previous
       // agent is not silently dropped; a "none" definition discards it.
       workingDir: options?.workingDir ?? existing?.workingDir,
+      projectId: options?.workingDir ? undefined : existing?.projectId,
       now: Date.now(),
     });
 
@@ -363,6 +375,9 @@ export const agentSessionActions = {
     let session = await agentSessionApi.createSessionFromDefinition(
       draft.agentDefinitionId,
       {
+        // A project wins over the raw dir on the backend, which is what the
+        // composer's picker means: the dir it chose became this project.
+        projectId: draft.projectId,
         workingDir: draft.workingDir,
         modelId: draft.modelId,
         providerId: draft.providerId,
@@ -526,6 +541,29 @@ export const agentSessionActions = {
     } catch (error) {
       rollback();
       console.error("Failed to archive agent session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Move a session into a project (`null` detaches it). Not optimistic: the
+   * backend rejects a missing project, and a row that jumped to a group it never
+   * reached would be worse than a short wait.
+   */
+  async setProject(id: UUID, projectId: UUID | null): Promise<void> {
+    // A draft has no row to move: it remembers the project and is created
+    // inside it on the first send.
+    if (isDraftSessionId(id)) {
+      applyDraftProject(id, projectId);
+      return;
+    }
+    try {
+      applySession(
+        id,
+        await agentSessionApi.setAgentSessionProject(id, projectId),
+      );
+    } catch (error) {
+      console.error("Failed to set agent session project:", error);
       throw error;
     }
   },

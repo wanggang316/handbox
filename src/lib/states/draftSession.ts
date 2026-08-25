@@ -38,6 +38,8 @@ export interface DraftSessionSeed {
   modelId?: string;
   providerId?: string;
   workingDir?: string;
+  /** Project the working dir resolved to; dropped alongside it for `"none"`. */
+  projectId?: string;
   now: number;
 }
 
@@ -53,11 +55,12 @@ export interface DraftSessionSeed {
  */
 export function buildDraftSession(seed: DraftSessionSeed): AgentSession {
   const definition = seed.definition;
-  const workingDir =
-    definition?.workingDirMode === "none" ? undefined : seed.workingDir;
+  const takesDirectory = definition?.workingDirMode !== "none";
+  const workingDir = takesDirectory ? seed.workingDir : undefined;
 
   return {
     id: seed.id,
+    projectId: takesDirectory ? seed.projectId : undefined,
     agentDefinitionId: seed.definitionId,
     name: definition?.name ?? "",
     modelId: seed.modelId,

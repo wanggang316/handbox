@@ -21,7 +21,7 @@ import {
   PanelTop,
   AppWindow,
   MessageCircleQuestionMark,
-  Sparkles,
+  Zap,
 } from "@lucide/svelte";
 import type { MessageKey } from "$lib/i18n";
 import { BUILTIN_TOOL_IDS } from "./builtinToolIds";
@@ -106,7 +106,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     id: "skill",
     labelKey: "agent.tool.skill",
-    icon: Sparkles,
+    icon: Zap,
     requiresWorkingDir: false,
   },
 ];

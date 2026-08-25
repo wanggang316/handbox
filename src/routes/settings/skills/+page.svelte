@@ -10,7 +10,7 @@
   import { t } from "$lib/i18n";
   import {
     LoaderCircle,
-    Sparkles,
+    Zap,
     RefreshCw,
     FolderOpen,
     ChevronsUpDown,
@@ -211,7 +211,7 @@
 
       {#if !skillState.isLoading && skillState.skills.length === 0 && !skillState.error}
         <div class="p-8 text-center">
-          <Sparkles class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
+          <Zap class="h-12 w-12 text-base-content/50 mx-auto mb-4" />
           <p class="text-base text-base-content/70 mb-1">{t("settings.skills.empty")}</p>
           <p class="text-sm text-base-content/60">
             {t("settings.skills.emptyHint")}

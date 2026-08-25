@@ -37,6 +37,8 @@
   import AppPill from "./AppPill.svelte";
   import { RENDER_APP_TOOL_NAME } from "./renderApp";
   import MessageNavRail, { type MessageNavItem } from "./MessageNavRail.svelte";
+  import SelectionReplyButton from "./SelectionReplyButton.svelte";
+  import { splitQuote } from "./quote";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -48,9 +50,15 @@
     sessionId: string;
     /** Folded render_app artifact title (from +page); AppPill fallback. */
     appTitle?: string;
+    /**
+     * Receives text the reader selected in the transcript and chose to quote.
+     * Omitted where there is no composer to hand it to (the quick panel), which
+     * also keeps the floating affordance out of read-only surfaces.
+     */
+    onQuote?: (text: string) => void;
   }
 
-  let { sessionId, appTitle }: Props = $props();
+  let { sessionId, appTitle, onQuote }: Props = $props();
 
   const runState = $derived(agentRunStore.runStateFor(sessionId));
 
@@ -257,7 +265,9 @@
         liveAssistantIndex >= 0),
   );
 
-  let messagesContainer: HTMLDivElement;
+  // $state so children reading it as a prop (the selection pill's viewport)
+  // see it once `bind:this` lands.
+  let messagesContainer = $state<HTMLDivElement>();
 
   function scrollToBottom() {
     if (messagesContainer) {
@@ -666,7 +676,14 @@
           answer = assistantText(next);
         }
       }
-      items.push({ index: i, question: userText(message), answer });
+      // The rail lists questions, so a quoted passage is only the fallback
+      // when the reader sent one with nothing of their own.
+      const parts = splitQuote(userText(message));
+      items.push({
+        index: i,
+        question: parts.text.trim() || (parts.quote ?? ""),
+        answer,
+      });
     }
     return items;
   });
@@ -806,21 +823,42 @@
       {#each visibleMessages as message, offset (windowStart + offset)}
         {@const i = windowStart + offset}
         {#if message.role === "user"}
+          {@const parts = splitQuote(userText(message))}
           <!-- data-message-index anchors the reader's position across a teardown
                (see scrollMemory): the row, not a pixel offset, is what survives
                older messages mounting in later. -->
           <!-- data-question marks it as a rail stop as well: the pin target on
                send, and where a tick jumps to. -->
-          <div class="flex justify-end" data-message-index={i} data-question>
+          <!-- data-no-quote: quoting is for what the agent said. The reader's
+               own words are already in the transcript above the composer, so
+               offering to quote them back is noise. -->
+          <div
+            class="flex justify-end"
+            data-message-index={i}
+            data-question
+            data-no-quote
+          >
             <div class="flex flex-col items-end">
               <div
                 class="inline-block max-w-full px-3.5 py-2 rounded-lg bg-base-200 text-base-content border border-[var(--hairline)]"
               >
-                <div
-                  class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
-                >
-                  {userText(message)}
-                </div>
+                <!-- A quoted passage reads as a quote, not as part of the
+                     question: the envelope it travels in is a wire format for
+                     the model (see quote.ts), never something to show raw. -->
+                {#if parts.quote}
+                  <div
+                    class="mb-2 border-l-2 border-base-content/25 pl-2 whitespace-pre-wrap break-words text-[13px] leading-[1.55] text-left text-base-content/55"
+                  >
+                    {parts.quote}
+                  </div>
+                {/if}
+                {#if parts.text}
+                  <div
+                    class="whitespace-pre-wrap break-words text-[15px] leading-[1.6] text-left"
+                  >
+                    {parts.text}
+                  </div>
+                {/if}
               </div>
             </div>
           </div>
@@ -1024,6 +1062,17 @@
          its height never feeds back into the measurement. -->
     <div style="height: {spacer}px" aria-hidden="true"></div>
   </div>
+
+  <!-- Selection affordance: anchored to `contentEl`, so only transcript text
+       (never the trailing spacer or the rail) can be quoted, and kept inside
+       the scroller so it never lands under the window's drag region. -->
+  {#if onQuote}
+    <SelectionReplyButton
+      container={contentEl}
+      viewport={messagesContainer}
+      onReply={onQuote}
+    />
+  {/if}
 
   {#if showNavRail}
     <MessageNavRail

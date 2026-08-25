@@ -344,14 +344,18 @@ impl McpRepository {
         Ok(McpServer {
             id: row.try_get("id")?,
             name: row.try_get("name")?,
-            display_name: row.try_get("display_name").ok(),
-            description: row.try_get("description").ok(),
+            // Nullable columns are read as `Option<T>`: sqlx-sqlite decodes SQL
+            // NULL into a non-Option target as `""` / `0` rather than erroring,
+            // so `try_get(..).ok()` would hand out `Some("")` and defeat every
+            // downstream `?? name` / `unwrap_or(&name)` fallback.
+            display_name: row.try_get::<Option<String>, _>("display_name")?,
+            description: row.try_get::<Option<String>, _>("description")?,
             connection_type: McpConnectionType::from(connection_type_value.as_str()),
             command: row.try_get("command")?,
             args,
-            working_dir: row.try_get("working_dir").ok(),
+            working_dir: row.try_get::<Option<String>, _>("working_dir")?,
             env,
-            endpoint: row.try_get("endpoint").ok(),
+            endpoint: row.try_get::<Option<String>, _>("endpoint")?,
             headers,
             timeout_ms: row
                 .try_get::<Option<i64>, _>("timeout_ms")?
@@ -362,14 +366,81 @@ impl McpRepository {
             prompts,
             resources,
             enabled_tools,
-            last_sync_at: row.try_get("last_sync_at").ok(),
+            last_sync_at: row.try_get::<Option<i64>, _>("last_sync_at")?,
             last_error: row
-                .try_get::<Option<String>, _>("last_error")
-                .ok()
-                .flatten()
+                .try_get::<Option<String>, _>("last_error")?
                 .and_then(|s| serde_json::from_str(&s).ok()),
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::Database;
+    use tempfile::TempDir;
+
+    async fn repo() -> (McpRepository, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let db = Arc::new(
+            Database::new(&dir.path().join("test.db"))
+                .await
+                .expect("database"),
+        );
+        (McpRepository::new(db), dir)
+    }
+
+    fn server_without_optionals() -> McpServer {
+        McpServer {
+            id: "server-1".to_string(),
+            name: "websearch".to_string(),
+            display_name: None,
+            description: None,
+            connection_type: McpConnectionType::Stdio,
+            command: "npx".to_string(),
+            args: vec!["-y".to_string()],
+            working_dir: None,
+            env: HashMap::new(),
+            endpoint: None,
+            headers: HashMap::new(),
+            timeout_ms: None,
+            enabled: true,
+            status: McpServerStatus::Ready,
+            tools: Vec::new(),
+            prompts: Vec::new(),
+            resources: Vec::new(),
+            enabled_tools: vec!["search".to_string()],
+            last_sync_at: None,
+            last_error: None,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        }
+    }
+
+    /// sqlx-sqlite decodes SQL NULL into a non-Option target as `""` / `0`
+    /// instead of erroring, so reading nullable columns via `try_get(..).ok()`
+    /// yields `Some("")` and silently defeats every `display_name.or(name)`
+    /// fallback downstream (empty MCP labels in the composer and tool list).
+    #[tokio::test]
+    async fn null_optional_columns_read_back_as_none() {
+        let (repo, _dir) = repo().await;
+        repo.create_server(&server_without_optionals())
+            .await
+            .unwrap();
+
+        for server in [
+            repo.get_server("server-1").await.unwrap().unwrap(),
+            repo.list_servers().await.unwrap().remove(0),
+        ] {
+            assert_eq!(server.display_name, None);
+            assert_eq!(server.description, None);
+            assert_eq!(server.working_dir, None);
+            assert_eq!(server.endpoint, None);
+            assert_eq!(server.last_sync_at, None);
+            assert!(server.last_error.is_none());
+            assert_eq!(server.name, "websearch");
+        }
     }
 }

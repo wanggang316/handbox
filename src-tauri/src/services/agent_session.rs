@@ -326,6 +326,34 @@ impl AgentSessionService {
         self.get_session(session_id).await
     }
 
+    /// Moves the session into `project_id`, or out of any project with `None` /
+    /// an empty id. A missing project is a `NOT_FOUND` and writes nothing.
+    ///
+    /// `working_dir` is deliberately left alone. A session's transcript is keyed
+    /// by its working dir (`agent_jsonl_store::session_cwd`), so re-pointing the
+    /// dir here would hide the history of an existing session; the project
+    /// attachment is an organizational grouping, and only session CREATION lets a
+    /// project dictate the working dir.
+    pub async fn set_session_project(
+        &self,
+        session_id: UUID,
+        project_id: Option<UUID>,
+    ) -> Result<AgentSession, AppError> {
+        let requested = project_id.filter(|id| !id.is_empty());
+        if let Some(pid) = requested.as_ref() {
+            if self.projects.get_project_by_id(pid).await?.is_none() {
+                return Err(AppError::not_found(&format!(
+                    "Agent project not found: {}",
+                    pid
+                )));
+            }
+        }
+        self.repository
+            .set_session_project(&session_id, requested.as_ref())
+            .await?;
+        self.get_session(session_id).await
+    }
+
     /// Single entry point for updating one session field (mirrors
     /// `agent_update_field`).
     pub async fn update_session_field(
@@ -874,6 +902,110 @@ mod tests {
         // Wire shape for the sidebar consumer: camelCase `projectId`.
         let json = serde_json::to_string(&listed[0]).unwrap();
         assert!(json.contains(&format!("\"projectId\":\"{}\"", project.id)));
+    }
+
+    #[tokio::test]
+    async fn set_session_project_moves_between_projects_without_touching_working_dir() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db);
+
+        let dir_a = TempDir::new().unwrap();
+        let project_a = projects
+            .create_project(dir_a.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        let dir_b = TempDir::new().unwrap();
+        let project_b = projects
+            .create_project(dir_b.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+
+        // Ungrouped session running in its own directory.
+        let own_dir = TempDir::new().unwrap();
+        let mut req = base_request("Regrouped Session");
+        req.working_dir = Some(own_dir.path().to_string_lossy().into_owned());
+        let created = service.create_session(req).await.expect("create failed");
+        let working_dir = created.working_dir.clone();
+        assert_eq!(created.project_id, None);
+
+        // Attach, then move: only the grouping changes; the transcript's cwd
+        // (working_dir) stays put through both.
+        let attached = service
+            .set_session_project(created.id.clone(), Some(project_a.id.clone()))
+            .await
+            .expect("attach failed");
+        assert_eq!(attached.project_id, Some(project_a.id));
+        assert_eq!(attached.working_dir, working_dir);
+
+        let moved = service
+            .set_session_project(created.id.clone(), Some(project_b.id.clone()))
+            .await
+            .expect("move failed");
+        assert_eq!(moved.project_id, Some(project_b.id));
+        assert_eq!(moved.working_dir, working_dir);
+
+        // Detach: back to ungrouped, still in the same directory.
+        let detached = service
+            .set_session_project(created.id.clone(), None)
+            .await
+            .expect("detach failed");
+        assert_eq!(detached.project_id, None);
+        assert_eq!(detached.working_dir, working_dir);
+
+        let reread = service.get_session(created.id).await.unwrap();
+        assert_eq!(reread.project_id, None);
+        assert_eq!(reread.working_dir, working_dir);
+    }
+
+    #[tokio::test]
+    async fn set_session_project_rejects_unknown_project_and_writes_nothing() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db);
+
+        let dir = TempDir::new().unwrap();
+        let project = projects
+            .create_project(dir.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+
+        let mut req = base_request("Kept In Project");
+        req.project_id = Some(project.id.clone());
+        let created = service.create_session(req).await.expect("create failed");
+
+        let error = service
+            .set_session_project(created.id.clone(), Some("ghost-project".to_string()))
+            .await
+            .expect_err("unknown project must fail");
+        assert_eq!(error.code, "NOT_FOUND");
+
+        // The existing attachment survives the rejected move.
+        let reread = service.get_session(created.id).await.unwrap();
+        assert_eq!(reread.project_id, Some(project.id));
+    }
+
+    #[tokio::test]
+    async fn set_session_project_treats_empty_id_as_detach() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db.clone());
+        let projects = crate::services::AgentProjectService::new(db);
+
+        let dir = TempDir::new().unwrap();
+        let project = projects
+            .create_project(dir.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+
+        let mut req = base_request("Empty Id Detaches");
+        req.project_id = Some(project.id);
+        let created = service.create_session(req).await.expect("create failed");
+
+        let detached = service
+            .set_session_project(created.id, Some(String::new()))
+            .await
+            .expect("empty id must detach");
+        assert_eq!(detached.project_id, None);
     }
 
     #[tokio::test]

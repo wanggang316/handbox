@@ -157,6 +157,22 @@ export async function setAgentSessionArchived(
   });
 }
 
+/**
+ * Moves a session into a project, or out of every project with `null`.
+ *
+ * Grouping only: the backend leaves `workingDir` untouched, because a session's
+ * transcript is keyed by the directory it runs in.
+ */
+export async function setAgentSessionProject(
+  sessionId: UUID,
+  projectId: UUID | null,
+): Promise<AgentSession> {
+  return apiCall<AgentSession>("agent_session_set_project", {
+    sessionId,
+    projectId,
+  });
+}
+
 export async function deleteAgentSession(sessionId: UUID): Promise<void> {
   return apiCall<void>("agent_session_delete", { sessionId });
 }

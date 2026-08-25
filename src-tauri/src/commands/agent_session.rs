@@ -347,6 +347,26 @@ pub async fn agent_session_set_archived(
     Ok(session)
 }
 
+/// Moves a session into a project (`project_id: null` detaches it).
+///
+/// Its own command for the same reason as [`agent_session_set_pinned`]: the
+/// column is written on its own so a concurrent field edit cannot revert it. The
+/// session's working dir is NOT re-pointed — see
+/// [`AgentSessionService::set_session_project`].
+#[tauri::command]
+pub async fn agent_session_set_project(
+    session_id: UUID,
+    project_id: Option<UUID>,
+    app_handle: AppHandle,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<AgentSession, AppError> {
+    let mut session = agent_session_service
+        .set_session_project(session_id, project_id)
+        .await?;
+    overlay_jsonl_activity(&mut session, &resolve_app_data_dir(&app_handle)?);
+    Ok(session)
+}
+
 /// Updates a single session field (mirrors `agent_update_field`).
 #[tauri::command]
 pub async fn agent_session_update_field(

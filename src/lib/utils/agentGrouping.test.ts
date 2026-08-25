@@ -1,37 +1,21 @@
 import { describe, it, expect } from "vitest";
 import {
-  groupSessionsByAgent,
+  groupSessionsByProject,
   partitionArchivedSessions,
-  CHATS_BUCKET_KEY,
-  type AgentSessionBucket,
+  UNGROUPED_BUCKET_KEY,
+  type AgentProjectBucket,
 } from "./agentGrouping";
-import type { Agent } from "../types/agent";
 import type { AgentProject } from "../types/agentProject";
 import type { AgentSession } from "../types/agentSession";
 
-function agent(id: string, name = id): Agent {
-  return {
-    id,
-    name,
-    createdAt: 0,
-    updatedAt: 0,
-    mcpServers: [],
-    skills: [],
-    builtin: false,
-    builtinTools: [],
-    starters: [],
-  };
-}
-
-function project(id: string): AgentProject {
-  return { id, path: `/p/${id}`, name: id, createdAt: 0, updatedAt: 0 };
+function project(id: string, createdAt = 0, name = id): AgentProject {
+  return { id, path: `/p/${id}`, name, createdAt, updatedAt: createdAt };
 }
 
 function session(
   id: string,
   activity: number,
   opts: {
-    agentId?: string;
     projectId?: string;
     pinned?: boolean;
     archived?: boolean;
@@ -40,7 +24,6 @@ function session(
   return {
     id,
     name: id,
-    agentDefinitionId: opts.agentId,
     projectId: opts.projectId,
     enabledTools: [],
     mcpServers: [],
@@ -53,145 +36,137 @@ function session(
   };
 }
 
-/** Compact signature of a bucket's children for order/shape assertions. */
-function childKeys(bucket: AgentSessionBucket): string[] {
-  return bucket.children.map((c) =>
-    c.kind === "project"
-      ? `project:${c.project.id}[${c.sessions.map((s) => s.id).join(",")}]`
-      : `session:${c.session.id}`,
-  );
+/** Compact signature of a bucket's members for order/shape assertions. */
+function sessionIds(bucket: AgentProjectBucket): string[] {
+  return bucket.sessions.map((s) => s.id);
 }
 
-describe("groupSessionsByAgent", () => {
+describe("groupSessionsByProject", () => {
   it("returns no buckets for empty input", () => {
-    expect(groupSessionsByAgent([], [], [])).toEqual([]);
+    expect(groupSessionsByProject([], [])).toEqual([]);
   });
 
-  it("groups under the source agent; projects nest, loose sessions stay direct", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A")],
+  it("groups sessions under their project", () => {
+    const buckets = groupSessionsByProject(
       [project("P")],
       [
-        session("s-proj", 100, { agentId: "A", projectId: "P" }),
-        session("s-loose", 200, { agentId: "A" }),
+        session("s-old", 100, { projectId: "P" }),
+        session("s-new", 200, { projectId: "P" }),
       ],
     );
     expect(buckets).toHaveLength(1);
-    expect(buckets[0].key).toBe("A");
-    expect(buckets[0].agent?.id).toBe("A");
-    // Activity desc: loose(200) precedes project(100).
-    expect(childKeys(buckets[0])).toEqual([
-      "session:s-loose",
-      "project:P[s-proj]",
-    ]);
+    expect(buckets[0].key).toBe("P");
+    expect(buckets[0].project?.id).toBe("P");
+    expect(sessionIds(buckets[0])).toEqual(["s-new", "s-old"]);
   });
 
-  it("puts sessions with no/dangling agent into the Chats bucket, always last", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A")],
-      [],
+  it("puts sessions with no/dangling project into Ungrouped, always last", () => {
+    const buckets = groupSessionsByProject(
+      [project("P")],
       [
-        session("a1", 100, { agentId: "A" }),
-        session("noagent", 200), // no source agent
-        session("dangling", 300, { agentId: "ghost" }), // dangling reference
+        session("in-p", 100, { projectId: "P" }),
+        session("noproj", 200), // never attached
+        session("dangling", 300, { projectId: "ghost" }), // deleted project
       ],
     );
-    // Chats stays last even with newer activity (300).
-    expect(buckets.map((b) => b.key)).toEqual(["A", CHATS_BUCKET_KEY]);
-    const chats = buckets[1];
-    expect(chats.agent).toBeNull();
-    expect(childKeys(chats)).toEqual(["session:dangling", "session:noagent"]);
+    // Ungrouped stays last even with newer activity (300).
+    expect(buckets.map((b) => b.key)).toEqual(["P", UNGROUPED_BUCKET_KEY]);
+    const ungrouped = buckets[1];
+    expect(ungrouped.project).toBeNull();
+    expect(sessionIds(ungrouped)).toEqual(["dangling", "noproj"]);
   });
 
-  it("orders agent buckets by latest activity desc", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A"), agent("B")],
-      [],
+  it("omits the Ungrouped bucket when every session has a project", () => {
+    const buckets = groupSessionsByProject(
+      [project("P")],
+      [session("in-p", 100, { projectId: "P" })],
+    );
+    expect(buckets.map((b) => b.key)).toEqual(["P"]);
+  });
+
+  it("keeps a project with no sessions, ordered by its own createdAt", () => {
+    const buckets = groupSessionsByProject(
+      [project("old-empty", 50), project("busy", 10), project("new-empty", 500)],
+      [session("s", 100, { projectId: "busy" })],
+    );
+    // new-empty(500) > busy(latest session 100) > old-empty(50).
+    expect(buckets.map((b) => b.key)).toEqual([
+      "new-empty",
+      "busy",
+      "old-empty",
+    ]);
+    expect(buckets[0].sessions).toEqual([]);
+  });
+
+  it("orders projects by latest activity desc", () => {
+    const buckets = groupSessionsByProject(
+      [project("A"), project("B")],
       [
-        session("a1", 100, { agentId: "A" }),
-        session("b1", 200, { agentId: "B" }),
+        session("a1", 100, { projectId: "A" }),
+        session("b1", 200, { projectId: "B" }),
       ],
     );
     expect(buckets.map((b) => b.key)).toEqual(["B", "A"]);
   });
 
-  it("interleaves project groups and loose sessions by activity; project uses its latest member", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A")],
-      [project("P")],
-      [
-        session("loose-hi", 350, { agentId: "A" }),
-        session("p-old", 100, { agentId: "A", projectId: "P" }),
-        session("p-new", 300, { agentId: "A", projectId: "P" }),
-        session("loose-mid", 250, { agentId: "A" }),
-      ],
-    );
-    expect(childKeys(buckets[0])).toEqual([
-      "session:loose-hi", // 350
-      "project:P[p-new,p-old]", // latest 300, members desc
-      "session:loose-mid", // 250
-    ]);
-  });
-
-  it("omits agents that have no sessions", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A"), agent("B")],
-      [],
-      [session("a1", 100, { agentId: "A" })],
-    );
-    expect(buckets.map((b) => b.key)).toEqual(["A"]);
-  });
-
   it("floats a pinned session above newer siblings", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A")],
-      [],
+    const buckets = groupSessionsByProject(
+      [project("P")],
       [
-        session("newer", 300, { agentId: "A" }),
-        session("pinned-old", 100, { agentId: "A", pinned: true }),
-        session("older", 200, { agentId: "A" }),
+        session("newer", 300, { projectId: "P" }),
+        session("pinned-old", 100, { projectId: "P", pinned: true }),
+        session("older", 200, { projectId: "P" }),
       ],
     );
-    expect(childKeys(buckets[0])).toEqual([
-      "session:pinned-old",
-      "session:newer",
-      "session:older",
+    expect(sessionIds(buckets[0])).toEqual([
+      "pinned-old",
+      "newer",
+      "older",
     ]);
   });
 
-  it("lifts the project group and the agent bucket holding the pin", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A"), agent("B")],
-      [project("P")],
+  it("lifts the project holding the pin above a busier one", () => {
+    const buckets = groupSessionsByProject(
+      [project("A"), project("B")],
       [
-        // Bucket B is newer, and inside A the loose session is newer than the
-        // project — both must yield to the pin.
-        session("b1", 500, { agentId: "B" }),
-        session("a-loose", 400, { agentId: "A" }),
-        session("a-p-pinned", 100, {
-          agentId: "A",
-          projectId: "P",
-          pinned: true,
-        }),
+        session("b1", 500, { projectId: "B" }),
+        session("a-pinned", 100, { projectId: "A", pinned: true }),
       ],
     );
     expect(buckets.map((b) => b.key)).toEqual(["A", "B"]);
-    expect(childKeys(buckets[0])).toEqual([
-      "project:P[a-p-pinned]",
-      "session:a-loose",
-    ]);
   });
 
-  it("keeps Chats last even when it holds the only pin", () => {
-    const buckets = groupSessionsByAgent(
-      [agent("A")],
-      [],
+  it("keeps Ungrouped last even when it holds the only pin", () => {
+    const buckets = groupSessionsByProject(
+      [project("P")],
       [
-        session("a1", 100, { agentId: "A" }),
+        session("in-p", 100, { projectId: "P" }),
         session("pinned-chat", 50, { pinned: true }),
       ],
     );
-    expect(buckets.map((b) => b.key)).toEqual(["A", CHATS_BUCKET_KEY]);
+    expect(buckets.map((b) => b.key)).toEqual(["P", UNGROUPED_BUCKET_KEY]);
+  });
+
+  it("breaks activity ties by project name asc", () => {
+    const buckets = groupSessionsByProject(
+      [project("p2", 0, "beta"), project("p1", 0, "alpha")],
+      [
+        session("s2", 100, { projectId: "p2" }),
+        session("s1", 100, { projectId: "p1" }),
+      ],
+    );
+    expect(buckets.map((b) => b.project?.name)).toEqual(["alpha", "beta"]);
+  });
+
+  it("does not mutate its inputs", () => {
+    const projects = [project("B", 0), project("A", 10)];
+    const sessions = [
+      session("s-old", 100, { projectId: "A" }),
+      session("s-new", 200, { projectId: "A" }),
+    ];
+    groupSessionsByProject(projects, sessions);
+    expect(projects.map((p) => p.id)).toEqual(["B", "A"]);
+    expect(sessions.map((s) => s.id)).toEqual(["s-old", "s-new"]);
   });
 });
 
