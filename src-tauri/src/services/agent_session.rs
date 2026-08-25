@@ -94,11 +94,22 @@ impl AgentSessionService {
     /// path degrades the same way it does for the source). Activity fields
     /// reset (the forked JSONL is the transcript authority) and sidebar flags
     /// start clean.
-    pub async fn fork_session(&self, source: &AgentSession) -> Result<AgentSession, AppError> {
+    ///
+    /// `name` is the user's title for the fork (the fork dialog pre-fills the
+    /// source name and lets them edit); `None` or whitespace falls back to the
+    /// source name, so a fork is never created nameless.
+    pub async fn fork_session(
+        &self,
+        source: &AgentSession,
+        name: Option<String>,
+    ) -> Result<AgentSession, AppError> {
         let now = Self::current_timestamp();
         let session = AgentSession {
             id: uuid::Uuid::new_v4().to_string(),
-            name: source.name.clone(),
+            name: name
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| source.name.clone()),
             project_id: source.project_id.clone(),
             agent_definition_id: source.agent_definition_id.clone(),
             model_id: source.model_id.clone(),
@@ -1416,10 +1427,10 @@ mod tests {
         source.message_count = 42;
         source.pinned = true;
 
-        let fork = service.fork_session(&source).await.unwrap();
+        let fork = service.fork_session(&source, None).await.unwrap();
 
         assert_ne!(fork.id, source.id, "a fork is its own row");
-        assert_eq!(fork.name, source.name);
+        assert_eq!(fork.name, source.name, "no override: source name carries");
         assert_eq!(fork.model_id, source.model_id);
         assert_eq!(fork.provider_id, source.provider_id);
         assert_eq!(fork.system_prompt, source.system_prompt);
@@ -1434,5 +1445,29 @@ mod tests {
         let read_back = service.get_session(fork.id.clone()).await.unwrap();
         assert_eq!(read_back.id, fork.id);
         assert_eq!(read_back.system_prompt, fork.system_prompt);
+    }
+
+    // The fork dialog lets the user retitle the fork; a whitespace-only entry
+    // must not produce a nameless row.
+    #[tokio::test]
+    async fn fork_session_name_override_trims_and_falls_back() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+        let source = service
+            .create_session(base_request("Original"))
+            .await
+            .unwrap();
+
+        let renamed = service
+            .fork_session(&source, Some("  Branch idea  ".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(renamed.name, "Branch idea", "override is trimmed");
+
+        let blank = service
+            .fork_session(&source, Some("   ".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(blank.name, "Original", "whitespace falls back to source");
     }
 }

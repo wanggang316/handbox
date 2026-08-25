@@ -87,6 +87,10 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.copied": "Copied",
   "agent.timeline.quoteReply": "Quote",
   "agent.timeline.forkFromHere": "New session from here",
+  "agent.timeline.forkTitle": "New Session from Here",
+  "agent.timeline.forkNameLabel": "Session name",
+  "agent.timeline.forkNamePlaceholder": "Name for the new session",
+  "agent.timeline.forkHint": "The new session carries the conversation up to this reply",
   "agent.timeline.forkFailed": "Failed to create a session from here",
 
   "agent.nav.label": "Message navigation",

@@ -321,11 +321,15 @@ fn extract_user_text(payload: &serde_json::Value) -> Option<String> {
 /// a transcript-fork failure rolls it back — a config row without the forked
 /// transcript would surface as an empty duplicate session. Returns the
 /// overlaid session, consistent with list/get.
+///
+/// `name` is the user's title from the fork dialog; `None`/blank falls back
+/// to the source session's name.
 #[tauri::command]
 pub async fn agent_session_fork(
     session_id: UUID,
     seq: i64,
     timestamp: i64,
+    name: Option<String>,
     app_handle: AppHandle,
     agent_session_service: State<'_, AgentSessionService>,
 ) -> Result<AgentSession, AppError> {
@@ -333,7 +337,7 @@ pub async fn agent_session_fork(
     let app_data_dir = resolve_app_data_dir(&app_handle)?;
     let cwd = agent_jsonl_store::session_cwd(source.working_dir.as_deref(), &app_data_dir);
 
-    let mut forked = agent_session_service.fork_session(&source).await?;
+    let mut forked = agent_session_service.fork_session(&source, name).await?;
     if let Err(e) = agent_jsonl_store::fork_transcript(
         &app_data_dir,
         &cwd,

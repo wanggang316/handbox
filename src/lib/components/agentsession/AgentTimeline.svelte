@@ -19,13 +19,18 @@
     renderMarkdown,
     markdownInteractions,
     copyToClipboard,
-    showAppError,
+    normalizeError,
   } from "$lib/utils";
   import { t } from "$lib/i18n";
   import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
+  import FormModal from "$lib/components/ui/FormModal.svelte";
+  import Input from "$lib/components/ui/Input.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
-  import { agentSessionActions } from "$lib/states/agentSession.svelte";
+  import {
+    agentSessionActions,
+    agentSessionState,
+  } from "$lib/states/agentSession.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
   import type { HookRuleNotification } from "$lib/types";
   import type {
@@ -133,31 +138,62 @@
   $effect(() => () => clearTimeout(copiedTimer));
 
   // Steering: fork the session at an assistant reply and continue in the new
-  // session from that point. One fork at a time — the guard swallows double
-  // clicks while the backend copies the transcript.
-  let forkingIndex = $state<number | null>(null);
+  // session from that point. The button opens a naming dialog (pre-filled with
+  // the source session's name); the fork happens on confirm.
+  let forkTarget = $state<{
+    index: number;
+    message: Extract<AgentMessage, { role: "assistant" }>;
+  } | null>(null);
+  let forkOpen = $state(false);
+  let forkName = $state("");
+  let forking = $state(false);
+  let forkError = $state<string | null>(null);
 
-  async function forkFrom(
+  function openForkDialog(
     index: number,
     message: Extract<AgentMessage, { role: "assistant" }>,
   ) {
-    if (forkingIndex !== null) {
+    // The list entry is the freshest name source (rename syncs it in place);
+    // currentSession covers a session not (yet) in the list.
+    const source =
+      agentSessionState.sessions.find((s) => s.id === sessionId) ??
+      agentSessionState.currentSession;
+    forkTarget = { index, message };
+    forkName = source?.name ?? "";
+    forkError = null;
+    forkOpen = true;
+  }
+
+  function closeForkDialog() {
+    forkOpen = false;
+    forkTarget = null;
+    forkError = null;
+  }
+
+  async function confirmFork() {
+    const target = forkTarget;
+    if (!target || forking) {
       return;
     }
-    forkingIndex = index;
+    forking = true;
+    forkError = null;
     try {
       // index + the message's own timestamp identify the cut; the backend
-      // rejects a stale pairing instead of cutting the wrong node.
+      // rejects a stale pairing instead of cutting the wrong node. A blank
+      // name falls back to the source session's name backend-side.
       const session = await agentSessionActions.forkSession(
         sessionId,
-        index,
-        message.timestamp,
+        target.index,
+        target.message.timestamp,
+        forkName,
       );
+      closeForkDialog();
       await goto(`/agent?id=${session.id}`);
     } catch (error) {
-      showAppError(error, { fallbackMessage: t("agent.timeline.forkFailed") });
+      const normalized = normalizeError(error, t("agent.timeline.forkFailed"));
+      forkError = normalized.hint ?? normalized.message;
     } finally {
-      forkingIndex = null;
+      forking = false;
     }
   }
 
@@ -1003,8 +1039,7 @@
                         size="icon-sm"
                         class="text-base-content/40 enabled:hover:text-base-content"
                         ariaLabel={t("agent.timeline.forkFromHere")}
-                        disabled={forkingIndex !== null}
-                        onclick={() => forkFrom(i, message)}
+                        onclick={() => openForkDialog(i, message)}
                       >
                         <GitBranchPlus size={14} />
                       </Button>
@@ -1132,6 +1167,25 @@
     />
   {/if}
 </div>
+
+<!-- Steering dialog: name the fork before creating it. The name pre-fills
+     from the source session; confirm forks and navigates, cancel discards. -->
+<FormModal
+  bind:open={forkOpen}
+  title={t("agent.timeline.forkTitle")}
+  saving={forking}
+  error={forkError}
+  hint={t("agent.timeline.forkHint")}
+  submitLabel={t("common.create")}
+  onSubmit={confirmFork}
+  onClose={closeForkDialog}
+>
+  <Input
+    label={t("agent.timeline.forkNameLabel")}
+    bind:value={forkName}
+    placeholder={t("agent.timeline.forkNamePlaceholder")}
+  />
+</FormModal>
 
 <style>
   /* WebKit draws its own disclosure marker on <summary>; the row supplies its

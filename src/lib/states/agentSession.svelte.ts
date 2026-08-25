@@ -579,8 +579,14 @@ export const agentSessionActions = {
     id: UUID,
     seq: number,
     timestamp: number,
+    name?: string,
   ): Promise<AgentSession> {
-    const session = await agentSessionApi.forkAgentSession(id, seq, timestamp);
+    const session = await agentSessionApi.forkAgentSession(
+      id,
+      seq,
+      timestamp,
+      name,
+    );
     const existing = Array.isArray(sessions) ? sessions : [];
     sessions = [session, ...existing];
     return session;

@@ -183,17 +183,20 @@ export async function deleteAgentSession(sessionId: UUID): Promise<void> {
  * different direction from there. `seq` is the message's index in the
  * committed timeline and `timestamp` its own millisecond timestamp — the
  * backend cross-checks both and rejects a stale view (e.g. after an in-run
- * compaction) instead of cutting the wrong node.
+ * compaction) instead of cutting the wrong node. `name` titles the fork;
+ * omitted or blank falls back to the source session's name.
  */
 export async function forkAgentSession(
   sessionId: UUID,
   seq: number,
   timestamp: number,
+  name?: string,
 ): Promise<AgentSession> {
   return apiCall<AgentSession>("agent_session_fork", {
     sessionId,
     seq,
     timestamp,
+    name,
   });
 }
 
