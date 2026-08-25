@@ -791,6 +791,12 @@
   {/if}
 {/snippet}
 
+{#snippet hookNotices(anchor: number)}
+  {#each hookNoticesAfter(anchor) as entry}
+    {@render hookNoticeRow(entry.notice)}
+  {/each}
+{/snippet}
+
 {#snippet hookNoticeRow(notice: HookRuleNotification)}
   {@const tone =
     notice.outcome === "denied" || notice.outcome === "failed"
@@ -1009,6 +1015,12 @@
                 </div>
               {/if}
 
+              <!-- Hooks that fired on this turn, above the actions: they belong
+                   to the reply, and the action row is the message's footer —
+                   trailing them after it left them floating between two
+                   messages with nothing saying which one they came from. -->
+              {@render hookNotices(i)}
+
               <!-- Message actions. Usage is an icon rather than a running total:
                    the numbers matter when asked for, not on every turn. -->
               {#if assistantText(message) || hasUsage(message)}
@@ -1060,10 +1072,13 @@
              card presents them inside the assistant turn, avoiding a detached
              tool-result block. -->
 
-        <!-- Hook firings anchored right after this message, in arrival order. -->
-        {#each hookNoticesAfter(i) as entry}
-          {@render hookNoticeRow(entry.notice)}
-        {/each}
+        <!-- Hook firings anchored right after this message, in arrival order.
+             A finished assistant turn renders its own inside the message, above
+             the action row; this covers the rest — a prompt rule on a user
+             message, and the turn still streaming in the LIVE view below. -->
+        {#if message.role !== "assistant" || i === liveAssistantIndex}
+          {@render hookNotices(i)}
+        {/if}
       {/each}
 
       <!-- LIVE streaming view: growing thinking block + streaming text. -->
