@@ -86,6 +86,53 @@ impl AgentSessionService {
         Ok(session)
     }
 
+    /// Clone `source`'s configuration into a fresh session row — the SQLite
+    /// half of a steering fork. Everything the run path reads (model /
+    /// provider / tools / working dir / prompts / provenance) is copied
+    /// verbatim — no re-validation: the source row already passed it, and a
+    /// working dir that has vanished since must not block forking (the run
+    /// path degrades the same way it does for the source). Activity fields
+    /// reset (the forked JSONL is the transcript authority) and sidebar flags
+    /// start clean.
+    ///
+    /// `name` is the user's title for the fork (the fork dialog pre-fills the
+    /// source name and lets them edit); `None` or whitespace falls back to the
+    /// source name, so a fork is never created nameless.
+    pub async fn fork_session(
+        &self,
+        source: &AgentSession,
+        name: Option<String>,
+    ) -> Result<AgentSession, AppError> {
+        let now = Self::current_timestamp();
+        let session = AgentSession {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| source.name.clone()),
+            project_id: source.project_id.clone(),
+            agent_definition_id: source.agent_definition_id.clone(),
+            model_id: source.model_id.clone(),
+            provider_id: source.provider_id.clone(),
+            system_prompt: source.system_prompt.clone(),
+            thinking_level: source.thinking_level.clone(),
+            temperature: source.temperature,
+            max_tokens: source.max_tokens,
+            working_dir: source.working_dir.clone(),
+            enabled_tools: source.enabled_tools.clone(),
+            mcp_servers: source.mcp_servers.clone(),
+            tool_execution_mode: source.tool_execution_mode.clone(),
+            message_count: 0,
+            last_message_at: None,
+            pinned: false,
+            archived: false,
+            created_at: now,
+            updated_at: now,
+        };
+        self.repository.create_session(&session).await?;
+        Ok(session)
+    }
+
     /// Instantiate a session from an AgentDefinition: snapshot its capability set
     /// (`enabled_tools` ← `builtin_tools`) and defaults, apply `overrides`
     /// (name/model/provider win), let `working_dir_mode` arbitrate the working dir,
@@ -1361,5 +1408,66 @@ mod tests {
 
         // The preset table is untouched.
         assert_eq!(count_rows(&db, "agents").await, agents_before);
+    }
+
+    // A steering fork clones the run configuration verbatim under a fresh id,
+    // while activity and sidebar state start clean — a pinned, well-used source
+    // must not produce a pinned fork claiming its message count.
+    #[tokio::test]
+    async fn fork_session_copies_config_and_resets_activity() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+
+        let mut request = base_request("Forked From");
+        request.system_prompt = Some("be brief".to_string());
+        request.enabled_tools = Some(vec!["read".to_string(), "bash".to_string()]);
+        request.thinking_level = Some("high".to_string());
+        let mut source = service.create_session(request).await.unwrap();
+        // Activity + sidebar state a fork must NOT inherit.
+        source.message_count = 42;
+        source.pinned = true;
+
+        let fork = service.fork_session(&source, None).await.unwrap();
+
+        assert_ne!(fork.id, source.id, "a fork is its own row");
+        assert_eq!(fork.name, source.name, "no override: source name carries");
+        assert_eq!(fork.model_id, source.model_id);
+        assert_eq!(fork.provider_id, source.provider_id);
+        assert_eq!(fork.system_prompt, source.system_prompt);
+        assert_eq!(fork.thinking_level, source.thinking_level);
+        assert_eq!(fork.enabled_tools, source.enabled_tools);
+        assert_eq!(fork.message_count, 0, "activity resets");
+        assert_eq!(fork.last_message_at, None);
+        assert!(!fork.pinned, "sidebar flags start clean");
+        assert!(!fork.archived);
+
+        // The row is persisted and readable back.
+        let read_back = service.get_session(fork.id.clone()).await.unwrap();
+        assert_eq!(read_back.id, fork.id);
+        assert_eq!(read_back.system_prompt, fork.system_prompt);
+    }
+
+    // The fork dialog lets the user retitle the fork; a whitespace-only entry
+    // must not produce a nameless row.
+    #[tokio::test]
+    async fn fork_session_name_override_trims_and_falls_back() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentSessionService::new(db);
+        let source = service
+            .create_session(base_request("Original"))
+            .await
+            .unwrap();
+
+        let renamed = service
+            .fork_session(&source, Some("  Branch idea  ".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(renamed.name, "Branch idea", "override is trimmed");
+
+        let blank = service
+            .fork_session(&source, Some("   ".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(blank.name, "Original", "whitespace falls back to source");
     }
 }
