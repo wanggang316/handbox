@@ -217,8 +217,8 @@ export const agentZh = {
   "agent.list.createSessionFailed": "创建会话失败",
   "agent.list.generateTitleFailed": "生成标题失败",
 
-  // Project settings panel (ProjectSettingsModal)
-  "agent.projectSettings.title": "{name} — 常规",
+  // Project settings panel (ProjectSettingsModal); the panel's own title bar
+  // shows the project name and path, so there is no title string here.
   "agent.projectSettings.general": "常规",
   "agent.projectSettings.name": "名称",
   "agent.projectSettings.color": "颜色",

@@ -1,21 +1,3 @@
-<script module lang="ts">
-  /**
-   * The installed-app probe is process-wide and stable for a session, so the
-   * promise is cached at module scope: reopening the panel must not re-scan
-   * /Applications and must not blank the editor row while it does.
-   */
-  let targetsPromise: Promise<OpenInTarget[]> | null = null;
-
-  function loadOpenInTargetsOnce(): Promise<OpenInTarget[]> {
-    targetsPromise ??= listOpenInTargets().catch((error) => {
-      // Do not poison the cache: a failed probe should be retried next open.
-      targetsPromise = null;
-      throw error;
-    });
-    return targetsPromise;
-  }
-</script>
-
 <script lang="ts">
   /**
    * Per-project settings, opened from the sidebar's project menu. Every field
@@ -26,7 +8,7 @@
   import { Ban } from "@lucide/svelte";
   import Modal from "$lib/components/ui/Modal.svelte";
   import { TableGroup, TableBaseRow, SelectRow } from "$lib/components/ui/table";
-  import { listOpenInTargets, type OpenInTarget } from "$lib/api/openIn";
+  import { listOpenInTargetsCached, type OpenInTarget } from "$lib/api/openIn";
   import { agentProjectActions } from "$lib/states/agentProject.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
   import { t } from "$lib/i18n";
@@ -97,7 +79,7 @@
   $effect(() => {
     if (!open) return;
     void settingsState.loadSettings();
-    loadOpenInTargetsOnce()
+    listOpenInTargetsCached()
       .then((list) => (targets = list))
       .catch((probeError) =>
         console.error("Failed to list open-in targets:", probeError),
@@ -221,23 +203,21 @@
   const isPreset = $derived(color !== null && PRESET_COLORS.includes(color));
 </script>
 
-<Modal bind:open>
+<!-- The project's name and path ride in the Modal's own title bar, so the panel
+     body starts straight at its first group. -->
+<Modal bind:open title={project?.name ?? ""} subtitle={project?.path ?? ""}>
   <div class="flex w-[560px] max-w-[92vw] max-h-[86vh] flex-col">
     {#if project}
-      <!-- pt-14 clears Modal's traffic-light row. -->
-      <div class="flex-shrink-0 px-7 pt-14">
-        <h2 class="truncate text-[17px] font-semibold text-base-content">
-          {t("agent.projectSettings.title", { name: project.name })}
-        </h2>
-        <p class="mt-1 truncate text-[13px] text-base-content/50">
-          {project.path}
-        </p>
-        {#if error}
-          <p class="mt-3 text-[13px] text-error">{error}</p>
-        {/if}
-      </div>
+      {#if error}
+        <!-- pt-14 clears Modal's title bar. -->
+        <p class="flex-shrink-0 px-7 pt-14 text-[13px] text-error">{error}</p>
+      {/if}
 
-      <div class="flex flex-1 min-h-0 flex-col gap-y-4 overflow-y-auto px-7 pb-7 pt-5">
+      <div
+        class="flex flex-1 min-h-0 flex-col gap-y-4 overflow-y-auto px-7 pb-7 {error
+          ? 'pt-4'
+          : 'pt-14'}"
+      >
         <TableGroup title={t("agent.projectSettings.general")}>
           <!-- Not TextRow: the name is committed on blur / Enter rather than on
                every keystroke, which needs the input's own handlers. -->

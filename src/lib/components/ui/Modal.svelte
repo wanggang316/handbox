@@ -6,6 +6,8 @@
   interface Props {
     open?: boolean;
     title?: string;
+    /** Muted line beside the title (e.g. a path); truncates before overflowing. */
+    subtitle?: string;
     showCloseButton?: boolean;
     closeOnBackdropClick?: boolean;
     onClose?: () => void;
@@ -15,6 +17,7 @@
   let {
     open = $bindable(false),
     title = "",
+    subtitle = "",
     showCloseButton = true,
     closeOnBackdropClick = false,
     onClose = () => {},
@@ -65,17 +68,30 @@
       style="z-index: var(--z-modal); transform: translate(-50%, -50%);"
     >
       {#if showCloseButton || title}
-        <div class="absolute left-0 top-0 z-10 flex items-center px-5 py-4">
+        <!-- max-w-full keeps a long subtitle inside the dialog; the row is still
+             shrink-to-fit, so it does not blanket the content beneath it. -->
+        <div class="absolute left-0 top-0 z-10 flex max-w-full items-baseline px-5 py-4">
           {#if showCloseButton}
-            <TrafficLightsRedButton onClick={() => (open = false)} />
+            <!-- self-center: the button has no baseline to share with the text. -->
+            <span class="flex-shrink-0 self-center">
+              <TrafficLightsRedButton onClick={() => (open = false)} />
+            </span>
           {/if}
+          <!-- Both text spans truncate; flexbox shrinks the longer one (usually
+               the subtitle path) first, so an outsized value cannot push the bar
+               past the dialog's edge. -->
           <Dialog.Title
             class={title
-              ? "ml-4 text-base font-medium text-base-content/80"
+              ? "ml-4 min-w-0 truncate text-base font-medium text-base-content/80"
               : "sr-only"}
           >
             {title || "对话框"}
           </Dialog.Title>
+          {#if title && subtitle}
+            <span class="ml-2 min-w-0 truncate text-xs text-base-content/45">
+              {subtitle}
+            </span>
+          {/if}
         </div>
       {:else}
         <Dialog.Title class="sr-only">对话框</Dialog.Title>

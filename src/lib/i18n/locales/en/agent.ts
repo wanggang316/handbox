@@ -229,8 +229,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.createSessionFailed": "Failed to create session",
   "agent.list.generateTitleFailed": "Failed to generate title",
 
-  // Project settings panel (ProjectSettingsModal)
-  "agent.projectSettings.title": "{name} — General",
+  // Project settings panel (ProjectSettingsModal); the panel's own title bar
+  // shows the project name and path, so there is no title string here.
   "agent.projectSettings.general": "General",
   "agent.projectSettings.name": "Name",
   "agent.projectSettings.color": "Color",
