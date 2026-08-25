@@ -898,7 +898,7 @@
         />
       {:else if showControls}
         <!-- Hover / focus swaps the relative time for the row's own controls. -->
-        <span class="flex flex-shrink-0 items-center gap-0.5">
+        <span class="flex flex-shrink-0 items-center gap-1.5">
           {#if !session.archived}
             <button
               class="p-0.5 rounded text-base-content/55 hover:text-base-content hover:bg-base-content/10"
@@ -976,7 +976,10 @@
     )}
     <!-- Right edge: "…" opens the project menu (the same one right-click
          serves), "+" the agent picker for a new session here. -->
-    <span data-group-control class="ml-auto flex items-center flex-shrink-0">
+    <span
+      data-group-control
+      class="ml-auto flex items-center gap-1.5 flex-shrink-0"
+    >
       <button
         class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
         title={t("agent.list.projectMenu")}
