@@ -70,28 +70,31 @@
       {#if showCloseButton || title}
         <!-- max-w-full keeps a long subtitle inside the dialog; the row is still
              shrink-to-fit, so it does not blanket the content beneath it. -->
-        <div class="absolute left-0 top-0 z-10 flex max-w-full items-baseline px-5 py-4">
+        <div class="absolute left-0 top-0 z-10 flex max-w-full items-start px-5 py-4">
           {#if showCloseButton}
-            <!-- self-center: the button has no baseline to share with the text. -->
-            <span class="flex-shrink-0 self-center">
+            <!-- py-1.5 pads the 12px button out to the title's 24px line box, so
+                 the dot centres on the title rather than on the stacked block. -->
+            <span class="flex-shrink-0 self-start py-1.5">
               <TrafficLightsRedButton onClick={() => (open = false)} />
             </span>
           {/if}
-          <!-- Both text spans truncate; flexbox shrinks the longer one (usually
-               the subtitle path) first, so an outsized value cannot push the bar
-               past the dialog's edge. -->
-          <Dialog.Title
-            class={title
-              ? "ml-4 min-w-0 truncate text-base font-medium text-base-content/80"
-              : "sr-only"}
-          >
-            {title || "对话框"}
-          </Dialog.Title>
-          {#if title && subtitle}
-            <span class="ml-2 min-w-0 truncate text-xs text-base-content/45">
-              {subtitle}
-            </span>
-          {/if}
+          <!-- The subtitle sits under the title rather than beside it, so a long
+               path reads as the title's own second line. Both truncate: neither
+               can push the header past the dialog's edge. -->
+          <div class="ml-4 flex min-w-0 flex-col">
+            <Dialog.Title
+              class={title
+                ? "truncate text-base font-medium text-base-content/80"
+                : "sr-only"}
+            >
+              {title || "对话框"}
+            </Dialog.Title>
+            {#if title && subtitle}
+              <span class="truncate text-xs text-base-content/45">
+                {subtitle}
+              </span>
+            {/if}
+          </div>
         </div>
       {:else}
         <Dialog.Title class="sr-only">对话框</Dialog.Title>

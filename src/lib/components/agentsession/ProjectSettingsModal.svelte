@@ -203,20 +203,20 @@
   const isPreset = $derived(color !== null && PRESET_COLORS.includes(color));
 </script>
 
-<!-- The project's name and path ride in the Modal's own title bar, so the panel
-     body starts straight at its first group. -->
+<!-- The project's name and its path (as the title's second line) ride in the
+     Modal's own title bar, so the body starts straight at its first group. -->
 <Modal bind:open title={project?.name ?? ""} subtitle={project?.path ?? ""}>
   <div class="flex w-[560px] max-w-[92vw] max-h-[86vh] flex-col">
     {#if project}
       {#if error}
-        <!-- pt-14 clears Modal's title bar. -->
-        <p class="flex-shrink-0 px-7 pt-14 text-[13px] text-error">{error}</p>
+        <!-- pt-20 clears Modal's title bar, two lines tall here (name + path). -->
+        <p class="flex-shrink-0 px-7 pt-20 text-[13px] text-error">{error}</p>
       {/if}
 
       <div
         class="flex flex-1 min-h-0 flex-col gap-y-4 overflow-y-auto px-7 pb-7 {error
           ? 'pt-4'
-          : 'pt-14'}"
+          : 'pt-20'}"
       >
         <TableGroup title={t("agent.projectSettings.general")}>
           <!-- Not TextRow: the name is committed on blur / Enter rather than on
