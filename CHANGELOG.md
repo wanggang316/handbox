@@ -16,6 +16,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.5.6] - 2026-08-25
+
+### Added
+- The sidebar now lists Projects instead of agents. Each project folds away, can
+  be pinned, given a color, revealed in Finder, or opened in its own settings
+  panel — and a session can be moved to another project at any time.
+- Select text in a reply and press Quote to carry that passage into the
+  composer, so you can ask about one specific part of a long answer.
+- Start a new session from any assistant reply. It carries the conversation up
+  to that point, so you can try another direction without losing the original.
+- A "+" button in the composer replaces the attachment icon: add photos, browse
+  skills, and pick which MCP servers this session can reach.
+- The working folder and whether tools run freely or ask first now sit under the
+  composer, per session — and the approval prompts follow that choice.
+- Choose the editor "Open in …" uses, in Settings → General, with a per-project
+  override in the project's settings panel.
+
+### Changed
+- A new chat is only kept once you send the first message, so leaving an
+  untouched one behind no longer clutters the sidebar.
+- Settings → General is regrouped into Interface, Messages and Editor.
+
+### Fixed
+- Switching a session to an agent that needs a working folder now asks you for
+  one instead of leaving the session unable to run.
+- A reply in progress no longer goes blank when the conversation reloads
+  underneath it.
+- MCP servers without a display name show their real name instead of a blank
+  row.
+
+
 ## [0.5.5] - 2026-08-22
 
 ### Added
