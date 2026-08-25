@@ -974,7 +974,7 @@
           {/if}
           <span class="max-w-[240px] truncate">{selectedModel.name}</span>
         {:else}
-          <span class="max-w-[240px] truncate text-warning"
+          <span class="max-w-[240px] truncate"
             >{t("agent.input.selectModel")}</span
           >
         {/if}
@@ -1088,7 +1088,7 @@
       {#if workingDirName}
         <span class="max-w-[220px] truncate">{workingDirName}</span>
       {:else}
-        <span class="max-w-[220px] truncate text-warning"
+        <span class="max-w-[220px] truncate"
           >{t("agent.input.selectWorkingDir")}</span
         >
       {/if}

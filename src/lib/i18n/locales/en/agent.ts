@@ -49,14 +49,14 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.manualExecutionDesc":
     "Writes, edits and commands need your approval",
   "agent.input.toolExecutionFailed": "Failed to set the tool execution mode",
-  "agent.input.selectModel": "Select model",
+  "agent.input.selectModel": "Select model...",
   "agent.input.noAvailableMcpServers": "No available MCP servers",
   "agent.input.configureMcpInSettings":
     "Configure and enable MCP servers in the app settings",
   "agent.input.enabledToolsCount": "{count} enabled tools",
   "agent.input.selectAgent": "Select agent",
   "agent.input.switchAgentFailed": "Failed to switch agent",
-  "agent.input.selectWorkingDir": "Select working directory",
+  "agent.input.selectWorkingDir": "Select folder...",
   "agent.input.workingDirFailed": "Failed to set working directory",
 
   // Model select modal (ModelSelectModal)
