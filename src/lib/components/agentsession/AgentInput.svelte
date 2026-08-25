@@ -38,6 +38,7 @@
     AgentRunAttachment,
     AgentQuestionRequest,
     AgentQuestionResponse,
+    InstantiateAgentSessionRequest,
     SkillInfo,
   } from "$lib/types";
   import type { ModelWithProvider } from "$lib/types/provider";
@@ -216,33 +217,64 @@
     if (!agent.id) return;
     // Already the session's source agent: no-op.
     if (agent.id === session.agentDefinitionId) return;
+
+    // A `workingDirMode: "required"` definition cannot be instantiated from a
+    // session that carries no directory — switching away from a "none" agent
+    // (the builtin chat one pins it to null) always hits that. Ask for the
+    // directory here instead of letting the backend reject the switch;
+    // cancelling the dialog cancels the switch.
+    let overrides: InstantiateAgentSessionRequest | undefined;
+    if (
+      agent.workingDirMode === "required" &&
+      !session.workingDir &&
+      !session.projectId
+    ) {
+      const picked = await pickDirectory();
+      if (!picked) return;
+      overrides = { workingDir: picked };
+    }
+
     try {
       // Untouched session (no messages, no active run): repoint it in place,
       // keeping id/URL; otherwise instantiate a new session and navigate.
-      // No overrides: the new definition's model/working-dir policy wins.
+      // Beyond the working dir above, the new definition's policy wins.
       if (session.messageCount === 0 && !agentRunStore.isRunning(session.id)) {
         await agentSessionActions.reinstantiateFromDefinition(
           session.id,
           agent.id,
+          overrides,
         );
         return;
       }
-      const created =
-        await agentSessionActions.createSessionFromDefinition(agent.id);
+      const created = await agentSessionActions.createSessionFromDefinition(
+        agent.id,
+        overrides,
+      );
       await goto(`/agent?id=${created.id}`);
     } catch (error) {
       console.error("Failed to switch agent:", error);
-      modelPrompt = t("agent.input.switchAgentFailed");
+      // Surface the backend's reason (a rejected working dir, an unknown
+      // definition): the generic label alone leaves nothing to act on.
+      modelPrompt =
+        error instanceof Error
+          ? error.message
+          : t("agent.input.switchAgentFailed");
     }
   }
 
-  // Pick the session working dir via the system dialog; the backend validates
-  // it as an existing absolute directory. Cancel (non-string result) is a no-op.
+  // Native directory dialog; null on cancel (any non-string result). The
+  // backend validates the path as an existing absolute directory.
+  async function pickDirectory(): Promise<string | null> {
+    const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+    const picked = await openDialog({ directory: true });
+    return typeof picked === "string" ? picked : null;
+  }
+
+  // Pick the session working dir via the system dialog. Cancel is a no-op.
   async function pickWorkingDir() {
     try {
-      const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-      const picked = await openDialog({ directory: true });
-      if (typeof picked !== "string") return;
+      const picked = await pickDirectory();
+      if (picked === null) return;
       modelPrompt = null;
       await agentSessionActions.updateField(session.id, "workingDir", picked);
     } catch (error) {
