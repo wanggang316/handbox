@@ -829,31 +829,23 @@
 <!-- Text a hook injected as a user message. It reads like a hook firing rather
      than a bubble: nobody typed it, and shown as the reader's own words it
      makes the reply that follows look like an answer to a question they never
-     asked (see injectedMessage.ts). A body that fits on one line is shown
-     outright; anything longer stays behind the disclosure. -->
+     asked (see injectedMessage.ts). The body stays behind the disclosure like
+     a command's execution capture — it is written for the model, and spelled
+     out in full it competes with the conversation for attention. -->
 {#snippet injectedRow(block: InjectedMessage)}
-  {@const multiline = block.text.includes("\n")}
-  {#if multiline}
-    <details class="hook-notice group px-3 py-1.5">
-      <summary
-        class="flex cursor-pointer list-none items-center gap-2 text-xs text-base-content/70"
-      >
-        {@render injectedIdentity(block)}
-        <span class="truncate text-base-content/50">{block.text}</span>
-        <ChevronDown
-          size={12}
-          class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
-        />
-      </summary>
-      <pre
-        class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{block.text}</pre>
-    </details>
-  {:else}
-    <div class="flex items-center gap-2 px-3 py-1.5 text-xs text-base-content/70">
+  <details class="hook-notice group px-3 py-1.5">
+    <summary
+      class="flex cursor-pointer list-none items-center gap-2 text-xs text-base-content/70"
+    >
       {@render injectedIdentity(block)}
-      <span class="truncate text-base-content/50">{block.text}</span>
-    </div>
-  {/if}
+      <ChevronDown
+        size={12}
+        class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
+      />
+    </summary>
+    <pre
+      class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{block.text}</pre>
+  </details>
 {/snippet}
 
 {#snippet injectedIdentity(block: InjectedMessage)}
