@@ -24,6 +24,7 @@
   import { t } from "$lib/i18n";
   import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import { agentSessionActions } from "$lib/states/agentSession.svelte";
+  import { isDraftSessionId } from "$lib/states/draftSession";
   import { agentState, agentActions } from "$lib/states/agent.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
   import { agentApprovalStore } from "$lib/states/agentApproval.svelte";
@@ -235,6 +236,14 @@
     }
 
     try {
+      // An unsent draft has no row to repoint: re-seed it from the new
+      // definition, keeping its id so the composer is not remounted.
+      if (isDraftSessionId(session.id)) {
+        await agentSessionActions.startDraft(agent.id, {
+          workingDir: overrides?.workingDir,
+        });
+        return;
+      }
       // Untouched session (no messages, no active run): repoint it in place,
       // keeping id/URL; otherwise instantiate a new session and navigate.
       // Beyond the working dir above, the new definition's policy wins.
@@ -677,8 +686,18 @@
     attachments = [];
     adjustTextareaHeight();
     try {
+      // A draft becomes a real session here, on the first send — this is the
+      // only place "New chat" writes a row. The URL follows so the timeline and
+      // the sidebar entry track the run; the composer itself is keyed to
+      // survive that navigation, so a failed start still restores the message.
+      let runSessionId = session.id;
+      if (isDraftSessionId(runSessionId)) {
+        const created = await agentSessionActions.materializeDraft();
+        runSessionId = created.id;
+        await goto(`/agent?id=${created.id}`, { replaceState: true });
+      }
       await runAgentStream(
-        session.id,
+        runSessionId,
         text,
         payloadAttachments,
         forcedSkillNames,
