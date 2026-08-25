@@ -182,9 +182,20 @@ export const agentZh = {
   "agent.list.removeFromProject": "移出项目",
   "agent.list.moveFailed": "移动会话失败",
   "agent.list.copyPath": "复制路径",
-  "agent.list.deleteProject": "删除项目",
+  // Menu label only; the confirm dialog spells out the cascade.
+  "agent.list.removeProject": "移除",
   "agent.list.copyId": "复制ID",
   "agent.list.untitledSession": "未命名",
+
+  // Project row menu (the "…" button and the right-click menu share it)
+  "agent.list.projectMenu": "项目操作",
+  "agent.list.projectMenuFor": "项目 {name} 的操作",
+  "agent.list.pinProject": "置顶项目",
+  "agent.list.unpinProject": "取消置顶项目",
+  "agent.list.projectSettings": "设置…",
+  "agent.list.revealInFinder": "在访达中显示",
+  "agent.list.revealFailed": "打开目录失败",
+  "agent.list.pinProjectFailed": "项目置顶失败",
 
   // Session row hover actions + the Archived group
   "agent.list.pin": "置顶",
@@ -205,6 +216,19 @@ export const agentZh = {
   "agent.list.createProjectFailed": "创建项目失败",
   "agent.list.createSessionFailed": "创建会话失败",
   "agent.list.generateTitleFailed": "生成标题失败",
+
+  // Project settings panel (ProjectSettingsModal); the panel's own title bar
+  // shows the project name and path, so there is no title string here.
+  "agent.projectSettings.general": "常规",
+  "agent.projectSettings.name": "名称",
+  "agent.projectSettings.color": "颜色",
+  "agent.projectSettings.colorNone": "无颜色",
+  "agent.projectSettings.colorCustom": "自定义颜色",
+  "agent.projectSettings.editor": "编辑器",
+  "agent.projectSettings.defaultEditor": "默认编辑器",
+  "agent.projectSettings.globalEditor": "跟随全局 — {name}",
+  "agent.projectSettings.globalEditorUnset": "跟随全局",
+  "agent.projectSettings.saveFailed": "保存项目设置失败",
 
   // Agent form modal (AgentFormModal)
   "agent.form.backToList": "返回列表",

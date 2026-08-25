@@ -8,7 +8,9 @@ export const settingsZh = {
   "settings.general.theme.dark": "深色主题",
   "settings.general.language": "语言",
   "settings.general.autoScroll": "聊天界面自动下滑",
-  "settings.general.section": "通用",
+  // Group titles on the General page, named after what each row acts on.
+  "settings.general.interfaceSection": "界面",
+  "settings.general.messagesSection": "消息",
   "settings.general.appearanceDesc": "选择界面的明暗配色方案",
   "settings.general.languageDesc": "界面显示语言",
   "settings.general.autoScrollDesc": "有新消息时自动滚动到底部",
@@ -18,6 +20,11 @@ export const settingsZh = {
   "settings.general.messageNav": "消息导航条",
   "settings.general.messageNavDesc":
     "会话左侧按提问显示刻度，悬停预览、点击跳转",
+  "settings.general.editorSection": "编辑器",
+  "settings.general.defaultEditor": "默认编辑器",
+  "settings.general.defaultEditorDesc":
+    "「在…中打开」默认使用的应用；项目可单独覆盖",
+  "settings.general.defaultEditorAuto": "自动选择",
 
   // Sidebar
   "settings.sidebar.backToApp": "返回应用",

@@ -8,7 +8,9 @@
 // DB UNIQUE constraint is the backstop).
 
 use crate::models::AppError;
-use crate::storage::types::{AgentProject, CreateAgentProjectRequest, UUID};
+use crate::storage::types::{
+    AgentProject, CreateAgentProjectRequest, UpdateAgentProjectSettingsRequest, UUID,
+};
 use crate::storage::Database;
 use sqlx::Row;
 use std::sync::Arc;
@@ -71,7 +73,8 @@ impl AgentProjectRepository {
         project_id: &UUID,
     ) -> Result<Option<AgentProject>, AppError> {
         let row = sqlx::query(
-            "SELECT id, path, name, created_at, updated_at FROM agent_projects WHERE id = $1",
+            "SELECT id, path, name, pinned, color, default_editor_id, created_at, updated_at \
+             FROM agent_projects WHERE id = $1",
         )
         .bind(project_id)
         .fetch_optional(self.db.pool())
@@ -84,7 +87,8 @@ impl AgentProjectRepository {
     /// Exact string match on `path`.
     pub async fn get_project_by_path(&self, path: &str) -> Result<Option<AgentProject>, AppError> {
         let row = sqlx::query(
-            "SELECT id, path, name, created_at, updated_at FROM agent_projects WHERE path = $1",
+            "SELECT id, path, name, pinned, color, default_editor_id, created_at, updated_at \
+             FROM agent_projects WHERE path = $1",
         )
         .bind(path)
         .fetch_optional(self.db.pool())
@@ -98,7 +102,8 @@ impl AgentProjectRepository {
     /// is the frontend's job.
     pub async fn list_projects(&self) -> Result<Vec<AgentProject>, AppError> {
         let rows = sqlx::query(
-            "SELECT id, path, name, created_at, updated_at FROM agent_projects ORDER BY created_at DESC, id ASC",
+            "SELECT id, path, name, pinned, color, default_editor_id, created_at, updated_at \
+             FROM agent_projects ORDER BY created_at DESC, id ASC",
         )
         .fetch_all(self.db.pool())
         .await
@@ -120,6 +125,67 @@ impl AgentProjectRepository {
                 .await
                 .map_err(|e| {
                     AppError::internal_error(&format!("Failed to rename agent project: {}", e))
+                })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Agent project not found: {}",
+                project_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Writes the settings panel's fields as one group, bumping `updated_at`.
+    ///
+    /// `pinned` is deliberately outside this write (see
+    /// [`UpdateAgentProjectSettingsRequest`]): the sidebar toggles it through
+    /// [`Self::set_pinned`], so a settings save that happens to carry a stale
+    /// pin can never undo it.
+    pub async fn update_project_settings(
+        &self,
+        project_id: &UUID,
+        request: &UpdateAgentProjectSettingsRequest,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE agent_projects \
+             SET name = $1, color = $2, default_editor_id = $3, updated_at = $4 \
+             WHERE id = $5",
+        )
+        .bind(&request.name)
+        .bind(&request.color)
+        .bind(&request.default_editor_id)
+        .bind(Self::now_ms())
+        .bind(project_id)
+        .execute(self.db.pool())
+        .await
+        .map_err(|e| {
+            AppError::internal_error(&format!("Failed to update agent project settings: {}", e))
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found(&format!(
+                "Agent project not found: {}",
+                project_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Single-column pin write, mirroring `set_session_pinned`: the sidebar's
+    /// pin must not read-modify-write the rest of the row.
+    pub async fn set_pinned(&self, project_id: &UUID, pinned: bool) -> Result<(), AppError> {
+        let result =
+            sqlx::query("UPDATE agent_projects SET pinned = $1, updated_at = $2 WHERE id = $3")
+                .bind(pinned)
+                .bind(Self::now_ms())
+                .bind(project_id)
+                .execute(self.db.pool())
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to pin agent project: {}", e))
                 })?;
 
         if result.rows_affected() == 0 {
@@ -242,6 +308,9 @@ impl AgentProjectRepository {
             id: row.try_get("id")?,
             path: row.try_get("path")?,
             name: row.try_get("name")?,
+            pinned: row.try_get("pinned")?,
+            color: row.try_get("color")?,
+            default_editor_id: row.try_get("default_editor_id")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
         })
@@ -444,6 +513,86 @@ mod tests {
         // Delete
         repo.delete_project(&created.id).await.unwrap();
         assert!(repo.get_project_by_id(&created.id).await.unwrap().is_none());
+    }
+
+    /// A fresh project starts unpinned / uncolored / on the global editor, the
+    /// settings write round-trips (explicit NULLs included) without disturbing
+    /// the pin, and the pin toggles independently of the settings.
+    #[tokio::test]
+    async fn test_project_settings_and_pin_are_independent() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentProjectRepository::new(Arc::new(db));
+
+        let project = repo
+            .create_project(&sample_request("/tmp/workspace/settings", "settings"))
+            .await
+            .unwrap();
+        assert!(!project.pinned);
+        assert_eq!(project.color, None);
+        assert_eq!(project.default_editor_id, None);
+
+        // Pin, then save settings: the settings write must leave the pin alone.
+        repo.set_pinned(&project.id, true).await.unwrap();
+        repo.update_project_settings(
+            &project.id,
+            &UpdateAgentProjectSettingsRequest {
+                name: "renamed".to_string(),
+                color: Some("#ff3b30".to_string()),
+                default_editor_id: Some("zed".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let saved = repo.get_project_by_id(&project.id).await.unwrap().unwrap();
+        assert_eq!(saved.name, "renamed");
+        assert_eq!(saved.color.as_deref(), Some("#ff3b30"));
+        assert_eq!(saved.default_editor_id.as_deref(), Some("zed"));
+        assert!(saved.pinned, "a settings save must not clear the pin");
+        assert!(saved.updated_at >= project.updated_at);
+
+        // Explicit NULLs clear the color and fall back to the global editor.
+        repo.update_project_settings(
+            &project.id,
+            &UpdateAgentProjectSettingsRequest {
+                name: "renamed".to_string(),
+                color: None,
+                default_editor_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let cleared = repo.get_project_by_id(&project.id).await.unwrap().unwrap();
+        assert_eq!(cleared.color, None);
+        assert_eq!(cleared.default_editor_id, None);
+        assert!(cleared.pinned);
+
+        // Unpin leaves the settings intact.
+        repo.set_pinned(&project.id, false).await.unwrap();
+        let unpinned = repo.get_project_by_id(&project.id).await.unwrap().unwrap();
+        assert!(!unpinned.pinned);
+        assert_eq!(unpinned.name, "renamed");
+
+        // Both writes are a clean NOT_FOUND on a missing id.
+        let missing = "never-existed".to_string();
+        assert_eq!(
+            repo.set_pinned(&missing, true).await.unwrap_err().code,
+            "NOT_FOUND"
+        );
+        assert_eq!(
+            repo.update_project_settings(
+                &missing,
+                &UpdateAgentProjectSettingsRequest {
+                    name: "x".to_string(),
+                    color: None,
+                    default_editor_id: None,
+                },
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "NOT_FOUND"
+        );
     }
 
     /// Cascade delete removes the project, its sessions and their messages

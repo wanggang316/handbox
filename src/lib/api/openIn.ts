@@ -21,6 +21,25 @@ export async function listOpenInTargets(): Promise<OpenInTarget[]> {
   return apiCall<OpenInTarget[]>("open_in_list_targets");
 }
 
+/**
+ * Same list, probed at most once per app run.
+ *
+ * The probe scans the standard application directories and renders every app
+ * icon, so it is far too heavy to repeat each time a picker opens — and its
+ * answer only changes when the user installs or removes an app, which does not
+ * happen mid-session. A failed probe clears the cache so the next caller
+ * retries rather than inheriting the error forever.
+ */
+let targetsPromise: Promise<OpenInTarget[]> | null = null;
+
+export function listOpenInTargetsCached(): Promise<OpenInTarget[]> {
+  targetsPromise ??= listOpenInTargets().catch((error) => {
+    targetsPromise = null;
+    throw error;
+  });
+  return targetsPromise;
+}
+
 /** `path` must be an existing directory. */
 export async function openInTarget(
   path: string,
