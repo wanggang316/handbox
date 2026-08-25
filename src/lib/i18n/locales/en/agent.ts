@@ -81,6 +81,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.copy": "Copy",
   "agent.timeline.copied": "Copied",
   "agent.timeline.quoteReply": "Quote",
+  "agent.timeline.injectedContext": "Injected context",
+  "agent.timeline.injectedContinuation": "Asked to continue",
 
   "agent.nav.label": "Message navigation",
   "agent.nav.jumpTo": "Jump to question {index}",

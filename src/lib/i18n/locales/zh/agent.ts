@@ -71,6 +71,9 @@ export const agentZh = {
   "agent.timeline.copy": "复制",
   "agent.timeline.copied": "已复制",
   "agent.timeline.quoteReply": "引用",
+  // Badges on text a hook injected as a user message (injectedMessage.ts)
+  "agent.timeline.injectedContext": "注入上下文",
+  "agent.timeline.injectedContinuation": "要求继续",
 
   // Message navigation rail (MessageNavRail)
   "agent.nav.label": "消息导航",

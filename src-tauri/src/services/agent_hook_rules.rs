@@ -556,7 +556,9 @@ impl Extension for RuleHookExtension {
                     // said you'd run the tests — run them" enforcement.
                     CommandVerdict::Deny(reason) => {
                         self.report(rule, SUBJECT, outcome::RESUMED, None, detail);
-                        Ok(HookDecision::Cancel(reason))
+                        Ok(HookDecision::Cancel(attribute_continuation(
+                            &rule.name, &reason,
+                        )))
                     }
                     // A hook that broke must NOT hand the model "hook command
                     // timed out" as an instruction and burn a re-entry on it —
@@ -645,6 +647,23 @@ impl Extension for RuleHookExtension {
             }
         }
     }
+}
+
+/// Name the rule that resumed the turn, inside the reason the model is about
+/// to read as its next user turn.
+///
+/// Without the envelope the reason arrives as an ordinary user message: the
+/// model obeys it as if the reader had typed it, and the transcript shows it as
+/// something they said. Naming the source is the same contract upstream applies
+/// to contributed context (`<extension-context extension="...">`), and it is
+/// what lets the timeline render this as a hook firing instead of a bubble
+/// (see components/agentsession/injectedMessage.ts).
+///
+/// A quote in the rule name would close the attribute early, so it is escaped;
+/// the parser's name capture stops at the first quote.
+fn attribute_continuation(rule_name: &str, reason: &str) -> String {
+    let name = rule_name.replace('"', "&quot;");
+    format!("<hook-continuation rule=\"{name}\">\n{reason}\n</hook-continuation>")
 }
 
 #[cfg(test)]
@@ -1358,13 +1377,26 @@ mod tests {
         let decision = ext.on_turn_end(&cx(), &turn_end("done!")).await.unwrap();
 
         match decision {
-            HookDecision::Cancel(reason) => {
-                assert_eq!(reason, "you said you would run the tests")
-            }
+            // The reason carries the rule's name: the model must not read a
+            // hook's instruction as something the user typed, and the timeline
+            // renders it as a hook firing rather than a user bubble.
+            HookDecision::Cancel(reason) => assert_eq!(
+                reason,
+                "<hook-continuation rule=\"enforce\">\nyou said you would run the tests\n</hook-continuation>"
+            ),
             other => panic!("expected Cancel, got {other:?}"),
         }
         let events = seen.lock().unwrap();
         assert_eq!(events[0]["outcome"], "resumed");
+    }
+
+    #[test]
+    fn a_quote_in_the_rule_name_cannot_close_the_attribute_early() {
+        let attributed = attribute_continuation("say \"hi\"", "keep going");
+        assert_eq!(
+            attributed,
+            "<hook-continuation rule=\"say &quot;hi&quot;\">\nkeep going\n</hook-continuation>"
+        );
     }
 
     /// A hook that broke must not hand the model its error message as an
