@@ -203,84 +203,99 @@
   const isPreset = $derived(color !== null && PRESET_COLORS.includes(color));
 </script>
 
-<!-- The project's name and its path (as the title's second line) ride in the
-     Modal's own title bar, so the body starts straight at its first group. -->
-<Modal bind:open title={project?.name ?? ""} subtitle={project?.path ?? ""}>
+<!-- The project's name rides in the Modal's own title bar, so the body starts
+     straight at its first group. -->
+<Modal bind:open title={project?.name ?? ""}>
   <div class="flex w-[560px] max-w-[92vw] max-h-[86vh] flex-col">
     {#if project}
       {#if error}
-        <!-- pt-20 clears Modal's title bar, two lines tall here (name + path). -->
-        <p class="flex-shrink-0 px-7 pt-20 text-[13px] text-error">{error}</p>
+        <!-- pt-14 clears Modal's title bar. -->
+        <p class="flex-shrink-0 px-7 pt-14 text-[13px] text-error">{error}</p>
       {/if}
 
       <div
         class="flex flex-1 min-h-0 flex-col gap-y-4 overflow-y-auto px-7 pb-7 {error
           ? 'pt-4'
-          : 'pt-20'}"
+          : 'pt-14'}"
       >
-        <TableGroup title={t("agent.projectSettings.general")}>
-          <!-- Not TextRow: the name is committed on blur / Enter rather than on
-               every keystroke, which needs the input's own handlers. -->
-          <TableBaseRow label={t("agent.projectSettings.name")} py="2">
-            <input
-              class="w-full border-none p-1 text-right text-sm text-base-content"
-              bind:value={name}
-              onblur={commitName}
-              onkeydown={handleNameKeydown}
-              placeholder={t("agent.list.renamePlaceholder")}
-            />
-          </TableBaseRow>
+        <!-- The group and its path caption are one block: gap-y-4 would put the
+             same distance between them as between two groups. -->
+        <div>
+          <TableGroup title={t("agent.projectSettings.general")}>
+            <!-- Not TextRow: the name is committed on blur / Enter rather than
+                 on every keystroke, which needs the input's own handlers. -->
+            <TableBaseRow label={t("agent.projectSettings.name")} py="2">
+              <input
+                class="w-full border-none p-1 text-right text-sm text-base-content"
+                bind:value={name}
+                onblur={commitName}
+                onkeydown={handleNameKeydown}
+                placeholder={t("agent.list.renamePlaceholder")}
+              />
+            </TableBaseRow>
 
-          <TableBaseRow label={t("agent.projectSettings.color")}>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-base-content/60 hover:text-base-content {color ===
-                null
-                  ? 'outline outline-2 outline-offset-2 outline-base-content/40'
-                  : ''}"
-                title={t("agent.projectSettings.colorNone")}
-                aria-label={t("agent.projectSettings.colorNone")}
-                aria-pressed={color === null}
-                onclick={() => pickColor(null)}
-              >
-                <Ban size={22} />
-              </button>
-
-              {#each PRESET_COLORS as preset (preset)}
+            <TableBaseRow label={t("agent.projectSettings.color")}>
+              <div class="flex items-center gap-2">
                 <button
                   type="button"
-                  class="h-6 w-6 flex-shrink-0 rounded-full {color === preset
+                  class="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-base-content/60 hover:text-base-content {color ===
+                  null
                     ? 'outline outline-2 outline-offset-2 outline-base-content/40'
                     : ''}"
-                  style="background-color: {preset};"
-                  aria-label={preset}
-                  aria-pressed={color === preset}
-                  onclick={() => pickColor(preset)}
-                ></button>
-              {/each}
+                  title={t("agent.projectSettings.colorNone")}
+                  aria-label={t("agent.projectSettings.colorNone")}
+                  aria-pressed={color === null}
+                  onclick={() => pickColor(null)}
+                >
+                  <Ban size={22} />
+                </button>
 
-              <!-- Custom color: a native picker behind a color-wheel swatch. -->
-              <span
-                class="relative h-6 w-6 flex-shrink-0 rounded-full {color !==
-                  null && !isPreset
-                  ? 'outline outline-2 outline-offset-2 outline-base-content/40'
-                  : ''}"
-                style="background: conic-gradient(#ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff3b30);"
-                title={t("agent.projectSettings.colorCustom")}
-              >
-                <input
-                  type="color"
-                  class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                  aria-label={t("agent.projectSettings.colorCustom")}
-                  value={customColorValue}
-                  oninput={(event) =>
-                    pickColor((event.currentTarget as HTMLInputElement).value)}
-                />
-              </span>
-            </div>
-          </TableBaseRow>
-        </TableGroup>
+                {#each PRESET_COLORS as preset (preset)}
+                  <button
+                    type="button"
+                    class="h-6 w-6 flex-shrink-0 rounded-full {color === preset
+                      ? 'outline outline-2 outline-offset-2 outline-base-content/40'
+                      : ''}"
+                    style="background-color: {preset};"
+                    aria-label={preset}
+                    aria-pressed={color === preset}
+                    onclick={() => pickColor(preset)}
+                  ></button>
+                {/each}
+
+                <!-- Custom color: a native picker behind a color-wheel swatch. -->
+                <span
+                  class="relative h-6 w-6 flex-shrink-0 rounded-full {color !==
+                    null && !isPreset
+                    ? 'outline outline-2 outline-offset-2 outline-base-content/40'
+                    : ''}"
+                  style="background: conic-gradient(#ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff3b30);"
+                  title={t("agent.projectSettings.colorCustom")}
+                >
+                  <input
+                    type="color"
+                    class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label={t("agent.projectSettings.colorCustom")}
+                    value={customColorValue}
+                    oninput={(event) =>
+                      pickColor((event.currentTarget as HTMLInputElement).value)}
+                  />
+                </span>
+              </div>
+            </TableBaseRow>
+          </TableGroup>
+
+          <!-- The working directory is the project's identity: it is what the
+               backend keys on, so it is shown for reference and never edited.
+               break-all because a deep path has no spaces to wrap at. -->
+          <!-- mt-2 / px-1 mirror the group title's mb-2 / mx-1, so the caption
+               brackets the card at the same inset the title does. -->
+          <p
+            class="mt-2 px-1 break-all text-[12px] leading-snug text-base-content/45"
+          >
+            {project.path}
+          </p>
+        </div>
 
         <TableGroup title={t("agent.projectSettings.editor")}>
           <SelectRow
