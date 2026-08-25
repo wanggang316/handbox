@@ -10,7 +10,9 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.general.theme.dark": "Dark",
   "settings.general.language": "Language",
   "settings.general.autoScroll": "Auto-scroll chat view",
-  "settings.general.section": "General",
+  // Group titles on the General page, named after what each row acts on.
+  "settings.general.interfaceSection": "Interface",
+  "settings.general.messagesSection": "Messages",
   "settings.general.appearanceDesc": "Choose the light or dark color scheme",
   "settings.general.languageDesc": "Interface display language",
   "settings.general.autoScrollDesc":

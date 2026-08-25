@@ -134,7 +134,9 @@
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
-  <TableGroup title={t("settings.general.section")}>
+  <!-- Grouped by what a row acts on: the app's chrome, the message stream, and
+       the external editor. -->
+  <TableGroup title={t("settings.general.interfaceSection")}>
     <SelectRow
       label={t("settings.general.appearance")}
       description={t("settings.general.appearanceDesc")}
@@ -159,7 +161,9 @@
         onChange={handleSidebarVibrancyChange}
       />
     {/if}
+  </TableGroup>
 
+  <TableGroup title={t("settings.general.messagesSection")}>
     <SwitchRow
       label={t("settings.general.autoScroll")}
       description={t("settings.general.autoScrollDesc")}
