@@ -32,6 +32,33 @@ pub async fn agent_project_rename(
     agent_project_service.rename_project(project_id, name).await
 }
 
+/// Saves the project settings panel's fields as one group. `color` /
+/// `default_editor_id` are nullable: null clears the color / falls back to the
+/// global default editor. `pinned` is not part of this write — see
+/// `agent_project_set_pinned`.
+#[tauri::command]
+pub async fn agent_project_update_settings(
+    project_id: UUID,
+    name: String,
+    color: Option<String>,
+    default_editor_id: Option<String>,
+    agent_project_service: State<'_, AgentProjectService>,
+) -> Result<AgentProject, AppError> {
+    agent_project_service
+        .update_project_settings(project_id, name, color, default_editor_id)
+        .await
+}
+
+/// Pins / unpins a project in the sidebar (single-column write).
+#[tauri::command]
+pub async fn agent_project_set_pinned(
+    project_id: UUID,
+    pinned: bool,
+    agent_project_service: State<'_, AgentProjectService>,
+) -> Result<AgentProject, AppError> {
+    agent_project_service.set_pinned(project_id, pinned).await
+}
+
 /// Aborts any active run of the project's sessions first (abort is a no-op when
 /// idle), best-effort deletes each session's JSONL transcript, then cascade-deletes
 /// the project, its sessions, and SQLite transcripts. `app_handle` resolves the

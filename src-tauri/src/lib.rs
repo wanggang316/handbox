@@ -226,6 +226,8 @@ pub fn run() {
             agent_project_create,
             agent_project_list,
             agent_project_rename,
+            agent_project_update_settings,
+            agent_project_set_pinned,
             agent_project_delete,
             // "Open in ...": open a working directory in an external editor/terminal/Finder
             open_in_list_targets,
