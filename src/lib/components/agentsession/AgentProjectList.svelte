@@ -840,7 +840,7 @@
 {#snippet sessionRow(session: AgentSession)}
   {#if renamingSessionId === session.id}
     <!-- Rename input: Enter/blur commits, Escape cancels. -->
-    <div class="pl-5 pr-2">
+    <div class="pl-2 pr-2">
       <input
         data-session-id={session.id}
         class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
@@ -859,7 +859,7 @@
       ? resolveAgentIcon(sourceAgent.icon)
       : MessagesSquare}
     <div
-      class="w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
+      class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
