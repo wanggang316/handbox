@@ -16,11 +16,11 @@
 
 use async_trait::async_trait;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hand_coding_agent::core::extensions::api::{
-    ResultDecision, ToolCallEvent, ToolResultEvent, TurnEndEvent, UserMessageEvent,
+    ResultDecision, SessionSink, ToolCallEvent, ToolResultEvent, TurnEndEvent, UserMessageEvent,
     UserMessageOutcome,
 };
 use hand_coding_agent::{
@@ -42,6 +42,11 @@ const RULE_EXTENSION_NAME: &str = "handbox-hook-rules";
 /// callId, outcome, message, detail }` — `callId` lets the timeline attach the
 /// entry to its tool card, `detail` is a command's execution capture.
 pub const HOOK_RULE_NOTIFY_EVENT: &str = "agent_hook_rule_notify";
+
+/// `custom_type` of the `Custom` transcript entry recording a rule firing.
+/// Namespaced because the transcript is shared with anything else that writes
+/// extension entries into the same session file.
+pub const HOOK_RULE_ENTRY_TYPE: &str = "handbox.hook_rule_match";
 
 /// What actually happened, for the notification payload. Distinct from the
 /// rule's action because a command resolves several ways.
@@ -86,6 +91,19 @@ pub struct RuleHookExtension {
     /// Not dispatched through the [`Extension`] trait: the approval pause is
     /// HandBox's own, so these fire through [`wrap_approval_emitter`].
     approval_rules: Vec<HookRule>,
+    /// The transcript writer, latched from the context on `on_load`.
+    ///
+    /// A notice is otherwise only ever live state: the host keeps it in memory
+    /// and drops it on reload, so what a hook DID vanished while what it
+    /// INJECTED survived as a real message. Recording it here puts both halves
+    /// in the transcript.
+    ///
+    /// Latched rather than threaded through: `report` has 21 call sites, and
+    /// the approval path is not an [`Extension`] dispatch at all, so it has no
+    /// context to thread. `on_load` is ungated and runs for every registered
+    /// extension, and the host rebuilds the session (and its sink) per run, so
+    /// re-latching each time is what keeps this pointing at the live sink.
+    session_sink: Mutex<Option<SessionSink>>,
 }
 
 impl RuleHookExtension {
@@ -137,6 +155,7 @@ impl RuleHookExtension {
             prompt_rules,
             turn_end_rules,
             approval_rules,
+            session_sink: Mutex::new(None),
         }
     }
 
@@ -233,6 +252,10 @@ impl RuleHookExtension {
     ///
     /// `call_id` ties a tool-call firing to its card in the timeline (`None`
     /// for prompt rules); `detail` is a command's execution capture.
+    ///
+    /// The same facts go to the transcript as a `Custom` entry, so the firing
+    /// is still there after a reload. The event is for the session that is
+    /// running now; the entry is for every time it is opened afterwards.
     fn report(
         &self,
         rule: &HookRule,
@@ -250,19 +273,30 @@ impl RuleHookExtension {
             "[hook_rules] rule matched"
         );
 
+        // One payload for both sinks: the timeline renders a restored firing
+        // with the same code that renders a live one, so the two cannot drift.
+        // `sessionId` is left to the event — the entry already lives in that
+        // session's transcript.
+        let record = serde_json::json!({
+            "ruleId": rule.id,
+            "ruleName": rule.name,
+            "action": rule.action,
+            "event": rule.event,
+            "toolName": tool_name,
+            "callId": call_id,
+            "outcome": outcome,
+            "message": rule.message,
+            "detail": detail,
+        });
+
+        if let Some(sink) = self.session_sink.lock().unwrap().as_ref() {
+            sink.append_custom(HOOK_RULE_ENTRY_TYPE, Some(record.clone()));
+        }
+
         if let Some(notify) = &self.notifier {
-            notify(serde_json::json!({
-                "sessionId": self.session_id,
-                "ruleId": rule.id,
-                "ruleName": rule.name,
-                "action": rule.action,
-                "event": rule.event,
-                "toolName": tool_name,
-                "callId": call_id,
-                "outcome": outcome,
-                "message": rule.message,
-                "detail": detail,
-            }));
+            let mut payload = record;
+            payload["sessionId"] = serde_json::Value::String(self.session_id.clone());
+            notify(payload);
         }
     }
 
@@ -348,6 +382,15 @@ pub fn wrap_approval_emitter(
 impl Extension for RuleHookExtension {
     fn manifest(&self) -> &ExtensionManifest {
         &self.manifest
+    }
+
+    /// Latch this run's transcript writer (see [`RuleHookExtension::session_sink`]).
+    /// Ungated and run for every registered extension, so it is the one place
+    /// guaranteed to see a context — including for a session whose only rules
+    /// are approval ones, which never reach an [`Extension`] dispatch.
+    async fn on_load(&self, cx: &ExtensionContext) -> Result<(), ExtensionError> {
+        *self.session_sink.lock().unwrap() = Some(cx.session_sink.clone());
+        Ok(())
     }
 
     async fn on_user_message(
@@ -669,6 +712,7 @@ fn attribute_continuation(rule_name: &str, reason: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hand_coding_agent::core::extensions::api::SessionWrite;
     use serde_json::json;
     use std::sync::Mutex;
 
@@ -1389,6 +1433,73 @@ mod tests {
         }
         let events = seen.lock().unwrap();
         assert_eq!(events[0]["outcome"], "resumed");
+    }
+
+    /// A firing is recorded in the transcript as well as emitted, so opening
+    /// the session later still shows what the hook did — the half that used to
+    /// vanish while the text a hook injected survived as a real message.
+    #[tokio::test]
+    async fn a_firing_is_written_to_the_transcript() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let ext = RuleHookExtension::new(
+            "s40".to_string(),
+            vec![HookRule {
+                arg_field: None,
+                arg_contains: None,
+                command: Some("echo 'hello'".to_string()),
+                ..rule("watch", HookEvent::TurnEnd, HookAction::RunCommand)
+            }],
+        )
+        .with_working_dir(dir.path().to_path_buf());
+
+        let cx = cx();
+        ext.on_load(&cx).await.unwrap();
+        ext.on_turn_end(&cx, &turn_end("done")).await.unwrap();
+
+        let writes = cx.session_sink.drain();
+        assert_eq!(writes.len(), 1, "one firing, one entry");
+        match &writes[0] {
+            SessionWrite::Custom { custom_type, data } => {
+                assert_eq!(custom_type, HOOK_RULE_ENTRY_TYPE);
+                let data = data.as_ref().expect("firing carries its facts");
+                assert_eq!(data["ruleName"], "watch");
+                assert_eq!(data["outcome"], outcome::RAN);
+                // The execution capture is what the row unfolds to show.
+                assert!(data["detail"].as_str().unwrap().contains("echo 'hello'"));
+                // The entry lives in the session's own transcript, so it does
+                // not repeat the id the way the broadcast event has to.
+                assert!(data.get("sessionId").is_none());
+            }
+            other => panic!("expected a Custom entry, got {other:?}"),
+        }
+    }
+
+    /// Without a context there is no sink to latch, and a firing must still
+    /// report rather than panic — the headless paths have no host.
+    #[tokio::test]
+    async fn a_firing_without_a_loaded_sink_still_reports() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let notifier: NotifyEmitter = Arc::new(move |payload| sink.lock().unwrap().push(payload));
+
+        let ext = RuleHookExtension::new(
+            "s41".to_string(),
+            vec![HookRule {
+                arg_field: None,
+                arg_contains: None,
+                ..rule("watch", HookEvent::TurnEnd, HookAction::Notify)
+            }],
+        )
+        .with_notifier(Some(notifier))
+        .with_working_dir(dir.path().to_path_buf());
+
+        // No on_load: the sink was never latched.
+        ext.on_turn_end(&cx(), &turn_end("done")).await.unwrap();
+
+        let events = seen.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["sessionId"], "s41");
     }
 
     #[test]
