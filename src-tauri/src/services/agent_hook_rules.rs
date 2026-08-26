@@ -677,6 +677,7 @@ mod tests {
             cwd: std::path::PathBuf::from("/tmp"),
             session_id: "coding-agent-internal".to_string(),
             data_dir: std::path::PathBuf::from("/tmp/data"),
+            session_sink: Default::default(),
         }
     }
 

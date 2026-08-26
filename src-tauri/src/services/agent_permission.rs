@@ -535,6 +535,7 @@ mod tests {
             cwd: root.to_path_buf(),
             session_id: "test-session".to_string(),
             data_dir: root.join(".hand").join("data"),
+            session_sink: Default::default(),
         }
     }
 
@@ -546,6 +547,7 @@ mod tests {
             cwd: root.to_path_buf(),
             session_id: session_id.to_string(),
             data_dir: root.join(".hand").join("data"),
+            session_sink: Default::default(),
         }
     }
 

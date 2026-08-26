@@ -1349,6 +1349,7 @@ mod tests {
                 cwd: Path::new("/tmp").to_path_buf(),
                 session_id: hook_cx_id,
                 data_dir: Path::new("/tmp").join(".hand").join("data"),
+                session_sink: Default::default(),
             };
             let event = ToolCallEvent {
                 tool_name: "bash".to_string(),
