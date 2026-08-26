@@ -12,8 +12,8 @@
 
 use crate::models::AppError;
 use crate::services::{
-    abort_run, agent_jsonl_store, title_gen, AgentSessionParameter, AgentSessionService,
-    ProviderService,
+    abort_run, agent_hook_rules, agent_jsonl_store, title_gen, AgentSessionParameter,
+    AgentSessionService, ProviderService,
 };
 use crate::storage::types::{
     AgentSession, AgentSessionMessage, CreateAgentSessionRequest, InstantiateAgentSessionRequest,
@@ -531,6 +531,44 @@ pub async fn agent_session_messages(
                 "failed to read JSONL transcript, falling back to SQLite: {e}"
             );
             agent_session_service.list_messages(session_id).await
+        }
+    }
+}
+
+/// Returns the hook firings recorded in the session's transcript.
+///
+/// Live firings arrive on `agent_hook_rule_notify` and are held in memory; this
+/// is what a reopened session has left of them. A session with no JSONL (legacy,
+/// or never run) simply has none — the timeline renders without them rather
+/// than failing the load.
+#[tauri::command]
+pub async fn agent_session_hook_notices(
+    session_id: UUID,
+    app_handle: AppHandle,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<Vec<agent_jsonl_store::StoredHookNotice>, AppError> {
+    let session = agent_session_service
+        .get_session(session_id.clone())
+        .await?;
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    let cwd = agent_jsonl_store::session_cwd(session.working_dir.as_deref(), &app_data_dir);
+
+    match agent_jsonl_store::load_hook_notices(
+        &app_data_dir,
+        &cwd,
+        &session_id,
+        agent_hook_rules::HOOK_RULE_ENTRY_TYPE,
+    ) {
+        Ok(notices) => Ok(notices.unwrap_or_default()),
+        // A transcript that cannot be read costs its hook history, not the
+        // session: the messages come from a separate read that has its own
+        // fallback.
+        Err(e) => {
+            tracing::warn!(
+                session_id = %session_id,
+                "failed to read hook notices from JSONL: {e}"
+            );
+            Ok(Vec::new())
         }
     }
 }
