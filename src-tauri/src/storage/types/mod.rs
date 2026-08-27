@@ -8,6 +8,7 @@ pub mod job;
 pub mod mcp;
 pub mod model;
 pub mod provider;
+pub mod tool_definition;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
 pub use agent_project::{
@@ -33,6 +34,10 @@ pub use mcp::{
 };
 pub use model::{Model, ModelModality};
 pub use provider::Provider;
+pub use tool_definition::{
+    CreateToolDefinitionRequest, ToolDefinition, ToolParam, ToolParamType,
+    UpdateToolDefinitionRequest,
+};
 // `SessionReasoningConfig` is defined in `models::llm_types`; re-exported so
 // `storage::types::SessionReasoningConfig` consumers keep resolving.
 pub use crate::models::llm_types::SessionReasoningConfig;

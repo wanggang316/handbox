@@ -55,6 +55,7 @@ export * from "./settings";
 export * from "./window";
 export * from "./mcp";
 export * from "./hookRule";
+export * from "./toolDefinition";
 export * from "./skill";
 export * from "./auth";
 export * from "./selection";

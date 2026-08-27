@@ -17,7 +17,7 @@ use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
     GenUiService, HookRuleService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
-    ProviderService, SettingsService, StorageService, UserSessionService,
+    ProviderService, SettingsService, StorageService, ToolDefinitionService, UserSessionService,
 };
 use crate::storage::Database;
 use crate::utils::logger;
@@ -261,6 +261,11 @@ pub fn run() {
             hook_rule_create,
             hook_rule_update,
             hook_rule_delete,
+            tool_definition_list,
+            tool_definition_get,
+            tool_definition_create,
+            tool_definition_update,
+            tool_definition_delete,
             skill_list,
             skill_set_disabled,
             settings_get,
@@ -338,6 +343,8 @@ async fn initialize_services(
     let mcp_service = McpService::new(database_service.clone());
 
     let hook_rule_service = HookRuleService::new(database_service.clone());
+
+    let tool_definition_service = ToolDefinitionService::new(database_service.clone());
 
     let settings_service = SettingsService::new(storage_service.clone());
 
@@ -466,6 +473,7 @@ async fn initialize_services(
     app.manage(model_service);
     app.manage(mcp_service);
     app.manage(hook_rule_service);
+    app.manage(tool_definition_service);
     app.manage(settings_service);
     app.manage(user_session_service);
     app.manage(agent_service);

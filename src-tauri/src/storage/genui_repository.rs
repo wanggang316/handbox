@@ -97,16 +97,20 @@ impl GenUiRepository {
         Ok(())
     }
 
-    /// Clears `genui_id` on any agent referencing it (no dangling refs), then
-    /// deletes the row.
+    /// Clears `genui_id` on every referencing row — agents and user-defined
+    /// tools alike (no dangling refs) — then deletes the row. A tool that loses
+    /// its spec falls back to rendering as an ordinary tool call.
     pub async fn delete_genui(&self, id: &UUID) -> Result<(), AppError> {
-        sqlx::query("UPDATE agents SET genui_id = NULL WHERE genui_id = $1")
-            .bind(id)
-            .execute(self.db.pool())
-            .await
-            .map_err(|e| {
-                AppError::internal_error(&format!("Failed to clear genui references: {}", e))
-            })?;
+        for table in ["agents", "tool_definitions"] {
+            let statement = format!("UPDATE {table} SET genui_id = NULL WHERE genui_id = $1");
+            sqlx::query(sqlx::AssertSqlSafe(statement))
+                .bind(id)
+                .execute(self.db.pool())
+                .await
+                .map_err(|e| {
+                    AppError::internal_error(&format!("Failed to clear genui references: {}", e))
+                })?;
+        }
 
         let result = sqlx::query("DELETE FROM genui WHERE id = $1")
             .bind(id)
