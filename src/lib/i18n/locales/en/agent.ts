@@ -48,15 +48,20 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.input.stop": "Stop",
   "agent.input.send": "Send",
   "agent.input.autoExecution": "Auto",
+  "agent.input.autoExecutionDesc":
+    "Writes, edits and commands run without asking",
   "agent.input.manualExecution": "Manual",
-  "agent.input.selectModel": "Select model",
+  "agent.input.manualExecutionDesc":
+    "Writes, edits and commands need your approval",
+  "agent.input.toolExecutionFailed": "Failed to set the tool execution mode",
+  "agent.input.selectModel": "Select model...",
   "agent.input.noAvailableMcpServers": "No available MCP servers",
   "agent.input.configureMcpInSettings":
     "Configure and enable MCP servers in the app settings",
   "agent.input.enabledToolsCount": "{count} enabled tools",
   "agent.input.selectAgent": "Select agent",
   "agent.input.switchAgentFailed": "Failed to switch agent",
-  "agent.input.selectWorkingDir": "Select working directory",
+  "agent.input.selectWorkingDir": "Select folder...",
   "agent.input.workingDirFailed": "Failed to set working directory",
 
   // Model select modal (ModelSelectModal)
@@ -83,6 +88,12 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.quoteReply": "Quote",
   "agent.timeline.injectedContext": "Injected context",
   "agent.timeline.injectedContinuation": "Asked to continue",
+  "agent.timeline.forkFromHere": "New session from here",
+  "agent.timeline.forkTitle": "New Session from Here",
+  "agent.timeline.forkNameLabel": "Session name",
+  "agent.timeline.forkNamePlaceholder": "Name for the new session",
+  "agent.timeline.forkHint": "The new session carries the conversation up to this reply",
+  "agent.timeline.forkFailed": "Failed to create a session from here",
 
   "agent.nav.label": "Message navigation",
   "agent.nav.jumpTo": "Jump to question {index}",
@@ -185,9 +196,20 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.removeFromProject": "Remove from project",
   "agent.list.moveFailed": "Failed to move the session",
   "agent.list.copyPath": "Copy path",
-  "agent.list.deleteProject": "Delete project",
+  // Menu label only; the confirm dialog spells out the cascade.
+  "agent.list.removeProject": "Remove",
   "agent.list.copyId": "Copy ID",
   "agent.list.untitledSession": "Untitled",
+
+  // Project row menu (the "…" button and the right-click menu share it)
+  "agent.list.projectMenu": "Project actions",
+  "agent.list.projectMenuFor": "Actions for project {name}",
+  "agent.list.pinProject": "Pin",
+  "agent.list.unpinProject": "Unpin",
+  "agent.list.projectSettings": "Settings…",
+  "agent.list.revealInFinder": "Reveal in Finder",
+  "agent.list.revealFailed": "Failed to open the directory",
+  "agent.list.pinProjectFailed": "Failed to pin the project",
 
   // Session row hover actions + the Archived group
   "agent.list.pin": "Pin",
@@ -208,6 +230,19 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.list.createProjectFailed": "Failed to create project",
   "agent.list.createSessionFailed": "Failed to create session",
   "agent.list.generateTitleFailed": "Failed to generate title",
+
+  // Project settings panel (ProjectSettingsModal); the panel's own title bar
+  // shows the project name and path, so there is no title string here.
+  "agent.projectSettings.general": "General",
+  "agent.projectSettings.name": "Name",
+  "agent.projectSettings.color": "Color",
+  "agent.projectSettings.colorNone": "No color",
+  "agent.projectSettings.colorCustom": "Custom color",
+  "agent.projectSettings.editor": "Editor",
+  "agent.projectSettings.defaultEditor": "Default editor",
+  "agent.projectSettings.globalEditor": "Global — {name}",
+  "agent.projectSettings.globalEditorUnset": "Global",
+  "agent.projectSettings.saveFailed": "Failed to save project settings",
 
   // Agent form modal (AgentFormModal)
   "agent.form.backToList": "Back to list",

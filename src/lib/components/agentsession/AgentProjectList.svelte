@@ -17,18 +17,23 @@
     ChevronRight,
     Copy,
     Folder,
+    FolderOpen,
     FolderPlus,
     FolderInput,
     Loader2,
     MessagesSquare,
+    MoreHorizontal,
     PencilLine,
     Pin,
     PinOff,
     Plus,
+    Settings2,
     Sparkles,
     Trash2,
   } from "@lucide/svelte";
   import SessionHoverCard from "$lib/components/agentsession/SessionHoverCard.svelte";
+  import ProjectSettingsModal from "$lib/components/agentsession/ProjectSettingsModal.svelte";
+  import { openInTarget } from "$lib/api/openIn";
   import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import {
     agentProjectState,
@@ -646,57 +651,53 @@
     }
   }
 
-  // --- Project rename / delete ----------------------------------------------
+  // --- Project pin / settings / reveal --------------------------------------
 
-  // Project rename mirrors session rename: state keyed by project id so the
-  // input follows its header through reorders and commits target renamingProjectId.
-  let renamingProjectId = $state("");
-  let renameProjectValue = $state("");
+  // The settings panel is mounted once and re-pointed at whichever project the
+  // menu was opened on; it stays bound to the store's row, so a save is
+  // reflected here without a round trip through this component.
+  let settingsProjectId = $state("");
+  let settingsOpen = $state(false);
+  const settingsProject = $derived(
+    agentProjectState.projects.find(
+      (project) => project.id === settingsProjectId,
+    ) ?? null,
+  );
 
-  function startProjectRename() {
+  function openProjectSettings() {
     if (contextMenu?.kind !== "project") return;
-    const project = contextMenu.project;
-    renamingProjectId = project.id;
-    renameProjectValue = project.name;
+    settingsProjectId = contextMenu.project.id;
     contextMenu = null;
-
-    setTimeout(() => {
-      const input = document.querySelector(
-        `input[data-project-id="${project.id}"]`,
-      ) as HTMLInputElement | null;
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    }, 0);
+    settingsOpen = true;
   }
 
-  // Same semantics as session rename: whitespace-only or unchanged names are
-  // not written; clearing state first makes the Enter + blur double-fire idempotent.
-  async function confirmProjectRename() {
-    const id = renamingProjectId;
-    const next = renameProjectValue.trim();
-    const project = agentProjectState.projects.find((p) => p.id === id);
-    cancelProjectRename();
-    if (project && next && next !== project.name) {
-      try {
-        await agentProjectActions.renameProject(id, next);
-      } catch (error) {
-        console.error("Failed to rename agent project:", error);
-      }
+  // Optimistic in the store, so the project reorders immediately; a failure
+  // rolls back there and surfaces in the shared error bar.
+  async function toggleProjectPinned(project: AgentProject) {
+    contextMenu = null;
+    createErrorMessage = null;
+    try {
+      await agentProjectActions.setPinned(project.id, !project.pinned);
+    } catch (error) {
+      const normalized = normalizeError(
+        error,
+        t("agent.list.pinProjectFailed"),
+      );
+      createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
 
-  function cancelProjectRename() {
-    renamingProjectId = "";
-    renameProjectValue = "";
-  }
-
-  function handleProjectRenameKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter") {
-      confirmProjectRename();
-    } else if (event.key === "Escape") {
-      cancelProjectRename();
+  // "system" is the backend's always-available file-manager target; the launch
+  // goes through the backend because the project path is outside the opener
+  // plugin's capability scope.
+  async function revealProject(project: AgentProject) {
+    contextMenu = null;
+    createErrorMessage = null;
+    try {
+      await openInTarget(project.path, "system");
+    } catch (error) {
+      const normalized = normalizeError(error, t("agent.list.revealFailed"));
+      createErrorMessage = normalized.hint ?? normalized.message;
     }
   }
 
@@ -840,7 +841,7 @@
 {#snippet sessionRow(session: AgentSession)}
   {#if renamingSessionId === session.id}
     <!-- Rename input: Enter/blur commits, Escape cancels. -->
-    <div class="pl-5 pr-2">
+    <div class="pl-2 pr-2">
       <input
         data-session-id={session.id}
         class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
@@ -859,7 +860,7 @@
       ? resolveAgentIcon(sourceAgent.icon)
       : MessagesSquare}
     <div
-      class="w-full flex items-center gap-1.5 py-1 pl-7 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
+      class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content hover:bg-base-300 cursor-default select-none {session.id ===
       activeId
         ? 'bg-base-300 text-base-content'
         : ''}"
@@ -897,7 +898,7 @@
         />
       {:else if showControls}
         <!-- Hover / focus swaps the relative time for the row's own controls. -->
-        <span class="flex flex-shrink-0 items-center gap-0.5">
+        <span class="flex flex-shrink-0 items-center gap-1.5">
           {#if !session.archived}
             <button
               class="p-0.5 rounded text-base-content/55 hover:text-base-content hover:bg-base-content/10"
@@ -952,60 +953,67 @@
 <!-- Project group: collapsible header + its sessions. -->
 {#snippet projectGroup(project: AgentProject, sessions: AgentSession[])}
   {@const collapsed = agentProjectCollapse.isCollapsed(project.id)}
-  {#if renamingProjectId === project.id}
-    <!-- Project rename row replaces the header; the input sits in a data-group-control exemption span. -->
-    <div
-      class="w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-[12px] leading-[18px]"
+  <div
+    data-project-id={project.id}
+    class="group/proj w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal hover:bg-base-300 cursor-default select-none {project.color
+      ? ''
+      : 'text-base-content/70 hover:text-base-content'}"
+    role="button"
+    tabindex="0"
+    aria-expanded={!collapsed}
+    onclick={(event) => handleGroupHeaderClick(event, project.id)}
+    onkeydown={(event) => handleGroupHeaderKeydown(event, project.id)}
+    oncontextmenu={(event) => handleProjectContextMenu(event, project)}
+  >
+    <!-- A project's color replaces the row's default text color outright, so it
+         also overrides the hover lift above (which is dropped in that case). -->
+    <span class="truncate min-w-0" style={project.color ? `color: ${project.color}` : undefined}>
+      {project.name}
+    </span>
+    {@render collapseChevron(
+      collapsed,
+      "group-hover/proj:opacity-100 group-focus-within/proj:opacity-100",
+    )}
+    <!-- Right edge: "…" opens the project menu (the same one right-click
+         serves), "+" the agent picker for a new session here. -->
+    <span
+      data-group-control
+      class="ml-auto flex items-center gap-1.5 flex-shrink-0"
     >
-      <span data-group-control class="flex-1 min-w-0">
-        <input
-          data-project-id={project.id}
-          class="w-full py-0.5 px-2 text-[12px] bg-base-100 border border-base-300 rounded-md"
-          bind:value={renameProjectValue}
-          onkeydown={handleProjectRenameKeydown}
-          onblur={confirmProjectRename}
-          placeholder={t("agent.list.renamePlaceholder")}
-        />
-      </span>
-    </div>
-  {:else}
-    <div
-      data-project-id={project.id}
-      class="group/proj w-full flex items-center gap-1.5 py-1 pl-2 pr-2 text-left rounded-md text-[12px] leading-[18px] font-normal text-base-content/70 hover:text-base-content hover:bg-base-300 cursor-default select-none"
-      role="button"
-      tabindex="0"
-      aria-expanded={!collapsed}
-      onclick={(event) => handleGroupHeaderClick(event, project.id)}
-      onkeydown={(event) => handleGroupHeaderKeydown(event, project.id)}
-      oncontextmenu={(event) => handleProjectContextMenu(event, project)}
-    >
-      <span class="truncate min-w-0">{project.name}</span>
-      {@render collapseChevron(
-        collapsed,
-        "group-hover/proj:opacity-100 group-focus-within/proj:opacity-100",
-      )}
-      <!-- Hover "+" opens the agent picker; the project is already decided. -->
-      <span data-group-control class="ml-auto flex items-center flex-shrink-0">
-        <button
-          class="-mr-0.5 p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
-          title={t("agent.list.newSession")}
-          aria-label={t("agent.list.newSessionInProject", {
-            name: project.name,
-          })}
-          onclick={(event) => {
-            event.stopPropagation();
-            contextMenu = {
-              kind: "agentPicker",
-              project,
-              ...menuAnchorFor(event),
-            };
-          }}
-        >
-          <Plus size={14} />
-        </button>
-      </span>
-    </div>
-  {/if}
+      <button
+        class="p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+        title={t("agent.list.projectMenu")}
+        aria-label={t("agent.list.projectMenuFor", { name: project.name })}
+        onclick={(event) => {
+          event.stopPropagation();
+          contextMenu = {
+            kind: "project",
+            project,
+            ...menuAnchorFor(event),
+          };
+        }}
+      >
+        <MoreHorizontal size={14} />
+      </button>
+      <button
+        class="-mr-0.5 p-0.5 rounded text-base-content/50 opacity-0 group-hover/proj:opacity-100 focus-visible:opacity-100 hover:text-base-content hover:bg-base-content/10 transition-opacity"
+        title={t("agent.list.newSession")}
+        aria-label={t("agent.list.newSessionInProject", {
+          name: project.name,
+        })}
+        onclick={(event) => {
+          event.stopPropagation();
+          contextMenu = {
+            kind: "agentPicker",
+            project,
+            ...menuAnchorFor(event),
+          };
+        }}
+      >
+        <Plus size={14} />
+      </button>
+    </span>
+  </div>
   {#if !collapsed && sessions.length > 0}
     <div class="space-y-0.5" transition:slide={{ duration: 160 }}>
       {#each sessions as session (session.id)}
@@ -1167,16 +1175,38 @@
 
 <!-- Context menu, dispatched by kind (session row / project header / pickers). -->
 {#if contextMenu?.kind === "project"}
+  {@const menuProject = contextMenu.project}
   <div
     class="context-menu fixed z-[var(--z-dropdown)] bg-[var(--bg-card)] border border-[var(--hairline)] rounded-lg shadow-xl px-1 py-1 min-w-36"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
   >
     <button
       class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
-      onclick={startProjectRename}
+      onclick={() => toggleProjectPinned(menuProject)}
     >
-      <PencilLine size={14} />
-      {t("common.rename")}
+      {#if menuProject.pinned}
+        <PinOff size={14} />
+        {t("agent.list.unpinProject")}
+      {:else}
+        <Pin size={14} />
+        {t("agent.list.pinProject")}
+      {/if}
+    </button>
+
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+      onclick={openProjectSettings}
+    >
+      <Settings2 size={14} />
+      {t("agent.list.projectSettings")}
+    </button>
+
+    <button
+      class="w-full px-2 py-1 text-left text-[13px] rounded-lg hover:bg-primary hover:text-primary-content flex items-center gap-2 whitespace-nowrap"
+      onclick={() => revealProject(menuProject)}
+    >
+      <FolderOpen size={14} />
+      {t("agent.list.revealInFinder")}
     </button>
 
     <button
@@ -1193,7 +1223,7 @@
       onclick={handleProjectDelete}
     >
       <Trash2 size={14} />
-      {t("agent.list.deleteProject")}
+      {t("agent.list.removeProject")}
     </button>
   </div>
 {:else if contextMenu?.kind === "agentPicker"}
@@ -1345,6 +1375,9 @@
     </button>
   </div>
 {/if}
+
+<!-- Per-project settings; mounted once and re-pointed by the project menu. -->
+<ProjectSettingsModal bind:open={settingsOpen} project={settingsProject} />
 
 <!-- Close the menu on outside click / right-click (row right-clicks stopPropagation). -->
 <svelte:window onclick={handleClickOutside} oncontextmenu={handleClickOutside} />

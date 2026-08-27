@@ -220,12 +220,15 @@ pub fn run() {
             agent_session_set_archived,
             agent_session_set_project,
             agent_session_delete,
+            agent_session_fork,
             agent_session_messages,
             agent_session_hook_notices,
             // Agent projects: sessions grouped by working directory
             agent_project_create,
             agent_project_list,
             agent_project_rename,
+            agent_project_update_settings,
+            agent_project_set_pinned,
             agent_project_delete,
             // "Open in ...": open a working directory in an external editor/terminal/Finder
             open_in_list_targets,

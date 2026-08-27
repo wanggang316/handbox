@@ -10,7 +10,9 @@ pub mod model;
 pub mod provider;
 
 pub use agent::{Agent, AgentReasoningConfig, CreateAgentRequest, UpdateAgentRequest};
-pub use agent_project::{AgentProject, CreateAgentProjectRequest};
+pub use agent_project::{
+    AgentProject, CreateAgentProjectRequest, UpdateAgentProjectSettingsRequest,
+};
 pub use agent_session::{
     AgentSession, AgentSessionMessage, CreateAgentSessionRequest, InstantiateAgentSessionRequest,
     UpdateAgentSessionRequest,

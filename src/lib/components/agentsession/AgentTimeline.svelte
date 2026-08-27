@@ -13,16 +13,24 @@
 
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import { ChartNoAxesColumn, Check, Copy } from "@lucide/svelte";
+  import { goto } from "$app/navigation";
+  import { ChartNoAxesColumn, Check, Copy, GitBranchPlus } from "@lucide/svelte";
   import {
     renderMarkdown,
     markdownInteractions,
     copyToClipboard,
+    normalizeError,
   } from "$lib/utils";
   import { t } from "$lib/i18n";
   import Button from "$lib/components/ui/Button.svelte";
   import Tooltip from "$lib/components/ui/Tooltip.svelte";
+  import FormModal from "$lib/components/ui/FormModal.svelte";
+  import Input from "$lib/components/ui/Input.svelte";
   import { agentRunStore } from "$lib/states/agentRun.svelte";
+  import {
+    agentSessionActions,
+    agentSessionState,
+  } from "$lib/states/agentSession.svelte";
   import { settingsState } from "$lib/states/settings.svelte";
   import type { HookRuleNotification } from "$lib/types";
   import type {
@@ -129,6 +137,66 @@
   }
 
   $effect(() => () => clearTimeout(copiedTimer));
+
+  // Steering: fork the session at an assistant reply and continue in the new
+  // session from that point. The button opens a naming dialog (pre-filled with
+  // the source session's name); the fork happens on confirm.
+  let forkTarget = $state<{
+    index: number;
+    message: Extract<AgentMessage, { role: "assistant" }>;
+  } | null>(null);
+  let forkOpen = $state(false);
+  let forkName = $state("");
+  let forking = $state(false);
+  let forkError = $state<string | null>(null);
+
+  function openForkDialog(
+    index: number,
+    message: Extract<AgentMessage, { role: "assistant" }>,
+  ) {
+    // The list entry is the freshest name source (rename syncs it in place);
+    // currentSession covers a session not (yet) in the list.
+    const source =
+      agentSessionState.sessions.find((s) => s.id === sessionId) ??
+      agentSessionState.currentSession;
+    forkTarget = { index, message };
+    forkName = source?.name ?? "";
+    forkError = null;
+    forkOpen = true;
+  }
+
+  function closeForkDialog() {
+    forkOpen = false;
+    forkTarget = null;
+    forkError = null;
+  }
+
+  async function confirmFork() {
+    const target = forkTarget;
+    if (!target || forking) {
+      return;
+    }
+    forking = true;
+    forkError = null;
+    try {
+      // index + the message's own timestamp identify the cut; the backend
+      // rejects a stale pairing instead of cutting the wrong node. A blank
+      // name falls back to the source session's name backend-side.
+      const session = await agentSessionActions.forkSession(
+        sessionId,
+        target.index,
+        target.message.timestamp,
+        forkName,
+      );
+      closeForkDialog();
+      await goto(`/agent?id=${session.id}`);
+    } catch (error) {
+      const normalized = normalizeError(error, t("agent.timeline.forkFailed"));
+      forkError = normalized.hint ?? normalized.message;
+    } finally {
+      forking = false;
+    }
+  }
 
   // Tool-call blocks keep the assistant content's source order, so parallel
   // calls render as cards in issue order, not completion order.
@@ -1039,6 +1107,23 @@
                     </Tooltip>
                   {/if}
 
+                  <!-- Steering: fork a new session ending at this reply. Hidden
+                       while a run is streaming — the transcript is mid-append
+                       and the cut point would be a moving target. -->
+                  {#if !runState.isRunning}
+                    <Tooltip content={t("agent.timeline.forkFromHere")}>
+                      <Button
+                        variant="clear"
+                        size="icon-sm"
+                        class="text-base-content/40 enabled:hover:text-base-content"
+                        ariaLabel={t("agent.timeline.forkFromHere")}
+                        onclick={() => openForkDialog(i, message)}
+                      >
+                        <GitBranchPlus size={14} />
+                      </Button>
+                    </Tooltip>
+                  {/if}
+
                   {#if hasUsage(message)}
                     <Tooltip content={usageLabel(message)}>
                       <!-- Mirrors the icon-sm clear button: it is a hover target
@@ -1163,6 +1248,25 @@
     />
   {/if}
 </div>
+
+<!-- Steering dialog: name the fork before creating it. The name pre-fills
+     from the source session; confirm forks and navigates, cancel discards. -->
+<FormModal
+  bind:open={forkOpen}
+  title={t("agent.timeline.forkTitle")}
+  saving={forking}
+  error={forkError}
+  hint={t("agent.timeline.forkHint")}
+  submitLabel={t("common.create")}
+  onSubmit={confirmFork}
+  onClose={closeForkDialog}
+>
+  <Input
+    label={t("agent.timeline.forkNameLabel")}
+    bind:value={forkName}
+    placeholder={t("agent.timeline.forkNamePlaceholder")}
+  />
+</FormModal>
 
 <style>
   /* WebKit draws its own disclosure marker on <summary>; the row supplies its

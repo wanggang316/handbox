@@ -86,22 +86,29 @@ pub fn ensure_session_file(
     std::fs::create_dir_all(&dir)
         .map_err(|e| AppError::internal_error(&format!("failed to create session dir: {e}")))?;
 
-    let line = header_line(session_id, cwd, created_at)?;
+    let line = header_line(session_id, cwd, created_at, None)?;
     write_file_atomic(&path, &format!("{line}\n"))?;
     Ok(path)
 }
 
 /// Serialize the one-line `{"type":"session","data":<SessionHeader>}` header,
-/// built via the same serde path SessionManager uses.
-fn header_line(session_id: &str, cwd: &Path, created_at: i64) -> Result<String, AppError> {
+/// built via the same serde path SessionManager uses. `parent_session` records
+/// fork provenance (the source session's id), matching the upstream
+/// `SessionManager::fork_from` header contract.
+fn header_line(
+    session_id: &str,
+    cwd: &Path,
+    created_at: i64,
+    parent_session: Option<&str>,
+) -> Result<String, AppError> {
     let header = SessionHeader {
         version: CURRENT_SESSION_VERSION,
         id: session_id.to_string(),
         timestamp: created_at,
         cwd: cwd.to_string_lossy().to_string(),
-        parent_session: None,
+        parent_session: parent_session.map(str::to_string),
     };
-    serde_json::to_string(&SessionEntryHeader::from(header))
+    serde_json::to_string(&SessionEntry::Session(header))
         .map_err(|e| AppError::internal_error(&format!("failed to serialize session header: {e}")))
 }
 
@@ -164,7 +171,7 @@ pub fn write_transcript_atomic(
     let path = dir.join(format!("{session_id}.jsonl"));
 
     let mut content = String::new();
-    content.push_str(&header_line(session_id, cwd, created_at)?);
+    content.push_str(&header_line(session_id, cwd, created_at, None)?);
     content.push('\n');
     for (message, timestamp) in messages {
         let entry = MessageEntryLine::Message(MessageEntryData {
@@ -182,20 +189,184 @@ pub fn write_transcript_atomic(
     write_file_atomic(&path, &content)
 }
 
-/// A `{"type":"session","data":<SessionHeader>}` envelope, matching the
-/// `SessionEntry::Session` on-disk shape. `SessionEntry` itself is not
-/// re-exported, so we mirror only the header-line shape we need to write;
-/// reading always goes through the upstream parser.
-#[derive(serde::Serialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-enum SessionEntryHeader {
-    Session(SessionHeader),
-}
-
-impl From<SessionHeader> for SessionEntryHeader {
-    fn from(h: SessionHeader) -> Self {
-        SessionEntryHeader::Session(h)
+/// Fork `source_session_id`'s transcript at context index `seq` into a fresh
+/// `<new_session_id>.jsonl` (the steering feature: a new session branching off
+/// an assistant reply). The new file holds every entry up to and INCLUDING the
+/// assistant message at `seq`, plus the tool results answering its tool calls —
+/// dropping those would leave dangling tool_use blocks the next model call
+/// rejects. The source file is never touched.
+///
+/// The upstream fork APIs (`AgentSession::fork` / `SessionManager::fork_from`)
+/// are not usable here: they mint their own session id, while HandBox requires
+/// file name == header id == the SQLite row UUID (see [`ensure_session_file`]),
+/// and they only cut BEFORE a user message. So this mirrors their semantics on
+/// HandBox's own writer instead.
+///
+/// `seq` is the frontend's message index — an index into
+/// [`SessionManager::build_context`]'s output — and `timestamp` is that
+/// message's own millisecond timestamp. Both are required: an in-run
+/// compaction shifts context indices without re-hydrating the timeline, so a
+/// bare `seq` can silently point at the wrong entry. The cut is accepted only
+/// when the `build_context` walk lands on an assistant message whose timestamp
+/// matches; otherwise a unique assistant-message timestamp match anywhere in
+/// the file wins, and ambiguity is rejected (refresh and retry).
+///
+/// Entry ids are copied verbatim so `first_kept_entry_id` references inside
+/// copied compaction entries stay valid. `Label` / `SessionInfo` entries are
+/// dropped: they carry the SOURCE session's display name, and the fork's name
+/// lives on its own SQLite row.
+pub fn fork_transcript(
+    base_dir: &Path,
+    cwd: &Path,
+    source_session_id: &str,
+    new_session_id: &str,
+    seq: i64,
+    timestamp: i64,
+    created_at: i64,
+) -> Result<(), AppError> {
+    let source_path = session_path(base_dir, cwd, source_session_id);
+    if !source_path.exists() {
+        // Legacy SQLite-only session: there is no JSONL history to fork.
+        return Err(AppError::validation_error("该会话没有可分叉的消息记录"));
     }
+    let manager = SessionManager::open(&source_path)
+        .map_err(|e| AppError::internal_error(&format!("failed to open session jsonl: {e}")))?;
+    let entries = manager.entries();
+
+    // The model crate stores message timestamps as u64 millis.
+    let target_ts = u64::try_from(timestamp).ok();
+    let is_target_assistant = |message: &Message| match message {
+        Message::Assistant(m) => Some(m.timestamp) == target_ts,
+        _ => false,
+    };
+
+    // Primary: mirror `build_context` (the context starts at the LATEST
+    // compaction's first kept entry) and index into it with `seq`; trust the
+    // landing only when the message's timestamp confirms it.
+    let start_id = entries.iter().rev().find_map(|e| match e {
+        SessionEntry::Compaction {
+            first_kept_entry_id,
+            ..
+        } => Some(first_kept_entry_id.clone()),
+        _ => None,
+    });
+    let mut found_start = start_id.is_none();
+    let mut context_idx: i64 = -1;
+    let mut cut_idx: Option<usize> = None;
+    for (idx, entry) in entries.iter().enumerate() {
+        let SessionEntry::Message { id, message, .. } = entry else {
+            continue;
+        };
+        if !found_start {
+            if Some(id.as_str()) == start_id.as_deref() {
+                found_start = true;
+            } else {
+                continue;
+            }
+        }
+        context_idx += 1;
+        if context_idx == seq {
+            if is_target_assistant(message) {
+                cut_idx = Some(idx);
+            }
+            break;
+        }
+    }
+
+    // Fallback: the frontend snapshot has drifted from the JSONL (compaction
+    // mid-run, pruned rows). The message's own timestamp still identifies it —
+    // accept a UNIQUE assistant match, reject ambiguity.
+    if cut_idx.is_none() {
+        let mut matches = entries.iter().enumerate().filter_map(|(idx, entry)| {
+            matches!(entry, SessionEntry::Message { message, .. } if is_target_assistant(message))
+                .then_some(idx)
+        });
+        cut_idx = match (matches.next(), matches.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
+        };
+    }
+    let mut cut_idx = cut_idx
+        .ok_or_else(|| AppError::validation_error("定位不到该条模型回复，请刷新会话后重试"))?;
+
+    // Extend the cut through the tool results answering the cut message's tool
+    // calls; they immediately follow it in the transcript. Dropping them would
+    // leave dangling tool_use blocks the next model call rejects.
+    while let Some(SessionEntry::Message { message, .. }) = entries.get(cut_idx + 1) {
+        if matches!(message.as_ref(), Message::ToolResult(_)) {
+            cut_idx += 1;
+        } else {
+            break;
+        }
+    }
+
+    let mut content = String::new();
+    content.push_str(&header_line(
+        new_session_id,
+        cwd,
+        created_at,
+        Some(source_session_id),
+    )?);
+    content.push('\n');
+    for entry in &entries[..=cut_idx] {
+        if matches!(
+            entry,
+            SessionEntry::Session(_)
+                | SessionEntry::Label { .. }
+                | SessionEntry::SessionInfo { .. }
+        ) {
+            continue;
+        }
+        let line = serde_json::to_string(entry).map_err(|e| {
+            AppError::internal_error(&format!("failed to serialize forked entry: {e}"))
+        })?;
+        content.push_str(&line);
+        content.push('\n');
+    }
+
+    // A compaction that postdates the cut still governs what the user was
+    // looking at when they forked. Re-appending the latest one keeps the
+    // fork's context identical to that view (build_context starts at its
+    // first-kept entry), while the file retains the full pre-compaction
+    // history. Skipped when its first-kept entry is not in the copied range
+    // (forking at a pruned message): the fork then simply reinstates full
+    // history up to the cut.
+    let latest_compaction = entries
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, e)| matches!(e, SessionEntry::Compaction { .. }));
+    if let Some((compaction_idx, compaction)) = latest_compaction {
+        if let SessionEntry::Compaction {
+            first_kept_entry_id,
+            ..
+        } = compaction
+        {
+            let first_kept_in_range = entries[..=cut_idx]
+                .iter()
+                .any(|e| e.id() == Some(first_kept_entry_id.as_str()));
+            if compaction_idx > cut_idx && first_kept_in_range {
+                let line = serde_json::to_string(compaction).map_err(|e| {
+                    AppError::internal_error(&format!("failed to serialize forked entry: {e}"))
+                })?;
+                content.push_str(&line);
+                content.push('\n');
+            }
+        }
+    }
+
+    let new_path = session_path(base_dir, cwd, new_session_id);
+    if new_path.exists() {
+        // A fresh UUID colliding with an existing file means something is badly
+        // wrong; refuse rather than clobber.
+        return Err(AppError::internal_error(&format!(
+            "fork target already exists: {}",
+            new_path.display()
+        )));
+    }
+    std::fs::create_dir_all(session_dir(base_dir, cwd))
+        .map_err(|e| AppError::internal_error(&format!("failed to create session dir: {e}")))?;
+    write_file_atomic(&new_path, &content)
 }
 
 /// The `data` payload of a `{"type":"message","data":{..}}` JSONL line. Written
@@ -1401,7 +1572,7 @@ mod tests {
         let path = dir.join(format!("{id}.jsonl"));
         let half = format!(
             "{}\n{}\n",
-            header_line(id, cwd.path(), TEST_CREATED_AT).unwrap(),
+            header_line(id, cwd.path(), TEST_CREATED_AT, None).unwrap(),
             serde_json::to_string(&MessageEntryLine::Message(MessageEntryData {
                 id: "x".into(),
                 message: &user_msg("only the first"),
@@ -1494,5 +1665,253 @@ mod tests {
             !leftovers.iter().any(|n| n.ends_with(".tmp")),
             "no .tmp ghost must remain: {leftovers:?}"
         );
+    }
+
+    // ── fork_transcript (steering) ───────────────────────────────────────────
+
+    /// A plain-text assistant reply with an explicit timestamp — the value the
+    /// frontend echoes back as the fork target's identity.
+    fn assistant_text_at(text: &str, ts: u64) -> Message {
+        Message::Assistant(AssistantMessage {
+            role: "assistant".into(),
+            content: vec![AssistantContentBlock::Text(TextContent::new(
+                text.to_string(),
+            ))],
+            api: Api::OpenAICompletions,
+            provider: hand_ai_model::types::Provider::OpenAI,
+            model: "gpt-4o".into(),
+            usage: Usage::default(),
+            stop_reason: StopReason::Stop,
+            error_message: None,
+            timestamp: ts,
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+        })
+    }
+
+    /// `role` + payload timestamp per row, for concise context assertions.
+    fn row_shape(row: &AgentSessionMessage) -> (String, u64) {
+        let ts = row
+            .payload
+            .get("timestamp")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        (row.role.clone(), ts)
+    }
+
+    /// The fork ends at the target assistant reply: later turns are dropped,
+    /// the new header carries the new id + source provenance, and the source
+    /// file is untouched.
+    #[test]
+    fn fork_transcript_cuts_after_target_assistant_reply() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let source = "sess-fork-source";
+        let fork = "sess-fork-new";
+
+        let mut mgr = open_resumed(base.path(), cwd.path(), source);
+        mgr.append_message(user_msg("q1")).unwrap();
+        mgr.append_message(assistant_text_at("a1", 1_000)).unwrap();
+        mgr.append_message(user_msg("q2")).unwrap();
+        mgr.append_message(assistant_text_at("a2", 2_000)).unwrap();
+
+        fork_transcript(base.path(), cwd.path(), source, fork, 1, 1_000, TEST_CREATED_AT)
+            .expect("fork at the first assistant reply");
+
+        let rows = load_transcript(base.path(), cwd.path(), fork)
+            .expect("fork transcript reads")
+            .expect("fork file exists");
+        let shapes: Vec<(String, u64)> = rows.iter().map(row_shape).collect();
+        assert_eq!(
+            shapes,
+            vec![("user".into(), shapes[0].1), ("assistant".into(), 1_000)],
+            "history ends at the target reply"
+        );
+
+        // Header: new id, provenance to the source, caller's created_at.
+        let fork_path = session_path(base.path(), cwd.path(), fork);
+        let header: serde_json::Value = serde_json::from_str(
+            std::fs::read_to_string(&fork_path)
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(header["data"]["id"], fork);
+        assert_eq!(header["data"]["parent_session"], source);
+        assert_eq!(header["data"]["timestamp"], TEST_CREATED_AT);
+
+        // The upstream reader accepts the forked file as a session of its own.
+        let reopened = SessionManager::open(&fork_path).expect("fork opens");
+        assert_eq!(reopened.id(), fork);
+
+        // Source keeps its full transcript.
+        let source_rows = load_transcript(base.path(), cwd.path(), source)
+            .unwrap()
+            .unwrap();
+        assert_eq!(source_rows.len(), 4, "source is untouched");
+    }
+
+    /// A cut on a tool-calling reply carries its tool results along — dropping
+    /// them would leave dangling tool_use blocks the next model call rejects.
+    #[test]
+    fn fork_transcript_keeps_tool_results_paired_with_the_cut_reply() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let source = "sess-fork-tools";
+        let fork = "sess-fork-tools-new";
+
+        let mut mgr = open_resumed(base.path(), cwd.path(), source);
+        mgr.append_message(user_msg("run it")).unwrap();
+        // assistant_with_tool_call stamps timestamp 1234.
+        mgr.append_message(assistant_with_tool_call(
+            "tc-1",
+            "bash",
+            serde_json::json!({ "command": "ls" }),
+        ))
+        .unwrap();
+        mgr.append_message(tool_result_success("tc-1", "bash", "ok"))
+            .unwrap();
+        mgr.append_message(assistant_text_at("done", 5_000)).unwrap();
+
+        fork_transcript(base.path(), cwd.path(), source, fork, 1, 1_234, TEST_CREATED_AT)
+            .expect("fork at the tool-calling reply");
+
+        let rows = load_transcript(base.path(), cwd.path(), fork)
+            .unwrap()
+            .unwrap();
+        let roles: Vec<&str> = rows.iter().map(|r| r.role.as_str()).collect();
+        assert_eq!(
+            roles,
+            vec!["user", "assistant", "toolResult"],
+            "the paired tool result rides along; the following reply does not"
+        );
+    }
+
+    /// Every mislocated target is rejected with a refresh hint, never a silent
+    /// wrong-node cut: seq/timestamp disagreement, unknown timestamps, and
+    /// user-message targets all fail.
+    #[test]
+    fn fork_transcript_rejects_stale_or_unknown_targets() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let source = "sess-fork-reject";
+
+        let mut mgr = open_resumed(base.path(), cwd.path(), source);
+        mgr.append_message(user_msg("q1")).unwrap();
+        mgr.append_message(assistant_text_at("a1", 1_000)).unwrap();
+
+        // seq lands on the assistant but the timestamp belongs to nothing.
+        let err = fork_transcript(base.path(), cwd.path(), source, "f1", 1, 9_999, TEST_CREATED_AT)
+            .expect_err("unknown timestamp");
+        assert_eq!(err.code, "VALIDATION_ERROR");
+
+        // seq out of range, timestamp unknown.
+        let err = fork_transcript(base.path(), cwd.path(), source, "f2", 7, 9_999, TEST_CREATED_AT)
+            .expect_err("out-of-range seq");
+        assert_eq!(err.code, "VALIDATION_ERROR");
+
+        // A user message is never a fork target, even with its real timestamp.
+        let user_ts = load_transcript(base.path(), cwd.path(), source)
+            .unwrap()
+            .unwrap()[0]
+            .payload["timestamp"]
+            .as_u64()
+            .unwrap();
+        let err = fork_transcript(
+            base.path(),
+            cwd.path(),
+            source,
+            "f3",
+            0,
+            i64::try_from(user_ts).unwrap(),
+            TEST_CREATED_AT,
+        )
+        .expect_err("user-message target");
+        assert_eq!(err.code, "VALIDATION_ERROR");
+
+        // No fork file may exist after any rejection.
+        for fork in ["f1", "f2", "f3"] {
+            assert!(
+                !session_path(base.path(), cwd.path(), fork).exists(),
+                "rejected fork {fork} must not leave a file"
+            );
+        }
+    }
+
+    /// Legacy sessions without a JSONL transcript cannot fork.
+    #[test]
+    fn fork_transcript_rejects_missing_source_file() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let err = fork_transcript(
+            base.path(),
+            cwd.path(),
+            "sess-legacy",
+            "sess-legacy-fork",
+            0,
+            1_000,
+            TEST_CREATED_AT,
+        )
+        .expect_err("no JSONL source");
+        assert_eq!(err.code, "VALIDATION_ERROR");
+    }
+
+    /// After an in-run compaction the frontend's indices are stale (the
+    /// timeline is not re-hydrated), so the timestamp fallback must relocate
+    /// the target; and the copied trailing compaction keeps the fork's context
+    /// identical to what the user was looking at.
+    #[test]
+    fn fork_transcript_survives_compaction_drift() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let source = "sess-fork-compacted";
+
+        let mut mgr = open_resumed(base.path(), cwd.path(), source);
+        mgr.append_message(user_msg("q1")).unwrap();
+        mgr.append_message(assistant_text_at("a1", 1_000)).unwrap();
+        let q2_id = mgr.append_message(user_msg("q2")).unwrap();
+        mgr.append_message(assistant_text_at("a2", 2_000)).unwrap();
+        mgr.append_compaction("earlier turns summarized", &q2_id)
+            .unwrap();
+
+        // Stale frontend view (pre-compaction): a2 sat at seq 3. The walk lands
+        // nowhere (post-compaction context has 2 messages), the timestamp
+        // relocates it, and the copied compaction keeps the context at
+        // [q2, a2] — exactly the source's own view.
+        let fork = "sess-fork-drifted";
+        fork_transcript(base.path(), cwd.path(), source, fork, 3, 2_000, TEST_CREATED_AT)
+            .expect("timestamp fallback relocates the target");
+        let rows = load_transcript(base.path(), cwd.path(), fork)
+            .unwrap()
+            .unwrap();
+        let shapes: Vec<(String, u64)> = rows.iter().map(row_shape).collect();
+        assert_eq!(shapes.len(), 2, "compacted view: q2 + a2 only");
+        assert_eq!(shapes[1], ("assistant".into(), 2_000));
+
+        // Post-compaction view (seq 1 == a2): the primary walk agrees with the
+        // timestamp and lands the same cut.
+        let fork2 = "sess-fork-agreeing";
+        fork_transcript(base.path(), cwd.path(), source, fork2, 1, 2_000, TEST_CREATED_AT)
+            .expect("primary walk hits the compacted index");
+        let rows2 = load_transcript(base.path(), cwd.path(), fork2)
+            .unwrap()
+            .unwrap();
+        assert_eq!(rows2.len(), 2, "same cut through the primary path");
+
+        // Forking at a message the compaction pruned (a1): its first-kept entry
+        // is outside the copied range, so the compaction is NOT carried over
+        // and the fork reinstates the full history up to the cut.
+        let fork3 = "sess-fork-pruned";
+        fork_transcript(base.path(), cwd.path(), source, fork3, 1, 1_000, TEST_CREATED_AT)
+            .expect("pruned target still forkable by timestamp");
+        let rows3 = load_transcript(base.path(), cwd.path(), fork3)
+            .unwrap()
+            .unwrap();
+        let shapes3: Vec<(String, u64)> = rows3.iter().map(row_shape).collect();
+        assert_eq!(shapes3.len(), 2, "full history up to a1: q1 + a1");
+        assert_eq!(shapes3[1], ("assistant".into(), 1_000));
     }
 }

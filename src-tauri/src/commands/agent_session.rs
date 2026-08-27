@@ -311,6 +311,58 @@ fn extract_user_text(payload: &serde_json::Value) -> Option<String> {
     }
 }
 
+/// Forks a session at an assistant reply (the steering feature): a new
+/// session whose transcript is the source's history up to and including that
+/// message, so the conversation can be taken in a different direction from
+/// there. `seq` / `timestamp` identify the reply (see
+/// [`agent_jsonl_store::fork_transcript`] for the drift-tolerant contract).
+///
+/// The SQLite row is created first (it supplies the fork's id + created_at);
+/// a transcript-fork failure rolls it back — a config row without the forked
+/// transcript would surface as an empty duplicate session. Returns the
+/// overlaid session, consistent with list/get.
+///
+/// `name` is the user's title from the fork dialog; `None`/blank falls back
+/// to the source session's name.
+#[tauri::command]
+pub async fn agent_session_fork(
+    session_id: UUID,
+    seq: i64,
+    timestamp: i64,
+    name: Option<String>,
+    app_handle: AppHandle,
+    agent_session_service: State<'_, AgentSessionService>,
+) -> Result<AgentSession, AppError> {
+    let source = agent_session_service.get_session(session_id).await?;
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    let cwd = agent_jsonl_store::session_cwd(source.working_dir.as_deref(), &app_data_dir);
+
+    let mut forked = agent_session_service.fork_session(&source, name).await?;
+    if let Err(e) = agent_jsonl_store::fork_transcript(
+        &app_data_dir,
+        &cwd,
+        &source.id,
+        &forked.id,
+        seq,
+        timestamp,
+        forked.created_at,
+    ) {
+        if let Err(rollback) = agent_session_service
+            .delete_session(forked.id.clone())
+            .await
+        {
+            tracing::warn!(
+                session_id = %forked.id,
+                "failed to roll back forked session row: {rollback:?}"
+            );
+        }
+        return Err(e);
+    }
+
+    overlay_jsonl_activity(&mut forked, &app_data_dir);
+    Ok(forked)
+}
+
 /// Pins / unpins a session in the sidebar.
 ///
 /// Its own command rather than an `agent_session_update_field` case: the flag is

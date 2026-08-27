@@ -11,9 +11,9 @@
  *  - Session activity key = coalesce(lastMessageAt, createdAt) — never
  *    updatedAt (rename/config writes bump updatedAt but are not "activity").
  *  - Pinned outranks activity at every level: a pinned session sorts ahead of
- *    its unpinned siblings, and a project holding one sorts ahead of projects
- *    that do not. Without that lift, pinning a session inside a low-activity
- *    project would leave the pin invisible.
+ *    its unpinned siblings, and a project sorts ahead of unpinned ones when it
+ *    is pinned itself or holds a pinned session. Without that lift, pinning a
+ *    session inside a low-activity project would leave the pin invisible.
  *  - A project's sort key is its latest session's activity, falling back to the
  *    project's own createdAt while it holds none — a project created just now
  *    must land at the top, not below every populated one.
@@ -98,8 +98,8 @@ function bucketActivityKey(bucket: AgentProjectBucket): Timestamp {
  *  - Every project gets a bucket, sessions or not.
  *  - Sessions with an empty or dangling projectId go to the ungrouped bucket,
  *    which is appended last and omitted when it would be empty.
- *  - Buckets holding a pinned session sort first, then by latest activity desc,
- *    ties by project name asc.
+ *  - Pinned buckets (pinned project, or one holding a pinned session) sort
+ *    first, then by latest activity desc, ties by project name asc.
  *
  * Pure: inputs are not mutated; output order is independent of input order.
  */
@@ -124,10 +124,12 @@ export function groupSessionsByProject(
   const buckets = [...projectBuckets.values()];
   for (const bucket of buckets) bucket.sessions.sort(compareSessionsForTree);
 
-  // sessions are sorted desc and pinned members sort first, so the first one
-  // carries both the bucket's latest activity and its pin state.
+  // A project pinned from its own menu lifts the bucket regardless of what it
+  // holds; failing that, sessions are sorted desc with pinned members first, so
+  // the first one carries both the bucket's latest activity and its pin state.
   const bucketHasPinned = (bucket: AgentProjectBucket): boolean =>
-    bucket.sessions.length > 0 && bucket.sessions[0].pinned;
+    bucket.project?.pinned === true ||
+    (bucket.sessions.length > 0 && bucket.sessions[0].pinned);
 
   buckets.sort((a, b) => {
     const pinnedA = bucketHasPinned(a);

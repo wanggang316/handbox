@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { TableGroup, SwitchRow, SelectRow } from "$lib/components/ui/table";
   import { settingsState, uiState } from "$lib/states";
+  import { listOpenInTargetsCached, type OpenInTarget } from "$lib/api/openIn";
   import { t } from "$lib/i18n";
   import { isMacOS } from "$lib/utils/tauri";
   import type { Theme, Language } from "$lib/types/settings";
@@ -28,7 +29,24 @@
   let sidebarVibrancy = $state<boolean>(true);
   let messageNav = $state<boolean>(true);
 
+  // Default "Open in ..." app. Lives in the agent section (the session header
+  // and the per-project panel both read it), but it is an app-wide preference,
+  // so this is where it is set. "" = no explicit choice.
+  const AUTO_EDITOR_VALUE = "";
+  let defaultEditorId = $state(AUTO_EDITOR_VALUE);
+  let openInTargets = $state<OpenInTarget[]>([]);
+
+  // Finder is always installed and is the fallback, not a "default editor".
+  const editorOptions = $derived([
+    { value: AUTO_EDITOR_VALUE, label: t("settings.general.defaultEditorAuto") },
+    ...openInTargets
+      .filter((target) => target.kind !== "system")
+      .map((target) => ({ value: target.id, label: target.name })),
+  ]);
+
   function syncFromSettings(): void {
+    defaultEditorId =
+      settingsState.settings?.agent?.defaultEditorId ?? AUTO_EDITOR_VALUE;
     if (!settingsState.settings?.general) return;
     theme = settingsState.settings.general.theme;
     language = settingsState.settings.general.language;
@@ -52,6 +70,13 @@
       .then(syncFromSettings)
       .catch((error) => {
         console.error("加载通用设置失败:", error);
+      });
+
+    // Cached app probe: the row shows only the "auto" option until it lands.
+    listOpenInTargetsCached()
+      .then((targets) => (openInTargets = targets))
+      .catch((error) => {
+        console.error("检测可用编辑器失败:", error);
       });
   });
 
@@ -94,10 +119,24 @@
     updateGeneralSetting("sidebarVibrancy", sidebarVibrancy);
   }
 
+  async function handleDefaultEditorChange(value: string) {
+    defaultEditorId = value;
+    try {
+      await settingsState.updateSettings({
+        section: "agent",
+        data: { defaultEditorId: value || null },
+      });
+    } catch (error) {
+      console.error("更新默认编辑器设置失败:", error);
+    }
+  }
+
 </script>
 
 <div class="p-6 pr-8 pt-2 flex flex-col gap-y-4">
-  <TableGroup title={t("settings.general.section")}>
+  <!-- Grouped by what a row acts on: the app's chrome, the message stream, and
+       the external editor. -->
+  <TableGroup title={t("settings.general.interfaceSection")}>
     <SelectRow
       label={t("settings.general.appearance")}
       description={t("settings.general.appearanceDesc")}
@@ -122,7 +161,9 @@
         onChange={handleSidebarVibrancyChange}
       />
     {/if}
+  </TableGroup>
 
+  <TableGroup title={t("settings.general.messagesSection")}>
     <SwitchRow
       label={t("settings.general.autoScroll")}
       description={t("settings.general.autoScrollDesc")}
@@ -135,6 +176,16 @@
       description={t("settings.general.messageNavDesc")}
       bind:checked={messageNav}
       onChange={handleMessageNavChange}
+    />
+  </TableGroup>
+
+  <TableGroup title={t("settings.general.editorSection")}>
+    <SelectRow
+      label={t("settings.general.defaultEditor")}
+      description={t("settings.general.defaultEditorDesc")}
+      options={editorOptions}
+      bind:selectedValue={defaultEditorId}
+      onSelect={(value) => handleDefaultEditorChange(value)}
     />
   </TableGroup>
 </div>

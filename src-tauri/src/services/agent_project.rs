@@ -9,7 +9,9 @@
 use crate::models::AppError;
 use crate::services::agent_jsonl_store::{delete_session_file, session_cwd};
 use crate::services::Database;
-use crate::storage::types::{AgentProject, CreateAgentProjectRequest, UUID};
+use crate::storage::types::{
+    AgentProject, CreateAgentProjectRequest, UpdateAgentProjectSettingsRequest, UUID,
+};
 use crate::storage::AgentProjectRepository;
 use sqlx::Row;
 use std::path::Path;
@@ -78,6 +80,70 @@ impl AgentProjectService {
             ));
         }
         self.repository.rename_project(&project_id, trimmed).await?;
+        self.get_project(project_id).await
+    }
+
+    /// Save the project settings panel's fields as one group.
+    ///
+    /// `name` follows [`Self::rename_project`]'s rule (trimmed, never blank).
+    /// `color` must be a `#rrggbb` literal — it goes straight into an inline
+    /// style in the sidebar, so the shape is checked here rather than trusted.
+    /// `default_editor_id` is only checked for emptiness: whether that target
+    /// is installed depends on the platform and on what the user has since
+    /// removed, and `open_in_open` already reports an unknown / missing app.
+    /// `None` for either is a real value (no color / follow the global editor).
+    pub async fn update_project_settings(
+        &self,
+        project_id: UUID,
+        name: String,
+        color: Option<String>,
+        default_editor_id: Option<String>,
+    ) -> Result<AgentProject, AppError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::validation_error(
+                "Agent project name must not be blank",
+            ));
+        }
+
+        let color = match color {
+            Some(value) => Some(normalize_project_color(&value)?),
+            None => None,
+        };
+
+        let default_editor_id = match default_editor_id {
+            Some(value) => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    return Err(AppError::validation_error(
+                        "Agent project default editor id must not be blank",
+                    ));
+                }
+                Some(trimmed.to_string())
+            }
+            None => None,
+        };
+
+        self.repository
+            .update_project_settings(
+                &project_id,
+                &UpdateAgentProjectSettingsRequest {
+                    name: trimmed.to_string(),
+                    color,
+                    default_editor_id,
+                },
+            )
+            .await?;
+        self.get_project(project_id).await
+    }
+
+    /// Pin / unpin a project (sidebar presentation state only).
+    pub async fn set_pinned(
+        &self,
+        project_id: UUID,
+        pinned: bool,
+    ) -> Result<AgentProject, AppError> {
+        self.repository.set_pinned(&project_id, pinned).await?;
         self.get_project(project_id).await
     }
 
@@ -221,6 +287,22 @@ pub fn default_project_name(canonical: &str) -> String {
         .unwrap_or_else(|| canonical.to_string())
 }
 
+/// Validates a project color and stores it lowercase, so equal colors compare
+/// equal regardless of how the picker cased them. Only `#rrggbb` is accepted:
+/// the value is interpolated into the sidebar row's inline style.
+fn normalize_project_color(color: &str) -> Result<String, AppError> {
+    let trimmed = color.trim();
+    let is_hex6 = trimmed.len() == 7
+        && trimmed.starts_with('#')
+        && trimmed[1..].chars().all(|c| c.is_ascii_hexdigit());
+    if !is_hex6 {
+        return Err(AppError::validation_error(
+            "Agent project color must be a #rrggbb value",
+        ));
+    }
+    Ok(trimmed.to_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,9 +327,9 @@ mod tests {
             "SELECT COUNT(*) AS count FROM {}",
             table
         )))
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
         row.try_get::<i64, _>("count").unwrap()
     }
 
@@ -515,6 +597,95 @@ mod tests {
             .await
             .expect_err("should reject");
         assert_eq!(err.code, "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn update_project_settings_validates_and_normalizes() {
+        let (db, _guard) = create_test_database().await;
+        let service = AgentProjectService::new(db);
+
+        let work_dir = TempDir::new().unwrap();
+        let created = service
+            .create_project(work_dir.path().to_string_lossy().into_owned())
+            .await
+            .unwrap();
+
+        // A malformed color is rejected and writes nothing.
+        for bad in ["red", "#f00", "#12345g", "#1234567"] {
+            let err = service
+                .update_project_settings(
+                    created.id.clone(),
+                    "ok".to_string(),
+                    Some(bad.to_string()),
+                    None,
+                )
+                .await
+                .expect_err("should reject");
+            assert_eq!(err.code, "VALIDATION_ERROR", "color {bad} must be rejected");
+        }
+        let unchanged = service.get_project(created.id.clone()).await.unwrap();
+        assert_eq!(unchanged.name, created.name);
+        assert_eq!(unchanged.color, None);
+
+        // Blank name / blank editor id are rejected too.
+        assert_eq!(
+            service
+                .update_project_settings(created.id.clone(), "  ".to_string(), None, None)
+                .await
+                .expect_err("should reject")
+                .code,
+            "VALIDATION_ERROR"
+        );
+        assert_eq!(
+            service
+                .update_project_settings(
+                    created.id.clone(),
+                    "ok".to_string(),
+                    None,
+                    Some("  ".to_string()),
+                )
+                .await
+                .expect_err("should reject")
+                .code,
+            "VALIDATION_ERROR"
+        );
+
+        // Valid values: name trimmed, color lowercased.
+        let saved = service
+            .update_project_settings(
+                created.id.clone(),
+                "  New Name  ".to_string(),
+                Some("#FF3B30".to_string()),
+                Some("zed".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.name, "New Name");
+        assert_eq!(saved.color.as_deref(), Some("#ff3b30"));
+        assert_eq!(saved.default_editor_id.as_deref(), Some("zed"));
+
+        // Pin round-trips independently of the settings above.
+        let pinned = service.set_pinned(created.id.clone(), true).await.unwrap();
+        assert!(pinned.pinned);
+        assert_eq!(pinned.color.as_deref(), Some("#ff3b30"));
+
+        // Missing id -> NOT_FOUND passthrough on both writes.
+        assert_eq!(
+            service
+                .set_pinned("missing".to_string(), true)
+                .await
+                .expect_err("should reject")
+                .code,
+            "NOT_FOUND"
+        );
+        assert_eq!(
+            service
+                .update_project_settings("missing".to_string(), "x".to_string(), None, None)
+                .await
+                .expect_err("should reject")
+                .code,
+            "NOT_FOUND"
+        );
     }
 
     /// Seed `<id>.jsonl` for a session under `base_dir` keyed by its working_dir,

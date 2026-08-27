@@ -701,6 +701,11 @@ class AgentRunStore {
     if (this.states[sessionId]?.hydrated) {
       return;
     }
+    // A run that starts while the fetch is in flight streams messages the rows
+    // predate — a session created and sent to in one gesture does exactly this.
+    // Replacing `messages` then would blank the turn the user is watching, so
+    // the restore stands down and lets the live state be the record.
+    const runningBefore = this.states[sessionId]?.isRunning ?? false;
     try {
       // Both halves of the transcript, fetched together: the messages a hook
       // injected and the record of what it did are one story.
@@ -717,6 +722,12 @@ class AgentRunStore {
         }
       }
       const state = this.ensureState(sessionId);
+      if (!runningBefore && state.isRunning) {
+        // Restore superseded by the run that started meanwhile; the session is
+        // still considered hydrated, so no later revisit refetches it.
+        state.hydrated = true;
+        return;
+      }
       state.messages = messages;
       // Anchors come back counted against this same transcript, so they land
       // where the firing happened. The session id is stamped back on: the

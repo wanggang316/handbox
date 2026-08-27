@@ -39,14 +39,17 @@ export const agentZh = {
   "agent.input.stop": "停止",
   "agent.input.send": "发送",
   "agent.input.autoExecution": "自动执行",
+  "agent.input.autoExecutionDesc": "写入 / 编辑 / 命令直接执行，不再询问",
   "agent.input.manualExecution": "手动执行",
-  "agent.input.selectModel": "选择模型",
+  "agent.input.manualExecutionDesc": "写入 / 编辑 / 命令执行前需要你确认",
+  "agent.input.toolExecutionFailed": "设置工具执行方式失败",
+  "agent.input.selectModel": "选择模型...",
   "agent.input.noAvailableMcpServers": "暂无可用的 MCP 服务器",
   "agent.input.configureMcpInSettings": "请在应用设置中配置并开启 MCP 服务器",
   "agent.input.enabledToolsCount": "{count} enabled tools",
   "agent.input.selectAgent": "选择 Agent",
   "agent.input.switchAgentFailed": "切换 Agent 失败",
-  "agent.input.selectWorkingDir": "选择工作目录",
+  "agent.input.selectWorkingDir": "选择文件夹...",
   "agent.input.workingDirFailed": "设置工作目录失败",
 
   // Model select modal (ModelSelectModal)
@@ -74,6 +77,12 @@ export const agentZh = {
   // Badges on text a hook injected as a user message (injectedMessage.ts)
   "agent.timeline.injectedContext": "注入上下文",
   "agent.timeline.injectedContinuation": "要求继续",
+  "agent.timeline.forkFromHere": "从此处新建会话",
+  "agent.timeline.forkTitle": "从此处新建会话",
+  "agent.timeline.forkNameLabel": "会话名称",
+  "agent.timeline.forkNamePlaceholder": "新会话的名称",
+  "agent.timeline.forkHint": "新会话将携带截至该条回复的对话历史",
+  "agent.timeline.forkFailed": "从此处新建会话失败",
 
   // Message navigation rail (MessageNavRail)
   "agent.nav.label": "消息导航",
@@ -176,9 +185,20 @@ export const agentZh = {
   "agent.list.removeFromProject": "移出项目",
   "agent.list.moveFailed": "移动会话失败",
   "agent.list.copyPath": "复制路径",
-  "agent.list.deleteProject": "删除项目",
+  // Menu label only; the confirm dialog spells out the cascade.
+  "agent.list.removeProject": "移除",
   "agent.list.copyId": "复制ID",
   "agent.list.untitledSession": "未命名",
+
+  // Project row menu (the "…" button and the right-click menu share it)
+  "agent.list.projectMenu": "项目操作",
+  "agent.list.projectMenuFor": "项目 {name} 的操作",
+  "agent.list.pinProject": "置顶项目",
+  "agent.list.unpinProject": "取消置顶项目",
+  "agent.list.projectSettings": "设置…",
+  "agent.list.revealInFinder": "在访达中显示",
+  "agent.list.revealFailed": "打开目录失败",
+  "agent.list.pinProjectFailed": "项目置顶失败",
 
   // Session row hover actions + the Archived group
   "agent.list.pin": "置顶",
@@ -199,6 +219,19 @@ export const agentZh = {
   "agent.list.createProjectFailed": "创建项目失败",
   "agent.list.createSessionFailed": "创建会话失败",
   "agent.list.generateTitleFailed": "生成标题失败",
+
+  // Project settings panel (ProjectSettingsModal); the panel's own title bar
+  // shows the project name and path, so there is no title string here.
+  "agent.projectSettings.general": "常规",
+  "agent.projectSettings.name": "名称",
+  "agent.projectSettings.color": "颜色",
+  "agent.projectSettings.colorNone": "无颜色",
+  "agent.projectSettings.colorCustom": "自定义颜色",
+  "agent.projectSettings.editor": "编辑器",
+  "agent.projectSettings.defaultEditor": "默认编辑器",
+  "agent.projectSettings.globalEditor": "跟随全局 — {name}",
+  "agent.projectSettings.globalEditorUnset": "跟随全局",
+  "agent.projectSettings.saveFailed": "保存项目设置失败",
 
   // Agent form modal (AgentFormModal)
   "agent.form.backToList": "返回列表",

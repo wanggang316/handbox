@@ -300,6 +300,19 @@ mod tests {
                 .unwrap();
         assert!(columns.contains(&"project_id".to_string()));
 
+        // agent_projects gained the per-project settings columns (migration 068).
+        let project_columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('agent_projects')")
+                .fetch_all(pool)
+                .await
+                .unwrap();
+        for column in ["pinned", "color", "default_editor_id"] {
+            assert!(
+                project_columns.contains(&column.to_string()),
+                "agent_projects should have a {column} column"
+            );
+        }
+
         // UNIQUE(path) is enforced.
         sqlx::query(
             "INSERT INTO agent_projects (id, path, name, created_at, updated_at) \

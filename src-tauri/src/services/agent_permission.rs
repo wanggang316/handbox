@@ -323,6 +323,9 @@ pub fn respond_to_approval(request_id: &str, decision: ApprovalDecision) {
 /// FAIL-CLOSED: with no emitter wired the extension denies outright rather than
 /// awaiting, so a dangerous tool never runs without an explicit consent surface.
 ///
+/// The gate on the built-ins is lifted only by an explicit session choice
+/// ([`with_dangerous_gate`](Self::with_dangerous_gate)); the default keeps it.
+///
 /// Registered AFTER [`SandboxExtension`] in the chain, where the first `Cancel`
 /// wins, so a sandbox escape is stopped before it can prompt the user.
 pub struct PermissionExtension {
@@ -341,6 +344,13 @@ pub struct PermissionExtension {
     /// `mcp__{serverId}__{tool}` names of this session's manual-execution MCP
     /// servers. Auto-execution MCP tools are absent and pass straight through.
     approval_tools: HashSet<String>,
+    /// Whether [`DANGEROUS_TOOLS`] are approval-gated. `false` is the session's
+    /// "auto" tool-execution mode: write/edit/bash run unattended. Defaults to
+    /// `true` so an unset / unknown mode keeps the gate.
+    ///
+    /// Never applies to [`approval_tools`]: a manual MCP server stays gated in
+    /// auto mode, since that mode is a per-server decision of its own.
+    gate_dangerous: bool,
 }
 
 impl PermissionExtension {
@@ -370,6 +380,7 @@ impl PermissionExtension {
             session_id,
             emitter,
             approval_tools: HashSet::new(),
+            gate_dangerous: true,
         }
     }
 
@@ -377,6 +388,13 @@ impl PermissionExtension {
     /// approval-gated like the dangerous built-ins.
     pub fn with_approval_tools(mut self, approval_tools: HashSet<String>) -> Self {
         self.approval_tools = approval_tools;
+        self
+    }
+
+    /// `false` lets [`DANGEROUS_TOOLS`] run without prompting (the session's
+    /// "auto" tool-execution mode). Manual MCP tools stay gated either way.
+    pub fn with_dangerous_gate(mut self, gate_dangerous: bool) -> Self {
+        self.gate_dangerous = gate_dangerous;
         self
     }
 }
@@ -458,10 +476,11 @@ impl Extension for PermissionExtension {
     ) -> Result<HookDecision, ExtensionError> {
         // Dangerous built-ins and this session's manual-server MCP tools are
         // approval-gated; everything else passes straight through (the sandbox
-        // judged paths earlier in the chain).
-        if !DANGEROUS_TOOLS.contains(&event.tool_name.as_str())
-            && !self.approval_tools.contains(&event.tool_name)
-        {
+        // judged paths earlier in the chain). In the session's auto mode the
+        // built-ins lose their gate, but the manual MCP tools keep theirs.
+        let gated = (self.gate_dangerous && DANGEROUS_TOOLS.contains(&event.tool_name.as_str()))
+            || self.approval_tools.contains(&event.tool_name);
+        if !gated {
             return Ok(HookDecision::Continue);
         }
         Ok(request_approval(
@@ -1285,6 +1304,60 @@ mod tests {
             recorded.lock().unwrap().is_empty(),
             "read-only tools must NOT emit an approval request"
         );
+    }
+
+    /// Auto tool-execution drops the gate on the dangerous built-ins: they
+    /// Continue without emitting a request, so nothing parks waiting for a user
+    /// who has already consented once, at the session level.
+    #[tokio::test]
+    async fn auto_execution_continues_dangerous_tools_without_requesting_approval() {
+        let (emitter, recorded) = recording_emitter();
+        let ext = PermissionExtension::new("auto-exec-session".to_string(), Some(emitter))
+            .with_dangerous_gate(false);
+
+        for (tool, args) in [
+            ("write", json!({ "path": "out.txt", "content": "data" })),
+            ("edit", json!({ "file_path": "out.txt" })),
+            ("bash", json!({ "command": "ls" })),
+        ] {
+            let decision = ext
+                .on_before_tool_call(&cx(Path::new("/tmp")), &call_event(tool, args))
+                .await
+                .expect("permission hook never returns Err");
+            assert!(
+                matches!(decision, HookDecision::Continue),
+                "{tool} must run unattended in auto tool-execution mode"
+            );
+        }
+
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "auto tool-execution must NOT emit approval requests for the built-ins"
+        );
+    }
+
+    /// Auto mode is about the built-ins only. A manual-execution MCP server is a
+    /// separate, per-server decision, so its tools stay gated — and with no
+    /// emitter answering, the call fails closed rather than slipping through.
+    #[tokio::test]
+    async fn auto_execution_still_gates_manual_mcp_tools() {
+        let mcp_tool = "mcp__srv__deploy";
+        let ext = PermissionExtension::new("auto-exec-mcp-session".to_string(), None)
+            .with_approval_tools(HashSet::from([mcp_tool.to_string()]))
+            .with_dangerous_gate(false);
+
+        let decision = ext
+            .on_before_tool_call(&cx(Path::new("/tmp")), &call_event(mcp_tool, json!({})))
+            .await
+            .expect("permission hook never returns Err");
+
+        match decision {
+            HookDecision::Cancel(reason) => assert!(
+                reason.contains("denied"),
+                "a gated MCP tool with no approval surface must fail closed, got: {reason:?}"
+            ),
+            other => panic!("manual MCP tools stay gated in auto mode, got {other:?}"),
+        }
     }
 
     /// `respond_to_approval` is idempotent: the FIRST response for a request_id
