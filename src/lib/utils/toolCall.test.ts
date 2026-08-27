@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseMcpToolName, toolArgSummary } from "./toolCall";
+import { parseMcpToolName, toolArgSummary, toolArgsRecord } from "./toolCall";
 
 describe("parseMcpToolName", () => {
   it("splits a namespaced MCP tool into server id and tool", () => {
@@ -78,5 +78,21 @@ describe("toolArgSummary", () => {
 
   it("shows a non-JSON string argument as-is", () => {
     expect(toolArgSummary("just text")).toBe("just text");
+  });
+});
+
+describe("toolArgsRecord", () => {
+  it("passes an object through and parses the JSON-string carrier", () => {
+    expect(toolArgsRecord({ city: "HZ" })).toEqual({ city: "HZ" });
+    expect(toolArgsRecord('{"city":"HZ"}')).toEqual({ city: "HZ" });
+  });
+
+  /// The state model a view renders against must never be null: an empty card
+  /// is recoverable, a missing state model is not.
+  it("falls back to an empty object for anything not object-shaped", () => {
+    expect(toolArgsRecord(undefined)).toEqual({});
+    expect(toolArgsRecord(null)).toEqual({});
+    expect(toolArgsRecord("not json")).toEqual({});
+    expect(toolArgsRecord([1, 2])).toEqual({});
   });
 });

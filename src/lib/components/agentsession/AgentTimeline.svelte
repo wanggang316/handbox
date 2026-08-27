@@ -44,6 +44,12 @@
   import { RENDER_CARD_TOOL_NAME } from "./renderCard";
   import AppPill from "./AppPill.svelte";
   import { RENDER_APP_TOOL_NAME } from "./renderApp";
+  import GenUiToolCard from "./GenUiToolCard.svelte";
+  import {
+    findToolByName,
+    toolDefinitionActions,
+  } from "$lib/states/toolDefinition.svelte";
+  import type { ToolDefinition } from "$lib/types/toolDefinition";
   import MessageNavRail, { type MessageNavItem } from "./MessageNavRail.svelte";
   import SelectionReplyButton from "./SelectionReplyButton.svelte";
   import { splitQuote } from "./quote";
@@ -303,6 +309,17 @@
     return message.role === "user"
       ? parseInjectedMessage(userText(message))
       : null;
+  }
+
+  // User-defined tools are presentational: a call to one that has a view linked
+  // renders as that view, driven by the call's own arguments. Definitions load
+  // once per session and never block a paint, so a transcript opened before they
+  // arrive shows plain tool rows and swaps to cards when they do.
+  toolDefinitionActions.ensureLoaded();
+
+  function viewToolFor(toolName: string): ToolDefinition | null {
+    const definition = findToolByName(toolName);
+    return definition?.genuiId ? definition : null;
   }
 
 
@@ -1056,6 +1073,13 @@
                         toolCall={toolCallView(block)}
                         {sessionId}
                         fallbackTitle={appTitle}
+                      />
+                    {:else if viewToolFor(block.name)}
+                      <!-- A user-defined tool with a view: the call's arguments
+                           are the data, rendered through the linked GenUI spec. -->
+                      <GenUiToolCard
+                        toolCall={toolCallView(block)}
+                        definition={viewToolFor(block.name)!}
                       />
                     {:else}
                       <AgentToolCallCard toolCall={toolCallView(block)} />

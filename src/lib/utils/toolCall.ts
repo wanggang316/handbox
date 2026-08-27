@@ -79,6 +79,17 @@ export function toolArgSummary(args: unknown): string {
 }
 
 /**
+ * A call's arguments as a plain object, or `{}` when they are not object-shaped.
+ *
+ * This is the state model a custom tool's GenUI view renders against, so it must
+ * never be null: a card with no data renders empty, which is recoverable, while
+ * a missing state model is not.
+ */
+export function toolArgsRecord(args: unknown): Record<string, unknown> {
+  return asRecord(args) ?? {};
+}
+
+/**
  * Arguments as an object. The live path can deliver them as a JSON string
  * (`tool_execution` events forward the model's raw arguments), so a string that
  * parses to an object is treated as that object.

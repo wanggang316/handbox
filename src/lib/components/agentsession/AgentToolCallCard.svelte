@@ -3,7 +3,9 @@
   import { renderCodeBlock } from "$lib/utils/code";
   import { parseMcpToolName, toolArgSummary } from "$lib/utils/toolCall";
   import { resolveToolIcon } from "$lib/constants/agentTools";
+  import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import { mcpState } from "$lib/states/mcp.svelte";
+  import { findToolByName } from "$lib/states/toolDefinition.svelte";
   import { t } from "$lib/i18n";
   import type { ToolCallView } from "$lib/states/agentRun.svelte";
   import type { ToolResultContent } from "$lib/types/agentSession";
@@ -17,7 +19,13 @@
 
   let { toolCall }: Props = $props();
 
-  const ToolIcon = $derived(resolveToolIcon(toolCall.toolName));
+  // A user-defined tool carries its own icon and label; falling back to the
+  // built-in registry covers every other name. Undefined once the definition is
+  // deleted, so an old transcript keeps rendering under the generic glyph.
+  const custom = $derived(findToolByName(toolCall.toolName));
+  const ToolIcon = $derived(
+    custom ? resolveAgentIcon(custom.icon) : resolveToolIcon(toolCall.toolName),
+  );
 
   // An MCP tool registers as `mcp__<serverId>__<tool>`: the row shows the tool
   // under its own name, prefixed by the server it came from (two servers can
@@ -30,8 +38,13 @@
     const server = mcpState.servers.find((s) => s.id === mcp.serverId);
     return server?.displayName || server?.name || "";
   });
+  // The row shows what the tool is called in the UI; the registration name the
+  // model actually used stays on the row's title attribute.
   const displayName = $derived(
-    mcp?.tool || toolCall.toolName || t("agent.toolCall.fallbackName"),
+    custom?.displayName ||
+      mcp?.tool ||
+      toolCall.toolName ||
+      t("agent.toolCall.fallbackName"),
   );
 
   // What the call operates on, on the collapsed row: the path it reads, the

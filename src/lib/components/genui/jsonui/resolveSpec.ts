@@ -10,11 +10,16 @@
  *
  * Nothing here throws: every failure yields `null`, signalling the caller to
  * fall back to ordinary markdown rendering.
+ *
+ * Prop validation has two modes. The default is strict literals, which is what
+ * a model's reply must be. `{ allowBindings: true }` additionally accepts
+ * json-render's `{ $state: path }` expressions, for the specs a user authors as
+ * a custom tool's view — see {@link SpecResolveOptions}.
  */
 
 import type { Spec, UIElement } from "@json-render/core";
 import { formatSpecIssues, validateSpec } from "@json-render/core";
-import type { ZodError, ZodTypeAny } from "zod";
+import { z, type ZodError, type ZodTypeAny } from "zod";
 import { uiCatalog } from "./catalog";
 
 /**
@@ -30,10 +35,71 @@ const componentPropsSchemas: Record<string, ZodTypeAny> = Object.fromEntries(
 );
 
 /**
+ * json-render's state-binding expression: the renderer resolves `{ $state: path }`
+ * against the state model instead of using the value literally.
+ */
+const stateBindingSchema = z.object({ $state: z.string() }).strict();
+
+/**
+ * The same schemas, with every declared prop widened to "the literal type OR a
+ * state binding".
+ *
+ * Only the tool templates use this. A spec a MODEL emitted describes one
+ * finished answer and has no state to read, so it stays on the strict schemas —
+ * a binding there would render blank. A spec a USER wrote as a tool's view is a
+ * template over that tool's arguments, and binding is the whole point.
+ *
+ * Widening per key (rather than accepting any object) keeps everything else
+ * intact: a required prop stays required, a wrong literal type is still
+ * rejected, undeclared keys are still stripped, and `{ $state: 42 }` fails.
+ */
+const bindingTolerantPropsSchemas: Record<string, ZodTypeAny> =
+  Object.fromEntries(
+    Object.entries(componentPropsSchemas).map(([type, schema]) => [
+      type,
+      widenToBindings(schema),
+    ]),
+  );
+
+function widenToBindings(schema: ZodTypeAny): ZodTypeAny {
+  if (!(schema instanceof z.ZodObject)) {
+    return schema;
+  }
+  const shape = schema.shape as Record<string, ZodTypeAny>;
+  return z.object(
+    Object.fromEntries(
+      Object.entries(shape).map(([prop, propSchema]) => [
+        prop,
+        z.union([propSchema, stateBindingSchema]),
+      ]),
+    ),
+  );
+}
+
+/**
+ * How a spec's props are validated.
+ *
+ * `allowBindings` opts into the widened schemas above — pass it only for a spec
+ * authored as a tool's view, never for model output.
+ */
+export interface SpecResolveOptions {
+  allowBindings?: boolean;
+}
+
+function schemasFor(options?: SpecResolveOptions): Record<string, ZodTypeAny> {
+  return options?.allowBindings
+    ? bindingTolerantPropsSchemas
+    : componentPropsSchemas;
+}
+
+/**
  * Resolve raw message content to a JSON-Render {@link Spec}, or `null` when the
  * content is not a well-formed, catalog-valid spec.
  */
-export function resolveSpec(content: string | null | undefined): Spec | null {
+export function resolveSpec(
+  content: string | null | undefined,
+  options?: SpecResolveOptions,
+): Spec | null {
   try {
     if (typeof content !== "string") {
       return null;
@@ -60,7 +126,7 @@ export function resolveSpec(content: string | null | undefined): Spec | null {
 
     const spec = result.data as Spec;
 
-    if (!validateElementProps(spec)) {
+    if (!validateElementProps(spec, schemasFor(options))) {
       return null;
     }
 
@@ -96,7 +162,10 @@ export type SpecDiagnostic =
  * every failure to `null`. On success the spec is normalised identically
  * (undeclared props stripped), so it renders through the same `<Renderer>`.
  */
-export function explainSpec(content: string | null | undefined): SpecDiagnostic {
+export function explainSpec(
+  content: string | null | undefined,
+  options?: SpecResolveOptions,
+): SpecDiagnostic {
   if (typeof content !== "string" || content.trim().length === 0) {
     return { ok: false, stage: "empty", message: "请输入一个 JSON spec。" };
   }
@@ -136,7 +205,7 @@ export function explainSpec(content: string | null | undefined): SpecDiagnostic 
   }
   const spec = result.data as Spec;
 
-  const propsIssue = firstPropsIssue(spec);
+  const propsIssue = firstPropsIssue(spec, schemasFor(options));
   if (propsIssue !== null) {
     return { ok: false, stage: "props", message: propsIssue };
   }
@@ -177,8 +246,11 @@ export function looksLikeStreamingSpec(
 }
 
 /** Boolean form of {@link firstPropsIssue}, which also strips undeclared props. */
-function validateElementProps(spec: Spec): boolean {
-  return firstPropsIssue(spec) === null;
+function validateElementProps(
+  spec: Spec,
+  schemas: Record<string, ZodTypeAny>,
+): boolean {
+  return firstPropsIssue(spec, schemas) === null;
 }
 
 /**
@@ -188,12 +260,15 @@ function validateElementProps(spec: Spec): boolean {
  * all pass; an element whose `type` has no schema is skipped, not rejected
  * (`uiCatalog.validate` has already rejected unknown types).
  */
-function firstPropsIssue(spec: Spec): string | null {
+function firstPropsIssue(
+  spec: Spec,
+  schemas: Record<string, ZodTypeAny>,
+): string | null {
   for (const [key, element] of Object.entries(spec.elements) as [
     string,
     UIElement,
   ][]) {
-    const schema = componentPropsSchemas[element.type];
+    const schema = schemas[element.type];
     if (schema === undefined) {
       continue;
     }
