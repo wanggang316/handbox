@@ -125,6 +125,63 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.agentTools.skillDesc":
     "Let the model discover and load skills on demand",
 
+  // Tool detail / custom tools
+  "settings.tools.custom.title": "Custom tools",
+  "settings.tools.custom.description":
+    "Define tools of your own: the model calls them with the parameters you declare, and HandBox renders those parameters through the linked view.",
+  "settings.tools.custom.empty": "No custom tools yet",
+  "settings.tools.custom.new": "New tool",
+  "settings.tools.custom.noView": "No view linked",
+  "settings.tools.detail.newTitle": "New tool",
+  "settings.tools.detail.back": "Back",
+  "settings.tools.detail.notFound": "No such tool",
+  "settings.tools.detail.readOnly": "Built-in tool, read-only",
+  "settings.tools.detail.mcpReadOnly": "MCP tool, read-only",
+  "settings.tools.detail.basics": "Basics",
+  "settings.tools.detail.name": "Registration name",
+  "settings.tools.detail.nameHint":
+    "The name the model calls: starts with a lowercase letter, then lowercase letters, digits and underscores only.",
+  "settings.tools.detail.namePlaceholder": "weather_card",
+  "settings.tools.detail.displayName": "Display name",
+  "settings.tools.detail.displayNamePlaceholder": "Weather card",
+  "settings.tools.detail.prompt": "Prompt",
+  "settings.tools.detail.promptHint":
+    "Tells the model when and why to call this tool.",
+  "settings.tools.detail.promptPlaceholder":
+    "Call when the user asks about the weather; fill the parameters with measured values",
+  "settings.tools.detail.params": "Parameters",
+  "settings.tools.detail.paramsHint":
+    "A parameter is both a field the model fills in and a binding path for the view.",
+  "settings.tools.detail.view": "View (GenUI)",
+  "settings.tools.detail.viewHint":
+    'Rendered as a card when the tool is called; read a parameter with { "$state": "/name" } in the spec.',
+  "settings.tools.detail.viewNone": "None (show as a plain tool row)",
+  "settings.tools.detail.viewEdit": "Edit this GenUI",
+  "settings.tools.detail.viewNew": "Create a GenUI",
+  "settings.tools.detail.preview": "Preview",
+  "settings.tools.detail.previewHint":
+    "Rendered with sample values; the real content comes from the model.",
+  "settings.tools.detail.previewInvalid": "This GenUI cannot render: {reason}",
+  "settings.tools.detail.previewMissing": "The linked GenUI no longer exists",
+  "settings.tools.detail.schema": "Parameter schema",
+  "settings.tools.detail.deleteTitle": "Delete tool",
+  "settings.tools.detail.deleteMessage": "Delete “{name}”?",
+  "settings.tools.detail.saveFailed": "Save failed",
+  "settings.tools.paramType.string": "Text",
+  "settings.tools.paramType.number": "Number",
+  "settings.tools.paramType.boolean": "Boolean",
+  "settings.tools.paramType.stringList": "Text list",
+  "settings.tools.paramType.stringMatrix": "Table rows",
+  "settings.tools.paramType.keyValueList": "Key/value pairs",
+  "settings.tools.params.empty":
+    "No parameters yet — the model will call this tool with none",
+  "settings.tools.params.add": "Add parameter",
+  "settings.tools.params.remove": "Remove parameter",
+  "settings.tools.params.required": "Required",
+  "settings.tools.params.namePlaceholder": "Name, e.g. city",
+  "settings.tools.params.descriptionPlaceholder":
+    "Tell the model what belongs here",
+
   // Skills page
   "settings.skills.title": "Skills",
   "settings.skills.description":

@@ -8,6 +8,7 @@
 
 import { apiCall } from "./index";
 import type {
+  BuiltinToolInfo,
   CreateToolDefinitionRequest,
   ToolDefinition,
   UpdateToolDefinitionRequest,
@@ -40,4 +41,13 @@ export async function updateToolDefinition(
 
 export async function deleteToolDefinition(toolId: string): Promise<void> {
   await apiCall<void>("tool_definition_delete", { toolId });
+}
+
+/**
+ * The tools HandBox registers itself, read-only: the coding-agent built-ins and
+ * the extension tools, each with the description and schema the model receives.
+ * `skill` is absent — it gates a pipeline rather than registering a tool.
+ */
+export async function getAgentToolCatalog(): Promise<BuiltinToolInfo[]> {
+  return apiCall<BuiltinToolInfo[]>("agent_tool_catalog");
 }

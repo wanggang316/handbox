@@ -9,9 +9,16 @@
     TextRow,
   } from "$lib/components/ui/table";
   import ModelSelectButton from "$lib/components/settings/ModelSelectButton.svelte";
+  import Button from "$lib/components/ui/Button.svelte";
+  import { Plus } from "@lucide/svelte";
   import { settingsState, providerActions } from "$lib/states";
   import { getAllModels } from "$lib/states/provider.svelte";
+  import {
+    toolDefinitionState,
+    toolDefinitionActions,
+  } from "$lib/states/toolDefinition.svelte";
   import { resolveAgentDefaultModel } from "$lib/utils/defaultModel";
+  import { resolveAgentIcon } from "$lib/utils/agentIcons";
   import {
     BUILTIN_TOOLS,
     BUILTIN_TOOL_IDS,
@@ -19,6 +26,7 @@
   } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
   import type { ModelWithProvider } from "$lib/types/provider";
+  import type { ToolDefinition } from "$lib/types/toolDefinition";
 
   // Globally enabled default tool set (coding-agent registry names); a missing
   // agent section means all enabled.
@@ -58,6 +66,28 @@
   const webSearchIcon = resolveToolIcon("web_search");
   const skillIcon = resolveToolIcon("skill");
 
+  /**
+   * Detail view for any tool. One route serves all three sources — a custom
+   * tool's uuid, a built-in id, an `mcp__…` name — because none of those can
+   * collide; the page decides editable vs read-only from what the id resolves
+   * to. `skill` has no tool of its own to show, so its row has no detail.
+   */
+  function openToolDetail(toolId: string): void {
+    void goto(`/settings/agent-tools/${encodeURIComponent(toolId)}`);
+  }
+
+  /** Enable/disable is the definition's own flag; it gates every session. */
+  async function toggleCustomTool(
+    tool: ToolDefinition,
+    enabled: boolean,
+  ): Promise<void> {
+    try {
+      await toolDefinitionActions.updateTool(tool.id, { enabled });
+    } catch (error) {
+      console.error("更新自定义工具失败:", error);
+    }
+  }
+
   function webSearchSnapshot(provider: string, apiKey: string): string {
     return JSON.stringify({ provider, apiKey });
   }
@@ -88,6 +118,11 @@
     // Catalog needed to resolve / detect-dangling the default model display.
     providerActions.loadProvidersWithModels().catch((error) => {
       console.error("加载模型目录失败:", error);
+    });
+    // Always re-read: a tool may have been created, renamed or deleted on the
+    // detail page since the store last loaded.
+    toolDefinitionActions.loadTools().catch((error) => {
+      console.error("加载自定义工具失败:", error);
     });
   });
 
@@ -226,6 +261,8 @@
         icon={tool.icon}
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
+        onOpenDetail={() => openToolDetail(tool.id)}
+        detailAriaLabel={t(tool.labelKey)}
       />
     {/each}
   </TableGroup>
@@ -242,6 +279,8 @@
       icon={webSearchIcon}
       checked={isEnabled("web_search")}
       onChange={(checked) => handleToggle("web_search", checked)}
+      onOpenDetail={() => openToolDetail("web_search")}
+      detailAriaLabel={t("agent.tool.web_search")}
     />
     {#if isEnabled("web_search")}
       <SelectRow
@@ -273,6 +312,8 @@
         description={tool.desc}
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
+        onOpenDetail={() => openToolDetail(tool.id)}
+        detailAriaLabel={tool.label}
       />
     {/each}
   </TableGroup>
@@ -284,6 +325,8 @@
   </div>
 
   <TableGroup>
+    <!-- No detail: `skill` gates the skill pipeline rather than registering a
+         tool, so there is no description or schema to show. -->
     <SwitchRow
       label={t("agent.tool.skill")}
       icon={skillIcon}
@@ -291,5 +334,53 @@
       checked={isEnabled("skill")}
       onChange={(checked) => handleToggle("skill", checked)}
     />
+  </TableGroup>
+
+  <div class="flex flex-col gap-y-1 mt-2">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-col gap-y-1">
+        <p class="text-sm font-medium text-base-content">
+          {t("settings.tools.custom.title")}
+        </p>
+        <p class="text-[13px] leading-snug text-base-content/55">
+          {t("settings.tools.custom.description")}
+        </p>
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        class="shrink-0"
+        onclick={() => openToolDetail("new")}
+      >
+        <Plus size={14} />
+        {t("settings.tools.custom.new")}
+      </Button>
+    </div>
+  </div>
+
+  <TableGroup>
+    {#if toolDefinitionState.tools.length === 0}
+      <TableBaseRow>
+        <p class="text-[13px] text-base-content/55">
+          {t("settings.tools.custom.empty")}
+        </p>
+      </TableBaseRow>
+    {:else}
+      {#each toolDefinitionState.tools as tool (tool.id)}
+        <!-- The registration name reads as the subtitle: it is what the model
+             calls and what a transcript's tool row is keyed by. -->
+        <SwitchRow
+          label={tool.displayName}
+          icon={resolveAgentIcon(tool.icon)}
+          description={tool.genuiId
+            ? tool.name
+            : `${tool.name} · ${t("settings.tools.custom.noView")}`}
+          checked={tool.enabled}
+          onChange={(checked) => toggleCustomTool(tool, checked)}
+          onOpenDetail={() => openToolDetail(tool.id)}
+          detailAriaLabel={tool.displayName}
+        />
+      {/each}
+    {/if}
   </TableGroup>
 </div>

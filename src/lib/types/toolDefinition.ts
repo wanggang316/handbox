@@ -55,6 +55,21 @@ export interface ToolDefinition {
   updatedAt: number;
 }
 
+/**
+ * One tool HandBox registers itself, as the read-only detail view shows it.
+ *
+ * This is what the MODEL is told — the same description and schema the tool
+ * carries into a run — rather than a hand-written copy that would drift.
+ */
+export interface BuiltinToolInfo {
+  /** Registration name; matches an id in `builtinToolIds.ts`. */
+  name: string;
+  label: string;
+  description: string;
+  /** JSON Schema of the tool's arguments. */
+  parameters: unknown;
+}
+
 export interface CreateToolDefinitionRequest {
   name: string;
   displayName: string;

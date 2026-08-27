@@ -266,6 +266,7 @@ pub fn run() {
             tool_definition_create,
             tool_definition_update,
             tool_definition_delete,
+            agent_tool_catalog,
             skill_list,
             skill_set_disabled,
             settings_get,
