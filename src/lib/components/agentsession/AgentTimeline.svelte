@@ -119,14 +119,75 @@
     return !!u && (u.input > 0 || u.output > 0 || u.totalTokens > 0);
   }
 
-  // Input/output tokens, spelled out for the usage tooltip and its aria-label.
-  function usageLabel(
-    message: Extract<AgentMessage, { role: "assistant" }>,
-  ): string {
-    const input = t("agent.timeline.usageInput", { count: message.usage.input });
-    const output = t("agent.timeline.usageOutput", {
-      count: message.usage.output,
+  /**
+   * A turn's assistant messages, keyed by the LAST of them.
+   *
+   * One reply is often several assistant messages: the model narrates, calls a
+   * tool, reads the result, continues. The reader sees one answer, so the
+   * actions row belongs on the turn's last message and must speak for the whole
+   * turn — one row per reply, not one per step.
+   *
+   * A user message opens a turn; toolResult messages sit inside one and are
+   * rendered by their paired card, so only assistant indices are collected.
+   */
+  const turnAssistants = $derived.by(() => {
+    const turns = new Map<number, number[]>();
+    let current: number[] = [];
+    const close = () => {
+      if (current.length > 0) {
+        turns.set(current[current.length - 1], current);
+        current = [];
+      }
+    };
+    runState.messages.forEach((message, index) => {
+      if (message.role === "user") {
+        close();
+      } else if (message.role === "assistant") {
+        current.push(index);
+      }
     });
+    close();
+    return turns;
+  });
+
+  function assistantAt(
+    index: number,
+  ): Extract<AgentMessage, { role: "assistant" }> {
+    return runState.messages[index] as Extract<
+      AgentMessage,
+      { role: "assistant" }
+    >;
+  }
+
+  /** Everything the turn said, in order — what "copy" puts on the clipboard. */
+  function turnText(indices: number[]): string {
+    return indices
+      .map((index) => assistantText(assistantAt(index)))
+      .filter((text) => text.length > 0)
+      .join("\n\n");
+  }
+
+  /** Steps that reported usage; an aborted or errored step contributes none. */
+  function turnUsageSteps(indices: number[]): number[] {
+    return indices.filter((index) => hasUsage(assistantAt(index)));
+  }
+
+  /**
+   * Input/output tokens for the whole turn, spelled out for the usage tooltip
+   * and its aria-label. Summed across steps: a turn that called three tools
+   * spent all three steps' tokens, and reporting only the last would understate
+   * it every time.
+   */
+  function turnUsageLabel(indices: number[]): string {
+    let inputTotal = 0;
+    let outputTotal = 0;
+    for (const index of turnUsageSteps(indices)) {
+      const usage = assistantAt(index).usage;
+      inputTotal += usage.input;
+      outputTotal += usage.output;
+    }
+    const input = t("agent.timeline.usageInput", { count: inputTotal });
+    const output = t("agent.timeline.usageOutput", { count: outputTotal });
     return `${input} · ${output}`;
   }
 
@@ -1022,6 +1083,9 @@
         {:else if message.role === "assistant" && i !== liveAssistantIndex}
           <!-- Finished assistant message; the in-progress skeleton renders in the
                LIVE view below and is skipped here. -->
+          <!-- Non-null only on the LAST assistant message of a turn, where the
+               actions row goes; the steps before it are the same reply. -->
+          {@const turn = turnAssistants.get(i)}
           <div class="flex flex-col gap-2" data-message-index={i}>
             <div class="flex-1 min-w-0">
               {#if assistantThinking(message)}
@@ -1105,11 +1169,13 @@
                    messages with nothing saying which one they came from. -->
               {@render hookNotices(i)}
 
-              <!-- Message actions. Usage is an icon rather than a running total:
-                   the numbers matter when asked for, not on every turn. -->
-              {#if assistantText(message) || hasUsage(message)}
+              <!-- Turn actions. Rendered once per reply — on the turn's last
+                   assistant message — rather than once per step, and speaking
+                   for the whole turn. Usage is an icon rather than a running
+                   total: the numbers matter when asked for, not every turn. -->
+              {#if turn && (turnText(turn).length > 0 || turnUsageSteps(turn).length > 0)}
                 <div class="mt-2 flex items-center gap-0.5 text-base-content/40">
-                  {#if assistantText(message)}
+                  {#if turnText(turn)}
                     <Tooltip
                       content={copiedIndex === i
                         ? t("agent.timeline.copied")
@@ -1120,7 +1186,7 @@
                         size="icon-sm"
                         class="text-base-content/40 enabled:hover:text-base-content"
                         ariaLabel={t("agent.timeline.copy")}
-                        onclick={() => copyMessage(i, assistantText(message))}
+                        onclick={() => copyMessage(i, turnText(turn))}
                       >
                         {#if copiedIndex === i}
                           <Check size={14} />
@@ -1148,8 +1214,8 @@
                     </Tooltip>
                   {/if}
 
-                  {#if hasUsage(message)}
-                    <Tooltip content={usageLabel(message)}>
+                  {#if turnUsageSteps(turn).length > 0}
+                    <Tooltip content={turnUsageLabel(turn)}>
                       <!-- Mirrors the icon-sm clear button: it is a hover target
                            like its neighbour, so it answers hover the same way.
                            It stays out of the tab order though — one stop per
@@ -1158,7 +1224,7 @@
                       <span
                         class="flex size-7 items-center justify-center rounded-md transition-[color,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300 hover:text-base-content"
                         role="img"
-                        aria-label={usageLabel(message)}
+                        aria-label={turnUsageLabel(turn)}
                       >
                         <ChartNoAxesColumn size={14} />
                       </span>
