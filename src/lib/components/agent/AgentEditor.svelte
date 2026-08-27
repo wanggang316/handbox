@@ -13,7 +13,7 @@
     SwitchRow,
   } from "../ui/table";
   import DefaultRow from "../ui/table/DefaultRow.svelte";
-  import { AGENT_ICONS, resolveAgentIcon } from "$lib/utils/agentIcons";
+  import IconPicker from "../ui/IconPicker.svelte";
   import { normalizeError } from "$lib/utils/error";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
@@ -120,21 +120,8 @@
   let skillsModalOpen = $state(false);
   let mcpModalOpen = $state(false);
 
-  // Icon picker popover: picking replaces and closes; picking the current icon
-  // clears it (back to the default Bot). Outside click closes.
-  let iconPickerOpen = $state(false);
-
-  function handleIconPickerOutside(event: MouseEvent) {
-    if (!iconPickerOpen) return;
-    const target = event.target as HTMLElement;
-    if (!target.closest(".icon-picker")) {
-      iconPickerOpen = false;
-    }
-  }
-
   function pickIcon(name: string) {
-    formData.icon = formData.icon === name ? "" : name;
-    iconPickerOpen = false;
+    formData.icon = name;
   }
 
   let skillSearch = $state("");
@@ -192,8 +179,6 @@
     workingDirMode: "optional",
     toolExecutionMode: "manual",
   });
-
-  const CurrentIcon = $derived(resolveAgentIcon(formData.icon));
 
   // Linked names absent from discovery (skill deleted/renamed): kept as removable rows.
   const missingSelectedSkills = $derived(
@@ -493,41 +478,11 @@
       </button>
 
       <div class="flex items-center gap-3">
-        <!-- Current-icon button; click opens the in-place picker popover. -->
-        <div class="icon-picker relative flex-shrink-0">
-          <button
-            type="button"
-            aria-expanded={iconPickerOpen}
-            title={t("agent.form.iconLabel")}
-            class="flex h-10 w-10 items-center justify-center rounded-lg bg-base-200 text-base-content/70 transition-colors hover:bg-base-300 hover:text-base-content"
-            onclick={() => (iconPickerOpen = !iconPickerOpen)}
-          >
-            <CurrentIcon size={20} />
-          </button>
-          {#if iconPickerOpen}
-            <div
-              class="absolute left-0 top-full z-[var(--z-popover)] mt-2 w-[19rem] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] p-3 shadow-xl"
-            >
-              <div class="flex flex-wrap gap-1.5">
-                {#each AGENT_ICONS as opt (opt.name)}
-                  {@const Icon = opt.Icon}
-                  <button
-                    type="button"
-                    aria-pressed={formData.icon === opt.name}
-                    title={opt.name}
-                    class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {formData.icon ===
-                    opt.name
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-transparent text-base-content/55 hover:bg-base-200 hover:text-base-content'}"
-                    onclick={() => pickIcon(opt.name)}
-                  >
-                    <Icon size={16} />
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
-        </div>
+        <IconPicker
+          value={formData.icon}
+          label={t("agent.form.iconLabel")}
+          onSelect={pickIcon}
+        />
 
         <div class="min-w-0 flex-1">
           <input
@@ -814,6 +769,3 @@
     </div>
   </div>
 </Modal>
-
-<!-- Close the icon picker on outside click; clicks inside .icon-picker keep it open. -->
-<svelte:window onclick={handleIconPickerOutside} />
