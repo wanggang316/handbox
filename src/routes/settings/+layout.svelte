@@ -8,10 +8,15 @@
 
   let { children } = $props();
 
-  // Shared header: resolve the title from the nav table (child routes map to
-  // their top-level item).
+  // Shared header: resolve the title from the nav table. Only the top-level
+  // page gets it — a detail route below one (a provider, a custom tool) carries
+  // its own sticky header with a back button and the record's own name, and the
+  // nav title stacked above that read as a second, wrong title for the record.
+  const currentNavItem = $derived(findSettingsNavItem($page.url.pathname));
   const currentTitle = $derived(
-    findSettingsNavItem($page.url.pathname)?.title ?? "",
+    currentNavItem && $page.url.pathname === currentNavItem.url
+      ? currentNavItem.title
+      : "",
   );
 
   // Settings has no sidebar toggle; pass a no-op to satisfy TitleBar

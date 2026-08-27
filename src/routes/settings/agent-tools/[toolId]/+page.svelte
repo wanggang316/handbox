@@ -15,7 +15,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { ChevronLeft, Trash2, ExternalLink } from "@lucide/svelte";
+  import { Trash2, ExternalLink } from "@lucide/svelte";
   import { Renderer, JsonUIProvider } from "@json-render/svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import Input from "$lib/components/ui/Input.svelte";
@@ -27,6 +27,7 @@
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import ToolParamsEditor from "$lib/components/settings/ToolParamsEditor.svelte";
+  import DetailHeader from "$lib/components/settings/DetailHeader.svelte";
   import { uiRegistry } from "$lib/components/genui/jsonui/registry";
   import { explainSpec } from "$lib/components/genui/jsonui/resolveSpec";
   import {
@@ -275,22 +276,51 @@
     }
     return null;
   });
+
+  /**
+   * What the sticky header says. It follows the display name as it is typed —
+   * the header is the only place the record is named once the page scrolls, so
+   * it has to agree with the field the reader is editing.
+   */
+  const headerTitle = $derived.by(() => {
+    if (loading) return t("settings.tools.detail.newTitle");
+    if (editable) {
+      const named = form.displayName.trim() || form.name.trim();
+      return named || t("settings.tools.detail.newTitle");
+    }
+    return readOnlyTool?.label ?? t("settings.tools.detail.notFound");
+  });
 </script>
 
-<div class="flex flex-col h-screen">
-  <header class="text-base-content py-2 px-4 flex-shrink-0">
+<!-- The page does NOT own a scroller: the settings layout is the scroll
+     container, and nesting one here is what let the header scroll out of
+     reach. It stays put because `DetailHeader` is sticky. -->
+{#snippet editorActions()}
+  <Button variant="primary" disabled={!canSave} onclick={save}>
+    {t("common.save")}
+  </Button>
+  {#if !isCreating}
     <Button
-      variant="secondary"
+      variant="clear"
       size="icon"
-      shape="pill"
-      ariaLabel={t("settings.tools.detail.back")}
-      onclick={back}
+      ariaLabel={t("settings.tools.detail.deleteTitle")}
+      class="text-base-content/40 enabled:hover:text-error"
+      onclick={() => (deleteOpen = true)}
     >
-      <ChevronLeft size={22} />
+      <Trash2 size={18} />
     </Button>
-  </header>
+  {/if}
+{/snippet}
 
-  <main class="flex-grow overflow-y-auto p-6 pr-8">
+<div class="flex flex-col">
+  <DetailHeader
+    title={headerTitle}
+    backLabel={t("settings.tools.detail.back")}
+    onBack={back}
+    actions={editable ? editorActions : undefined}
+  />
+
+  <div class="px-6 pr-8 pb-10">
     {#if loading}
       <div class="flex justify-center py-16">
         <Spinner />
@@ -310,20 +340,6 @@
               onInput={(value) => (form.displayName = value)}
             />
           </div>
-          <Button variant="primary" disabled={!canSave} onclick={save}>
-            {t("common.save")}
-          </Button>
-          {#if !isCreating}
-            <Button
-              variant="clear"
-              size="icon"
-              ariaLabel={t("settings.tools.detail.deleteTitle")}
-              class="text-base-content/40 enabled:hover:text-error"
-              onclick={() => (deleteOpen = true)}
-            >
-              <Trash2 size={18} />
-            </Button>
-          {/if}
         </div>
 
         {#if saveError}
@@ -476,7 +492,7 @@
         {t("settings.tools.detail.notFound")}
       </p>
     {/if}
-  </main>
+  </div>
 </div>
 
 <ConfirmModal
