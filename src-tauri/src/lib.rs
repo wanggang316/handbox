@@ -19,6 +19,7 @@ use crate::services::{
     GenUiService, HookRuleService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
     ProviderService, SettingsService, StorageService, ToolDefinitionService, UserSessionService,
 };
+use crate::models::settings::UpdateSettingsRequest;
 use crate::storage::Database;
 use crate::utils::logger;
 use std::sync::Arc;
@@ -387,6 +388,45 @@ async fn initialize_services(
     }
 
     let agent_service = AgentService::new(database_service.clone());
+
+    // One-time: the model a session starts on moved from an app-wide setting
+    // onto the agent definition (migration 070). Hand the old value to every
+    // agent that has none, then clear it, so an upgrade keeps running on the
+    // model the user already picked instead of asking again per agent.
+    {
+        let legacy = settings_service
+            .get_settings()
+            .map(|settings| {
+                (
+                    settings.agent.default_model_id,
+                    settings.agent.default_provider_id,
+                )
+            })
+            .unwrap_or((None, None));
+        if let (Some(model_id), Some(provider_id)) = legacy {
+            match agent_service
+                .adopt_default_model_where_unset(&model_id, &provider_id)
+                .await
+            {
+                Ok(adopted) => {
+                    tracing::info!(
+                        "[startup] {adopted} agent(s) adopted the former app-wide default model"
+                    );
+                    // Clearing it is what makes this run once.
+                    if let Err(e) = settings_service.update_settings(UpdateSettingsRequest {
+                        section: "agent".to_string(),
+                        data: serde_json::json!({
+                            "defaultModelId": null,
+                            "defaultProviderId": null,
+                        }),
+                    }) {
+                        tracing::warn!("[startup] failed to clear the legacy default model: {e}");
+                    }
+                }
+                Err(e) => tracing::warn!("[startup] default-model adoption failed: {e}"),
+            }
+        }
+    }
 
     // GenUI: CRUD for named JSON-Render UI specs.
     let genui_service = GenUiService::new(database_service.clone());

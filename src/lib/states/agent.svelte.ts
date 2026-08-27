@@ -9,6 +9,7 @@ import type {
   AgentReasoningConfig,
 } from "../types";
 import * as agentApi from "../api/agent";
+import type { AgentDefaultModel } from "../api/agent";
 
 export const agentState = $state({
   agents: [] as Agent[],
@@ -158,6 +159,8 @@ export const agentActions = {
       | "generativeUi"
       | "genuiId"
       | "providerId"
+      // `{ modelId, providerId }` or null — the pair is one field.
+      | "defaultModel"
       | "icon"
       | "description"
       | "builtinTools"
@@ -172,6 +175,7 @@ export const agentActions = {
       | McpServerConfig[]
       | string[]
       | AgentReasoningConfig
+      | AgentDefaultModel
       | null,
   ): Promise<Agent> {
     try {

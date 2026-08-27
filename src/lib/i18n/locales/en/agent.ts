@@ -270,6 +270,12 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.form.sectionRuntime": "Runtime",
   "agent.form.linkedCount": "{count} linked",
   "agent.form.builtinTools": "Built-in tools",
+  "agent.form.defaultModel": "Default model",
+  "agent.form.defaultModelHint":
+    "Model a new session from this agent starts on; you can still switch inside the session. Unset leaves the session asking for one.",
+  "agent.form.defaultModelNone": "Not selected",
+  "agent.form.defaultModelUnavailable":
+    "The selected model is no longer available — pick another",
   "agent.form.workingDir": "Working directory",
   "agent.form.toolExecution": "Tool execution",
   "agent.form.workingDirRequired": "Required",

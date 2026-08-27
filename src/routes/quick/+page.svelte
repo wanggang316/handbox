@@ -143,18 +143,14 @@
     sending = true;
     runError = null;
     try {
-      // Sessions don't inherit a model from the AgentDefinition; the overlay
-      // runs on the app-wide default model (settings > Agent), resolved against
-      // the catalog and passed as a paired modelId+providerId override so an
-      // unrunnable default is caught before a session is created. Load the
-      // catalog first — helper windows skip the main window's preload.
+      // The overlay runs on the chosen agent's own default model, resolved
+      // against the catalog and passed as a paired modelId+providerId override
+      // so an unrunnable default is caught before a session is created. Load
+      // the catalog first — helper windows skip the main window's preload.
       if (getAllModels().length === 0) {
         await providerActions.loadProvidersWithModels();
       }
-      const resolved = resolveAgentDefaultModel(
-        settingsState.settings?.agent,
-        getAllModels(),
-      );
+      const resolved = resolveAgentDefaultModel(agent, getAllModels());
       if (!resolved.available) {
         // Empty catalog / no default picked / default delisted: point the user to settings
         runError = t("quickaction.model.unavailable");

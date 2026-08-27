@@ -260,6 +260,11 @@ export const agentZh = {
   "agent.form.sectionRuntime": "运行",
   "agent.form.linkedCount": "已关联 {count} 个",
   "agent.form.builtinTools": "内置工具",
+  "agent.form.defaultModel": "默认模型",
+  "agent.form.defaultModelHint":
+    "用这个 Agent 新建会话时默认选用的模型，会话内仍可随时切换。不设则由会话创建后自行选择。",
+  "agent.form.defaultModelNone": "未选择",
+  "agent.form.defaultModelUnavailable": "所选模型已不可用，请重新选择",
   "agent.form.workingDir": "工作目录",
   "agent.form.toolExecution": "工具执行",
   "agent.form.workingDirRequired": "必需",

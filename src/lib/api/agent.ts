@@ -51,6 +51,12 @@ export async function deleteAgent(agentId: UUID): Promise<void> {
   return apiCall<void>("agent_delete", { agentId: agentId });
 }
 
+/** The `(model, provider)` pair an agent's sessions start on. */
+export interface AgentDefaultModel {
+  modelId: string;
+  providerId: string;
+}
+
 /** Updates a single agent field; `value: null` clears it. */
 export async function updateAgentField(
   agentId: UUID,
@@ -67,6 +73,9 @@ export async function updateAgentField(
     | "generativeUi"
     | "genuiId"
     | "providerId"
+    // `{ modelId, providerId }` or null — the pair is one field, since half of
+    // it names no model.
+    | "defaultModel"
     | "icon"
     | "description"
     | "builtinTools"
@@ -81,6 +90,7 @@ export async function updateAgentField(
     | McpServerConfig[]
     | string[]
     | AgentReasoningConfig
+    | AgentDefaultModel
     | null,
 ): Promise<Agent> {
   return apiCall<Agent>("agent_update_field", {

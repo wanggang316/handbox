@@ -17,6 +17,9 @@ pub enum AgentParameter {
     GenerativeUi(Option<bool>),
     GenUiId(Option<UUID>),
     ProviderId(Option<String>),
+    /// The `(model, provider)` pair moves together: a half-set pair identifies
+    /// no model, so it is one parameter rather than two.
+    DefaultModel(Option<String>, Option<String>),
     Icon(Option<String>),
     Description(Option<String>),
     BuiltinTools(Vec<String>),
@@ -73,6 +76,8 @@ impl AgentService {
             // Extended AgentDefinition fields start empty here and are filled in
             // field by field via `agent_update_field`. User-created is never builtin.
             provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             icon: None,
             description: None,
             builtin: false,
@@ -89,6 +94,26 @@ impl AgentService {
         Ok(agent)
     }
 
+    /// One-time adoption of the app-wide default model by every agent that has
+    /// none.
+    ///
+    /// The setting it comes from is gone; without this every existing agent
+    /// would start model-less on upgrade and the quick panel would refuse to
+    /// run until each one was configured by hand. Only untouched agents are
+    /// filled, so re-running it can never overwrite a deliberate choice — and
+    /// the caller clears the legacy setting afterwards, so it runs once.
+    ///
+    /// Returns how many agents adopted it.
+    pub async fn adopt_default_model_where_unset(
+        &self,
+        model_id: &str,
+        provider_id: &str,
+    ) -> Result<u64, AppError> {
+        self.repository
+            .fill_missing_default_model(model_id, provider_id)
+            .await
+    }
+
     pub async fn list_agents(
         &self,
         limit: Option<i32>,
@@ -103,7 +128,10 @@ impl AgentService {
     pub async fn get_agent(&self, agent_id: UUID) -> Result<Agent, AppError> {
         match self.repository.get_agent_by_id(&agent_id).await? {
             Some(agent) => Ok(agent),
-            None => Err(AppError::not_found(&format!("Agent not found: {}", agent_id))),
+            None => Err(AppError::not_found(&format!(
+                "Agent not found: {}",
+                agent_id
+            ))),
         }
     }
 
@@ -117,7 +145,9 @@ impl AgentService {
 
         // Builtin definitions keep a fixed display name; other fields stay editable.
         if agent.builtin && matches!(parameter, AgentParameter::Name(_)) {
-            return Err(AppError::validation_error("Builtin agent cannot be renamed"));
+            return Err(AppError::validation_error(
+                "Builtin agent cannot be renamed",
+            ));
         }
 
         match parameter {
@@ -133,6 +163,10 @@ impl AgentService {
             AgentParameter::GenerativeUi(v) => agent.generative_ui = v,
             AgentParameter::GenUiId(v) => agent.genui_id = v,
             AgentParameter::ProviderId(v) => agent.provider_id = v,
+            AgentParameter::DefaultModel(model_id, provider_id) => {
+                agent.default_model_id = model_id;
+                agent.default_provider_id = provider_id;
+            }
             AgentParameter::Icon(v) => agent.icon = v,
             AgentParameter::Description(v) => agent.description = v,
             AgentParameter::BuiltinTools(v) => agent.builtin_tools = v,
@@ -204,7 +238,9 @@ impl AgentService {
 
         // Builtin definitions (builtin-chat / builtin-coding) are protected.
         if agent.builtin {
-            return Err(AppError::validation_error("Builtin agent cannot be deleted"));
+            return Err(AppError::validation_error(
+                "Builtin agent cannot be deleted",
+            ));
         }
 
         self.repository.delete_agent(&agent_id).await
@@ -445,7 +481,10 @@ mod tests {
         assert_eq!(updated.top_k, Some(40));
         assert_eq!(updated.max_tokens, Some(4096));
         assert_eq!(updated.system_prompt, Some("Updated prompt".to_string()));
-        assert_eq!(updated.skills, vec!["skill1".to_string(), "skill2".to_string()]);
+        assert_eq!(
+            updated.skills,
+            vec!["skill1".to_string(), "skill2".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -506,7 +545,10 @@ mod tests {
             .unwrap();
 
         let updated = service
-            .update_agent_parameter(created.id.clone(), AgentParameter::Name("New Name".to_string()))
+            .update_agent_parameter(
+                created.id.clone(),
+                AgentParameter::Name("New Name".to_string()),
+            )
             .await
             .expect("update parameter failed");
 

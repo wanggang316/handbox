@@ -33,8 +33,8 @@ impl AgentRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid starters: {}", e)))?;
 
         let query = r#"
-            INSERT INTO agents (id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+            INSERT INTO agents (id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, default_model_id, default_provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
         "#;
 
         sqlx::query(query)
@@ -51,6 +51,8 @@ impl AgentRepository {
             .bind(agent.generative_ui)
             .bind(&agent.genui_id)
             .bind(&agent.provider_id)
+            .bind(&agent.default_model_id)
+            .bind(&agent.default_provider_id)
             .bind(&agent.icon)
             .bind(&agent.description)
             .bind(agent.builtin)
@@ -68,9 +70,31 @@ impl AgentRepository {
         Ok(())
     }
 
+    /// Set the default-model pair on every agent that has none. Untouched rows
+    /// only — see `AgentService::adopt_default_model_where_unset`.
+    pub async fn fill_missing_default_model(
+        &self,
+        model_id: &str,
+        provider_id: &str,
+    ) -> Result<u64, AppError> {
+        let result = sqlx::query(
+            "UPDATE agents SET default_model_id = $1, default_provider_id = $2 \
+             WHERE default_model_id IS NULL",
+        )
+        .bind(model_id)
+        .bind(provider_id)
+        .execute(self.db.pool())
+        .await
+        .map_err(|e| {
+            AppError::internal_error(&format!("Failed to adopt the default model: {}", e))
+        })?;
+
+        Ok(result.rows_affected())
+    }
+
     pub async fn list_agents(&self, limit: i32, offset: i32) -> Result<Vec<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
+            SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, default_model_id, default_provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
             FROM agents ORDER BY updated_at DESC LIMIT $1 OFFSET $2
         "#;
 
@@ -91,7 +115,7 @@ impl AgentRepository {
 
     pub async fn get_agent_by_id(&self, agent_id: &UUID) -> Result<Option<Agent>, AppError> {
         let query = r#"
-            SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
+            SELECT id, name, temperature, top_p, top_k, reasoning, max_tokens, system_prompt, mcp_servers, skills, generative_ui, genui_id, provider_id, default_model_id, default_provider_id, icon, description, builtin, builtin_tools, working_dir_mode, tool_execution_mode, thinking_level, starters, created_at, updated_at
             FROM agents WHERE id = $1
         "#;
 
@@ -127,8 +151,8 @@ impl AgentRepository {
             .map_err(|e| AppError::validation_error(&format!("Invalid starters: {}", e)))?;
 
         let query = r#"
-            UPDATE agents SET name = $1, temperature = $2, top_p = $3, top_k = $4, reasoning = $5, max_tokens = $6, system_prompt = $7, mcp_servers = $8, skills = $9, generative_ui = $10, genui_id = $11, provider_id = $12, icon = $13, description = $14, builtin = $15, builtin_tools = $16, working_dir_mode = $17, tool_execution_mode = $18, thinking_level = $19, starters = $20, updated_at = $21
-            WHERE id = $22
+            UPDATE agents SET name = $1, temperature = $2, top_p = $3, top_k = $4, reasoning = $5, max_tokens = $6, system_prompt = $7, mcp_servers = $8, skills = $9, generative_ui = $10, genui_id = $11, provider_id = $12, default_model_id = $13, default_provider_id = $14, icon = $15, description = $16, builtin = $17, builtin_tools = $18, working_dir_mode = $19, tool_execution_mode = $20, thinking_level = $21, starters = $22, updated_at = $23
+            WHERE id = $24
         "#;
 
         let result = sqlx::query(query)
@@ -144,6 +168,8 @@ impl AgentRepository {
             .bind(agent.generative_ui)
             .bind(&agent.genui_id)
             .bind(&agent.provider_id)
+            .bind(&agent.default_model_id)
+            .bind(&agent.default_provider_id)
             .bind(&agent.icon)
             .bind(&agent.description)
             .bind(agent.builtin)
@@ -159,7 +185,10 @@ impl AgentRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to update agent: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Agent not found: {}", agent.id)));
+            return Err(AppError::not_found(&format!(
+                "Agent not found: {}",
+                agent.id
+            )));
         }
 
         Ok(())
@@ -173,7 +202,10 @@ impl AgentRepository {
             .map_err(|e| AppError::internal_error(&format!("Failed to delete agent: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(AppError::not_found(&format!("Agent not found: {}", agent_id)));
+            return Err(AppError::not_found(&format!(
+                "Agent not found: {}",
+                agent_id
+            )));
         }
 
         Ok(())
@@ -276,6 +308,10 @@ impl AgentRepository {
         let generative_ui: Option<bool> = row.try_get::<Option<bool>, _>("generative_ui")?;
         // SQL NULL -> None (legacy rows / unlinked).
         let genui_id: Option<String> = row.try_get::<Option<String>, _>("genui_id")?;
+        let default_model_id: Option<String> =
+            row.try_get::<Option<String>, _>("default_model_id")?;
+        let default_provider_id: Option<String> =
+            row.try_get::<Option<String>, _>("default_provider_id")?;
 
         // AgentDefinition columns are all decoded NULL-safe for legacy rows.
         let provider_id: Option<String> = row.try_get::<Option<String>, _>("provider_id")?;
@@ -314,6 +350,8 @@ impl AgentRepository {
             skills,
             generative_ui,
             genui_id,
+            default_model_id,
+            default_provider_id,
             provider_id,
             icon,
             description,
@@ -334,6 +372,37 @@ mod tests {
     use super::*;
     use crate::storage::Database;
     use tempfile::tempdir;
+
+    /// An agent with everything empty; the caller sets only what it asserts on.
+    fn blank_agent(name: &str) -> Agent {
+        Agent {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            reasoning: None,
+            max_tokens: None,
+            system_prompt: None,
+            mcp_servers: vec![],
+            skills: vec![],
+            generative_ui: None,
+            genui_id: None,
+            provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
+            icon: None,
+            description: None,
+            builtin: false,
+            builtin_tools: vec![],
+            working_dir_mode: None,
+            tool_execution_mode: None,
+            thinking_level: None,
+            starters: vec![],
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
 
     async fn create_test_db() -> (Database, tempfile::TempDir) {
         let temp_dir = tempdir().unwrap();
@@ -377,6 +446,8 @@ mod tests {
             generative_ui: Some(true),
             genui_id: None,
             provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             icon: None,
             description: None,
             builtin: false,
@@ -455,6 +526,8 @@ mod tests {
             generative_ui: None,
             genui_id: None,
             provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             icon: None,
             description: None,
             builtin: false,
@@ -492,6 +565,8 @@ mod tests {
             generative_ui: None,
             genui_id: None,
             provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             icon: None,
             description: None,
             builtin: false,
@@ -533,6 +608,8 @@ mod tests {
             generative_ui,
             genui_id: None,
             provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             icon: None,
             description: None,
             builtin: false,
@@ -608,5 +685,92 @@ mod tests {
             .collect();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].generative_ui, None);
+    }
+
+    /// The adoption pass is what keeps an upgrade from stranding every agent
+    /// model-less, so its one guarantee — never overwrite a deliberate pick —
+    /// is worth pinning down.
+    #[tokio::test]
+    async fn fill_missing_default_model_leaves_configured_agents_alone() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentRepository::new(Arc::new(db));
+
+        let unset = blank_agent("unset");
+        let configured = Agent {
+            default_model_id: Some("kept".to_string()),
+            default_provider_id: Some("kept-provider".to_string()),
+            ..blank_agent("configured")
+        };
+
+        repo.create_agent(&unset).await.unwrap();
+        repo.create_agent(&configured).await.unwrap();
+
+        // The built-in agents seeded by migration are in here too, and they
+        // should adopt it as well — so count what is actually unset rather than
+        // assuming this test's two rows are the whole table.
+        let expected = repo
+            .list_agents(100, 0)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|agent| agent.default_model_id.is_none())
+            .count() as u64;
+        assert!(expected >= 1, "the fixture has at least one agent to fill");
+
+        let adopted = repo
+            .fill_missing_default_model("adopted", "adopted-provider")
+            .await
+            .unwrap();
+        assert_eq!(adopted, expected, "every agent without a model adopts one");
+
+        let filled = repo.get_agent_by_id(&unset.id).await.unwrap().unwrap();
+        assert_eq!(filled.default_model_id.as_deref(), Some("adopted"));
+        assert_eq!(
+            filled.default_provider_id.as_deref(),
+            Some("adopted-provider")
+        );
+
+        let untouched = repo.get_agent_by_id(&configured.id).await.unwrap().unwrap();
+        assert_eq!(untouched.default_model_id.as_deref(), Some("kept"));
+        assert_eq!(
+            untouched.default_provider_id.as_deref(),
+            Some("kept-provider")
+        );
+
+        // Idempotent: a second pass has nothing left to fill.
+        assert_eq!(
+            repo.fill_missing_default_model("later", "later-provider")
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    /// The pair survives a write/read round trip — the failure this guards is
+    /// adding a column to one SQL statement and forgetting the other two.
+    #[tokio::test]
+    async fn default_model_pair_roundtrips() {
+        let (db, _temp_dir) = create_test_db().await;
+        let repo = AgentRepository::new(Arc::new(db));
+
+        let agent = Agent {
+            default_model_id: Some("gpt-4o".to_string()),
+            default_provider_id: Some("openai".to_string()),
+            ..blank_agent("pair")
+        };
+        repo.create_agent(&agent).await.unwrap();
+
+        let stored = repo.get_agent_by_id(&agent.id).await.unwrap().unwrap();
+        assert_eq!(stored.default_model_id.as_deref(), Some("gpt-4o"));
+        assert_eq!(stored.default_provider_id.as_deref(), Some("openai"));
+
+        let mut cleared = stored;
+        cleared.default_model_id = None;
+        cleared.default_provider_id = None;
+        repo.update_agent(&cleared).await.unwrap();
+
+        let reread = repo.get_agent_by_id(&agent.id).await.unwrap().unwrap();
+        assert_eq!(reread.default_model_id, None);
+        assert_eq!(reread.default_provider_id, None);
     }
 }

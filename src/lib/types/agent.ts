@@ -31,6 +31,13 @@ export interface Agent extends BaseEntity {
   // Linked GenUI (named JSON-Render spec) id.
   genuiId?: string;
   providerId?: string | null;
+  /**
+   * Model a session created from this agent starts on, as a (model, provider)
+   * PAIR — the same model id can exist under several providers. Null leaves the
+   * session model-less and the composer asks.
+   */
+  defaultModelId?: string | null;
+  defaultProviderId?: string | null;
   // Lucide icon name.
   icon?: string | null;
   description?: string | null;

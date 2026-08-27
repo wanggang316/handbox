@@ -2,6 +2,9 @@
  * Default-model resolution shared by every "a persisted model pointer decides
  * what a fresh session runs on" feature (agent sessions, quick action).
  *
+ * The pointer lives on the AGENT DEFINITION every session is instantiated from;
+ * it used to be a single app-wide setting.
+ *
  * A stored default is a `(modelId, providerId)` PAIR: the same model id can
  * exist under several providers, so neither half is meaningful alone. The pair
  * is resolved against the live catalog because a provider can be disabled or a
@@ -14,7 +17,7 @@
 
 import type { ModelWithProvider } from "../types/provider";
 import type { InstantiateAgentSessionRequest } from "../types/agentSession";
-import type { AgentSettings } from "../types/settings";
+import type { Agent } from "../types/agent";
 
 /** Why a stored default cannot produce a runnable model. */
 export type DefaultModelEmptyReason =
@@ -78,25 +81,24 @@ export function resolveDefaultModel(
 }
 
 /**
- * Resolve the app-wide default model (settings > Agent) against the catalog.
+ * Resolve an agent definition's default model against the catalog.
  *
- * The single default every session-creating surface reads: the agent session
- * list, the quick-action overlay and the selection window all start on it.
+ * The default every session-creating surface reads: the session list, the
+ * quick-action overlay and the selection window all instantiate from a
+ * definition, so the definition is what says which model they start on. It
+ * replaced an app-wide setting, which could not say "the coding agent runs on a
+ * big model, the quick translator on a cheap one".
  *
- * @param agentSettings `settingsState.settings?.agent`, or `undefined`/`null`
- *   while settings are still loading.
+ * @param agent the source definition, or `undefined`/`null` while it loads.
  * @param allModels the provider+model catalog (`getAllModels()`).
  */
 export function resolveAgentDefaultModel(
-  agentSettings: AgentSettings | undefined | null,
+  agent: Agent | undefined | null,
   allModels: ModelWithProvider[],
 ): DefaultModelResolution {
   return resolveDefaultModel(
-    agentSettings
-      ? {
-          modelId: agentSettings.defaultModelId,
-          providerId: agentSettings.defaultProviderId,
-        }
+    agent
+      ? { modelId: agent.defaultModelId, providerId: agent.defaultProviderId }
       : null,
     allModels,
   );

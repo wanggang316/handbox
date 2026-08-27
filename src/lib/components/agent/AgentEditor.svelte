@@ -14,11 +14,15 @@
   } from "../ui/table";
   import DefaultRow from "../ui/table/DefaultRow.svelte";
   import IconPicker from "../ui/IconPicker.svelte";
+  import ModelSelectButton from "../settings/ModelSelectButton.svelte";
   import { normalizeError } from "$lib/utils/error";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
   import type { McpServerConfig } from "$lib/types/llm";
   import { agentActions } from "$lib/states/agent.svelte";
+  import { getAllModels, providerActions } from "$lib/states/provider.svelte";
+  import { resolveDefaultModel } from "$lib/utils/defaultModel";
+  import type { ModelWithProvider } from "$lib/types/provider";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
   import { listSkills } from "$lib/api/skill";
@@ -43,6 +47,10 @@
     generativeUi: boolean;
     // Linked GenUI id; empty string means none.
     genuiId: string;
+    // Model a session from this agent starts on; a (model, provider) pair, both
+    // empty when unset.
+    defaultModelId: string;
+    defaultProviderId: string;
     description: string;
     builtinTools: string[];
     workingDirMode: string;
@@ -159,6 +167,11 @@
         .loadServers()
         .catch((e) => console.error("Failed to load MCP servers:", e));
     }
+    if (getAllModels().length === 0) {
+      providerActions
+        .loadProvidersWithModels()
+        .catch((e) => console.error("Failed to load the model catalog:", e));
+    }
     listSkills()
       .then((skills) => {
         availableSkills = skills.filter((s) => s.body !== null);
@@ -174,6 +187,8 @@
     mcpServers: [],
     generativeUi: false,
     genuiId: "",
+    defaultModelId: "",
+    defaultProviderId: "",
     description: "",
     builtinTools: [],
     workingDirMode: "optional",
@@ -197,6 +212,31 @@
   });
 
   let saving = $state(false);
+
+  // Resolved against the live catalog: a provider disabled after the pick makes
+  // the pair dangle, which the row says out loud rather than silently showing
+  // the placeholder as if nothing had been chosen.
+  const defaultModelResolution = $derived(
+    resolveDefaultModel(
+      {
+        modelId: formData.defaultModelId,
+        providerId: formData.defaultProviderId,
+      },
+      getAllModels()
+    )
+  );
+  const selectedDefaultModel = $derived<ModelWithProvider | null>(
+    defaultModelResolution.available ? defaultModelResolution.model : null
+  );
+  const defaultModelDangling = $derived(
+    !defaultModelResolution.available &&
+      defaultModelResolution.reason === "dangling-default"
+  );
+
+  function pickDefaultModel(model: ModelWithProvider) {
+    formData.defaultModelId = model.id;
+    formData.defaultProviderId = model.provider_id;
+  }
 
   function isMcpSelected(serverId: string): boolean {
     return formData.mcpServers.some((s) => s.serverId === serverId);
@@ -305,6 +345,23 @@
         await agentActions.updateAgentField(agent.id, "genuiId", effectiveGenuiId);
       }
 
+      // The model pair travels as one field: half of it names no model.
+      if (
+        (agent.defaultModelId ?? "") !== data.defaultModelId ||
+        (agent.defaultProviderId ?? "") !== data.defaultProviderId
+      ) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "defaultModel",
+          data.defaultModelId && data.defaultProviderId
+            ? {
+                modelId: data.defaultModelId,
+                providerId: data.defaultProviderId,
+              }
+            : null
+        );
+      }
+
       if (
         JSON.stringify(data.skills ?? []) !== JSON.stringify(agent.skills ?? [])
       ) {
@@ -369,6 +426,12 @@
             data.description
           );
         }
+        if (data.defaultModelId && data.defaultProviderId) {
+          await agentActions.updateAgentField(newAgent.id, "defaultModel", {
+            modelId: data.defaultModelId,
+            providerId: data.defaultProviderId,
+          });
+        }
         if (data.builtinTools.length > 0) {
           await agentActions.updateAgentField(
             newAgent.id,
@@ -430,6 +493,8 @@
         mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
         generativeUi: agent.generativeUi ?? false,
         genuiId: agent.genuiId ?? "",
+        defaultModelId: agent.defaultModelId ?? "",
+        defaultProviderId: agent.defaultProviderId ?? "",
         description: agent.description ?? "",
         builtinTools: agent.builtinTools ? [...agent.builtinTools] : [],
         workingDirMode: agent.workingDirMode ?? "optional",
@@ -444,6 +509,8 @@
         mcpServers: [],
         generativeUi: false,
         genuiId: "",
+        defaultModelId: "",
+        defaultProviderId: "",
         description: "",
         builtinTools: [],
         workingDirMode: "optional",
@@ -568,6 +635,28 @@
       </TableGroup>
 
       <TableGroup title={t("agent.form.sectionRuntime")}>
+        <!-- The model a session from this agent starts on. It replaced an
+             app-wide setting, so it sits with the rest of the runtime the
+             definition decides. -->
+        <TableBaseRow
+          label={t("agent.form.defaultModel")}
+          layout="vertical"
+          helpText={t("agent.form.defaultModelHint")}
+        >
+          <div class="mt-2 flex items-center gap-3">
+            <ModelSelectButton
+              selectedModel={selectedDefaultModel}
+              placeholder={t("agent.form.defaultModelNone")}
+              onModelSelect={pickDefaultModel}
+            />
+            {#if defaultModelDangling}
+              <span class="text-xs text-warning">
+                {t("agent.form.defaultModelUnavailable")}
+              </span>
+            {/if}
+          </div>
+        </TableBaseRow>
+
         <SelectRow
           label={t("agent.form.workingDir")}
           options={workingDirModeOptions}
