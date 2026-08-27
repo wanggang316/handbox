@@ -169,6 +169,37 @@ export const settingsZh = {
   "settings.tools.params.namePlaceholder": "参数名，如 city",
   "settings.tools.params.descriptionPlaceholder": "告诉模型这个参数该填什么",
 
+  // GenUI page
+  "settings.genui.description":
+    "可复用的界面模板：绑定到工具后用来渲染调用结果，绑定到 Agent 则作为回复格式的示例。",
+  "settings.genui.new": "新建 GenUI",
+  "settings.genui.count": "{count} 个模板",
+  "settings.genui.empty": "还没有 GenUI 模板",
+  "settings.genui.emptyHint": "新建一个，或在工具详情里直接创建并绑定。",
+  "settings.genui.deleteTitle": "删除 GenUI",
+  "settings.genui.deleteMessage":
+    "确认要删除「{name}」吗？引用它的 Agent 与工具会自动解除关联。此操作不可撤销。",
+  "settings.genui.editor.createTitle": "新建 GenUI",
+  "settings.genui.editor.editTitle": "编辑 GenUI",
+  "settings.genui.editor.name": "名称",
+  "settings.genui.editor.namePlaceholder": "为这份 GenUI 取个名字",
+  "settings.genui.editor.spec": "spec JSON",
+  "settings.genui.editor.preview": "渲染结果",
+  "settings.genui.editor.invalid": "校验未通过",
+  "settings.genui.editor.stage.empty": "空输入",
+  "settings.genui.editor.stage.json": "JSON 语法",
+  "settings.genui.editor.stage.shape": "顶层结构",
+  "settings.genui.editor.stage.components": "组件 / 结构",
+  "settings.genui.editor.stage.props": "组件 props",
+  "settings.genui.editor.stage.references": "引用完整性",
+  "settings.genui.editor.examples": "从示例开始 · 点击载入到左侧编辑（{count}）",
+  "settings.genui.editor.exampleLoaded": "已载入",
+  "settings.genui.editor.previewUnavailable": "预览不可用",
+  "settings.genui.editor.components": "可用组件（{count}）",
+  "settings.genui.editor.saving": "保存中…",
+  "settings.genui.editor.saveFailed": "保存 GenUI 失败",
+  "settings.genui.deleteFailed": "删除 GenUI 失败",
+
   // Skills page
   "settings.skills.title": "技能",
   "settings.skills.description":

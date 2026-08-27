@@ -182,6 +182,39 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.tools.params.descriptionPlaceholder":
     "Tell the model what belongs here",
 
+  // GenUI page
+  "settings.genui.description":
+    "Reusable interface templates: linked to a tool they render its call, linked to an agent they serve as an example of the reply format.",
+  "settings.genui.new": "New GenUI",
+  "settings.genui.count": "{count} templates",
+  "settings.genui.empty": "No GenUI templates yet",
+  "settings.genui.emptyHint":
+    "Create one here, or create and link it straight from a tool's detail.",
+  "settings.genui.deleteTitle": "Delete GenUI",
+  "settings.genui.deleteMessage":
+    "Delete “{name}”? Agents and tools linking to it are unlinked automatically. This cannot be undone.",
+  "settings.genui.editor.createTitle": "New GenUI",
+  "settings.genui.editor.editTitle": "Edit GenUI",
+  "settings.genui.editor.name": "Name",
+  "settings.genui.editor.namePlaceholder": "Name this GenUI",
+  "settings.genui.editor.spec": "spec JSON",
+  "settings.genui.editor.preview": "Preview",
+  "settings.genui.editor.invalid": "Validation failed",
+  "settings.genui.editor.stage.empty": "Empty input",
+  "settings.genui.editor.stage.json": "JSON syntax",
+  "settings.genui.editor.stage.shape": "Top-level shape",
+  "settings.genui.editor.stage.components": "Components / structure",
+  "settings.genui.editor.stage.props": "Component props",
+  "settings.genui.editor.stage.references": "Reference integrity",
+  "settings.genui.editor.examples":
+    "Start from an example · click to load it into the editor ({count})",
+  "settings.genui.editor.exampleLoaded": "Loaded",
+  "settings.genui.editor.previewUnavailable": "Preview unavailable",
+  "settings.genui.editor.components": "Available components ({count})",
+  "settings.genui.editor.saving": "Saving…",
+  "settings.genui.editor.saveFailed": "Failed to save the GenUI",
+  "settings.genui.deleteFailed": "Failed to delete the GenUI",
+
   // Skills page
   "settings.skills.title": "Skills",
   "settings.skills.description":

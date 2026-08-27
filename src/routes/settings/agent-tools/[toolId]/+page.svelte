@@ -28,6 +28,7 @@
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
   import ToolParamsEditor from "$lib/components/settings/ToolParamsEditor.svelte";
   import DetailHeader from "$lib/components/settings/DetailHeader.svelte";
+  import GenUiEditorModal from "$lib/components/genui/GenUiEditorModal.svelte";
   import { uiRegistry } from "$lib/components/genui/jsonui/registry";
   import { explainSpec } from "$lib/components/genui/jsonui/resolveSpec";
   import {
@@ -51,6 +52,7 @@
     BuiltinToolInfo,
     ToolParam,
   } from "$lib/types/toolDefinition";
+  import type { GenUi } from "$lib/types";
 
   const toolId = $derived($page.params.toolId ?? "");
   const isCreating = $derived(toolId === "new");
@@ -241,8 +243,20 @@
     }
   }
 
+  /**
+   * Author the view without leaving the tool. Editing the linked one opens it;
+   * with nothing linked it opens a new one, and saving links it here — which is
+   * the point of doing this in a dialog rather than a route: the tool you were
+   * configuring is still on screen behind it.
+   */
+  let genuiEditorOpen = $state(false);
+
   function openGenui(): void {
-    void goto(form.genuiId ? `/genui/${form.genuiId}` : "/genui/new");
+    genuiEditorOpen = true;
+  }
+
+  function handleGenuiSaved(saved: GenUi): void {
+    if (saved.id) form.genuiId = saved.id;
   }
 
   function renderSchema(parameters: unknown): string {
@@ -494,6 +508,12 @@
     {/if}
   </div>
 </div>
+
+<GenUiEditorModal
+  bind:open={genuiEditorOpen}
+  genui={linkedGenui ?? null}
+  onSaved={handleGenuiSaved}
+/>
 
 <ConfirmModal
   open={deleteOpen}
