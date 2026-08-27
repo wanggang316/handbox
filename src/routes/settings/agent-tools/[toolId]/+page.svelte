@@ -201,7 +201,9 @@
         displayName: form.displayName.trim() || form.name.trim(),
         icon: form.icon,
         description: form.description,
-        parameters: form.parameters,
+        // Snapshot: the parameters cross an IPC boundary, and `$state` hands
+        // out proxies that must not be serialized as-is.
+        parameters: $state.snapshot(form.parameters),
         genuiId: form.genuiId,
       };
       if (isCreating) {
