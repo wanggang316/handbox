@@ -210,6 +210,29 @@ export async function getAgentSessionMessages(
 }
 
 /**
+ * Hook firings recorded in the session's transcript.
+ *
+ * Live firings arrive on `agent_hook_rule_notify`; these are what a reopened
+ * session has left of them. `notice` omits `sessionId` — the entry already
+ * lives in that session's transcript — so the caller stamps it back on.
+ */
+export interface StoredHookNotice {
+  /** Index of the message this firing followed; -1 = before them all. */
+  anchor: number;
+  notice: Omit<HookRuleNotification, "sessionId">;
+}
+
+export async function getAgentSessionHookNotices(
+  sessionId: UUID,
+): Promise<StoredHookNotice[]> {
+  const list = await apiCall<StoredHookNotice[]>(
+    "agent_session_hook_notices",
+    { sessionId },
+  );
+  return list || [];
+}
+
+/**
  * Starts a streaming run; returns immediately. Output arrives asynchronously
  * via `agent_stream_event` / `agent_stream_closed` / `agent_stream_error`.
  * `forcedSkills`: skill bodies injected into this turn's system prompt in list

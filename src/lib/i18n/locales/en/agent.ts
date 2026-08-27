@@ -86,6 +86,8 @@ export const agentEn: Record<keyof typeof agentZh, string> = {
   "agent.timeline.copy": "Copy",
   "agent.timeline.copied": "Copied",
   "agent.timeline.quoteReply": "Quote",
+  "agent.timeline.injectedContext": "Injected context",
+  "agent.timeline.injectedContinuation": "Asked to continue",
   "agent.timeline.forkFromHere": "New session from here",
   "agent.timeline.forkTitle": "New Session from Here",
   "agent.timeline.forkNameLabel": "Session name",

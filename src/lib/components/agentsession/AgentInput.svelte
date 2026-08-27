@@ -466,7 +466,7 @@
   // Clear the typed /query from the textarea.
   function clearSlashQuery() {
     input = "";
-    adjustTextareaHeight();
+    void adjustTextareaHeight();
   }
 
   // Return focus to the textarea with the caret at the end.
@@ -476,7 +476,7 @@
     textareaRef.focus();
     const end = textareaRef.value.length;
     textareaRef.setSelectionRange(end, end);
-    adjustTextareaHeight();
+    void adjustTextareaHeight();
   }
 
   async function selectSkill(skill: SkillInfo) {
@@ -513,7 +513,11 @@
       : [];
   }
 
-  function adjustTextareaHeight() {
+  // Sizing measures scrollHeight, so it has to run after Svelte flushed `input`
+  // into the DOM: called synchronously right after clearing the text it would
+  // still measure the sent message and keep the box at its expanded height.
+  async function adjustTextareaHeight() {
+    await tick();
     if (textareaRef) {
       textareaRef.style.height = "auto";
       const scrollHeight = textareaRef.scrollHeight;
@@ -615,7 +619,7 @@
   }
 
   function handleInput(event: Event) {
-    adjustTextareaHeight();
+    void adjustTextareaHeight();
     const inputType = (event as InputEvent).inputType;
     const fromPaste =
       inputType === "insertFromPaste" || inputType === "insertFromDrop";
@@ -778,7 +782,7 @@
       resetAttachments();
       removeQuote();
       input = "";
-      adjustTextareaHeight();
+      void adjustTextareaHeight();
       try {
         await steerAgentRun(session.id, text);
       } catch (error) {
@@ -824,7 +828,7 @@
     input = "";
     attachments = [];
     removeQuote();
-    adjustTextareaHeight();
+    void adjustTextareaHeight();
     try {
       // A draft becomes a real session here, on the first send — this is the
       // only place "New chat" writes a row. The URL follows so the timeline and
@@ -856,7 +860,7 @@
       if (quoted !== null) {
         agentQuoteStore.set(session.id, quoted);
       }
-      adjustTextareaHeight();
+      void adjustTextareaHeight();
       modelPrompt =
         error instanceof Error ? error.message : t("agent.input.runFailed");
     }

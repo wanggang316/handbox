@@ -212,7 +212,12 @@ pub fn build_agent_session(
         hook_rules = config.hook_rules.len(),
         "[build_agent_session] hook rules loaded"
     );
-    if rules.has_extension_rules() {
+    // Approval rules ride the emitter, not the chain, but registering for them
+    // too is what gets `on_load` called — and with it the session sink the
+    // extension records firings through. Without this an approval-only session
+    // reports its firings and persists none of them. The chain cost is nil:
+    // the before/after hooks find no rule and return immediately.
+    if rules.has_extension_rules() || rules.has_approval_rules() {
         session.register_extension(rules.clone());
     }
 

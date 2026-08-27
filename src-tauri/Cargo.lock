@@ -2624,8 +2624,8 @@ dependencies = [
 
 [[package]]
 name = "hand-agent"
-version = "0.4.2"
-source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.2#8aadfda087999c399436584c22441835855ac745"
+version = "0.4.4"
+source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.4#3e25beb3c4d4df6a3094c5b6e3441bf45cc921f5"
 dependencies = [
  "async-stream",
  "futures",
@@ -2642,8 +2642,8 @@ dependencies = [
 
 [[package]]
 name = "hand-coding-agent"
-version = "0.4.2"
-source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.2#8aadfda087999c399436584c22441835855ac745"
+version = "0.4.4"
+source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.4#3e25beb3c4d4df6a3094c5b6e3441bf45cc921f5"
 dependencies = [
  "arboard",
  "async-stream",
@@ -2686,8 +2686,8 @@ dependencies = [
 
 [[package]]
 name = "hand-tui"
-version = "0.4.2"
-source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.2#8aadfda087999c399436584c22441835855ac745"
+version = "0.4.4"
+source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.4#3e25beb3c4d4df6a3094c5b6e3441bf45cc921f5"
 dependencies = [
  "base64 0.22.1",
  "crossterm",
@@ -3925,8 +3925,8 @@ dependencies = [
 
 [[package]]
 name = "model"
-version = "0.4.2"
-source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.2#8aadfda087999c399436584c22441835855ac745"
+version = "0.4.4"
+source = "git+https://github.com/wanggang316/hand-ai.git?tag=v0.4.4#3e25beb3c4d4df6a3094c5b6e3441bf45cc921f5"
 dependencies = [
  "async-stream",
  "async-trait",

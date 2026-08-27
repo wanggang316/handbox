@@ -47,6 +47,7 @@
   import MessageNavRail, { type MessageNavItem } from "./MessageNavRail.svelte";
   import SelectionReplyButton from "./SelectionReplyButton.svelte";
   import { splitQuote } from "./quote";
+  import { parseInjectedMessage, type InjectedMessage } from "./injectedMessage";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -287,6 +288,21 @@
       default:
         return action;
     }
+  }
+
+  function injectedKindLabel(kind: InjectedMessage["kind"]): string {
+    return kind === "continuation"
+      ? t("agent.timeline.injectedContinuation")
+      : t("agent.timeline.injectedContext");
+  }
+
+  // Text a hook put into the transcript as a user message; null for a message
+  // the reader actually sent. Read twice per row (render + navigation), so it
+  // stays a plain call on an already-cheap parse rather than a cached map.
+  function injectedBlocks(message: AgentMessage): InjectedMessage[] | null {
+    return message.role === "user"
+      ? parseInjectedMessage(userText(message))
+      : null;
   }
 
 
@@ -689,7 +705,10 @@
     const previousCount = seenCount;
     seenCount = messages.length;
     for (let i = messages.length - 1; i >= previousCount; i -= 1) {
-      if (messages[i].role === "user") {
+      // Pin to what the reader sent. A hook's injection arrives as a user
+      // message too, and pinning to it would scroll the reply they are waiting
+      // for out from under them.
+      if (messages[i].role === "user" && !injectedBlocks(messages[i])) {
         void pinTo(i);
         scheduleActiveNav();
         return;
@@ -731,13 +750,17 @@
     const messages = runState.messages;
     for (let i = 0; i < messages.length; i += 1) {
       const message = messages[i];
-      if (message.role !== "user") {
+      // Questions only: a hook's injection is a user message the reader never
+      // asked, so it earns no stop on the rail.
+      if (message.role !== "user" || injectedBlocks(message)) {
         continue;
       }
       let answer = "";
       for (let j = i + 1; j < messages.length && !answer; j += 1) {
         const next = messages[j];
-        if (next.role === "user") {
+        // A hook resuming the turn does not end the answer: what follows is
+        // still the reply to this question.
+        if (next.role === "user" && !injectedBlocks(next)) {
           break;
         }
         if (next.role === "assistant") {
@@ -836,6 +859,12 @@
   {/if}
 {/snippet}
 
+{#snippet hookNotices(anchor: number)}
+  {#each hookNoticesAfter(anchor) as entry}
+    {@render hookNoticeRow(entry.notice)}
+  {/each}
+{/snippet}
+
 {#snippet hookNoticeRow(notice: HookRuleNotification)}
   {@const tone =
     notice.outcome === "denied" || notice.outcome === "failed"
@@ -865,6 +894,39 @@
   {/if}
 {/snippet}
 
+<!-- Text a hook injected as a user message. It reads like a hook firing rather
+     than a bubble: nobody typed it, and shown as the reader's own words it
+     makes the reply that follows look like an answer to a question they never
+     asked (see injectedMessage.ts). The body stays behind the disclosure like
+     a command's execution capture — it is written for the model, and spelled
+     out in full it competes with the conversation for attention. -->
+{#snippet injectedRow(block: InjectedMessage)}
+  <details class="hook-notice group px-3 py-1.5">
+    <summary
+      class="flex cursor-pointer list-none items-center gap-2 text-xs text-base-content/70"
+    >
+      {@render injectedIdentity(block)}
+      <ChevronDown
+        size={12}
+        class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
+      />
+    </summary>
+    <pre
+      class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{block.text}</pre>
+  </details>
+{/snippet}
+
+{#snippet injectedIdentity(block: InjectedMessage)}
+  <Anchor size={12} class="shrink-0" />
+  <span class="shrink-0 text-base-content/50">Hooks</span>
+  <span class="shrink-0 font-medium">{block.source}</span>
+  <span
+    class="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-base-content/10 text-base-content/70"
+  >
+    {injectedKindLabel(block.kind)}
+  </span>
+{/snippet}
+
 <!-- The scroller sits in a positioned shell so the nav rail can float in the
      free space beside the centred column without taking layout from it. -->
 <div class="relative flex min-h-0 flex-1 flex-col">
@@ -890,7 +952,17 @@
            cards key by toolCallId so their state never shifts with the index. -->
       {#each visibleMessages as message, offset (windowStart + offset)}
         {@const i = windowStart + offset}
-        {#if message.role === "user"}
+        {#if message.role === "user" && injectedBlocks(message)}
+          {@const blocks = injectedBlocks(message) ?? []}
+          <!-- Anchored like any other row so scroll restore still finds it, but
+               without data-question: the rail lists what the reader asked, and
+               a hook's injection is not one of their questions. -->
+          <div data-message-index={i} data-no-quote>
+            {#each blocks as block, blockIndex (blockIndex)}
+              {@render injectedRow(block)}
+            {/each}
+          </div>
+        {:else if message.role === "user"}
           {@const parts = splitQuote(userText(message))}
           <!-- data-message-index anchors the reader's position across a teardown
                (see scrollMemory): the row, not a pixel offset, is what survives
@@ -1003,6 +1075,12 @@
                 </div>
               {/if}
 
+              <!-- Hooks that fired on this turn, above the actions: they belong
+                   to the reply, and the action row is the message's footer —
+                   trailing them after it left them floating between two
+                   messages with nothing saying which one they came from. -->
+              {@render hookNotices(i)}
+
               <!-- Message actions. Usage is an icon rather than a running total:
                    the numbers matter when asked for, not on every turn. -->
               {#if assistantText(message) || hasUsage(message)}
@@ -1071,10 +1149,13 @@
              card presents them inside the assistant turn, avoiding a detached
              tool-result block. -->
 
-        <!-- Hook firings anchored right after this message, in arrival order. -->
-        {#each hookNoticesAfter(i) as entry}
-          {@render hookNoticeRow(entry.notice)}
-        {/each}
+        <!-- Hook firings anchored right after this message, in arrival order.
+             A finished assistant turn renders its own inside the message, above
+             the action row; this covers the rest — a prompt rule on a user
+             message, and the turn still streaming in the LIVE view below. -->
+        {#if message.role !== "assistant" || i === liveAssistantIndex}
+          {@render hookNotices(i)}
+        {/if}
       {/each}
 
       <!-- LIVE streaming view: growing thinking block + streaming text. -->

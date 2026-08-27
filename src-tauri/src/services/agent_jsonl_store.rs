@@ -442,6 +442,93 @@ pub fn load_transcript(
     Ok(Some(messages_to_rows(session_id, &messages)?))
 }
 
+/// A hook firing restored from the transcript, positioned for the timeline.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredHookNotice {
+    /// Index into the transcript this firing follows, matching the `seq` of
+    /// the rows [`load_transcript`] returns. `-1` means it preceded them all.
+    pub anchor: i32,
+    /// The recorded facts, in the shape the live notification uses.
+    pub notice: serde_json::Value,
+}
+
+/// Read the hook firings recorded in a session's transcript, or `None` when no
+/// JSONL file exists.
+///
+/// The host keeps live firings in memory and drops them on reload, so these
+/// `Custom` entries are what a reopened session has left (see
+/// `agent_hook_rules::HOOK_RULE_ENTRY_TYPE`).
+///
+/// Anchors are counted the way [`SessionManager::build_context`] counts
+/// messages — starting after the latest compaction, so a firing whose messages
+/// were compacted away drops out with them. The count treats every
+/// `CustomMessage` as one message, which is exact for HandBox (it writes plain
+/// `Custom` entries only) and approximate for a transcript that some other
+/// extension wrote; the anchor is clamped to the transcript either way, so the
+/// worst case is a row placed a little off rather than one that is lost.
+///
+/// Precision is per-turn, not per-message: the host drains queued writes after
+/// the turn's own messages, so several firings from one turn share the anchor
+/// of its last message. A firing that carries a `callId` is placed exactly
+/// regardless — the timeline attaches those to the tool card by id.
+pub fn load_hook_notices(
+    base_dir: &Path,
+    cwd: &Path,
+    session_id: &str,
+    entry_type: &str,
+) -> Result<Option<Vec<StoredHookNotice>>, AppError> {
+    let path = session_path(base_dir, cwd, session_id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let manager = SessionManager::open(&path)
+        .map_err(|e| AppError::internal_error(&format!("failed to open session jsonl: {e}")))?;
+
+    let entries = manager.entries();
+    // Mirror build_context: everything before the latest compaction's first
+    // kept entry is out of the transcript, and so are the firings among it.
+    let start_id = entries.iter().rev().find_map(|entry| match entry {
+        SessionEntry::Compaction {
+            first_kept_entry_id,
+            ..
+        } => Some(first_kept_entry_id.clone()),
+        _ => None,
+    });
+    let mut found_start = start_id.is_none();
+
+    let limit = manager.build_context().len() as i32;
+    let mut seq: i32 = 0;
+    let mut notices = Vec::new();
+    for entry in entries {
+        match entry {
+            SessionEntry::Message { id, .. } | SessionEntry::CustomMessage { id, .. } => {
+                if !found_start {
+                    if Some(id.as_str()) == start_id.as_deref() {
+                        found_start = true;
+                    } else {
+                        continue;
+                    }
+                }
+                seq += 1;
+            }
+            SessionEntry::Custom {
+                custom_type, data, ..
+            } if custom_type == entry_type => {
+                if !found_start {
+                    continue;
+                }
+                notices.push(StoredHookNotice {
+                    anchor: seq.min(limit) - 1,
+                    notice: data.clone().unwrap_or(serde_json::Value::Null),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(Some(notices))
+}
+
 /// Append a session label (display name); the most recent label wins on
 /// read-back. A rename must come through here, not only through the SQLite
 /// `name`, or a stale JSONL label would visually override it.
@@ -583,6 +670,80 @@ mod tests {
 
     fn user_msg(text: &str) -> Message {
         Message::User(UserMessage::new_text(text.to_string()))
+    }
+
+    const HOOK_TYPE: &str = "handbox.hook_rule_match";
+
+    fn firing(rule: &str) -> serde_json::Value {
+        serde_json::json!({ "ruleName": rule, "outcome": "ran" })
+    }
+
+    /// A firing is anchored to the message it followed, so the timeline can put
+    /// it back where it happened rather than at the end of the transcript.
+    #[test]
+    fn load_hook_notices_anchors_each_firing_to_the_message_it_followed() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-hooks";
+
+        {
+            let mut mgr = open_resumed(base.path(), cwd.path(), id);
+            mgr.append_custom(HOOK_TYPE, Some(firing("before-any"))).unwrap();
+            mgr.append_message(user_msg("first")).unwrap();
+            mgr.append_message(user_msg("second")).unwrap();
+            mgr.append_custom(HOOK_TYPE, Some(firing("after-second"))).unwrap();
+            // Another extension's entry shares the transcript and must not be
+            // mistaken for a hook firing.
+            mgr.append_custom("something.else", Some(firing("not-ours"))).unwrap();
+        }
+
+        let notices = load_hook_notices(base.path(), cwd.path(), id, HOOK_TYPE)
+            .unwrap()
+            .expect("jsonl exists");
+
+        assert_eq!(notices.len(), 2, "only the hook entries are read");
+        // -1: it preceded every message.
+        assert_eq!(notices[0].anchor, -1);
+        assert_eq!(notices[0].notice["ruleName"], "before-any");
+        assert_eq!(notices[1].anchor, 1);
+        assert_eq!(notices[1].notice["ruleName"], "after-second");
+    }
+
+    /// Compaction drops the messages a firing was anchored to, so the firing
+    /// goes with them rather than re-anchoring onto unrelated messages.
+    #[test]
+    fn load_hook_notices_drops_firings_compacted_away() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        let id = "sess-hooks-compacted";
+
+        {
+            let mut mgr = open_resumed(base.path(), cwd.path(), id);
+            mgr.append_message(user_msg("old")).unwrap();
+            mgr.append_custom(HOOK_TYPE, Some(firing("in-the-past"))).unwrap();
+            let kept = mgr.append_message(user_msg("kept")).unwrap();
+            mgr.append_compaction("rolled-up history", &kept).unwrap();
+            mgr.append_custom(HOOK_TYPE, Some(firing("still-here"))).unwrap();
+        }
+
+        let notices = load_hook_notices(base.path(), cwd.path(), id, HOOK_TYPE)
+            .unwrap()
+            .expect("jsonl exists");
+
+        assert_eq!(notices.len(), 1, "the compacted-away firing is gone");
+        assert_eq!(notices[0].notice["ruleName"], "still-here");
+        // Anchored to the one surviving message, which is index 0 post-compaction.
+        assert_eq!(notices[0].anchor, 0);
+    }
+
+    /// A session with no JSONL is a legacy one: no file, no firings, no error.
+    #[test]
+    fn load_hook_notices_returns_none_without_a_jsonl() {
+        let base = TempDir::new().unwrap();
+        let cwd = TempDir::new().unwrap();
+        assert!(load_hook_notices(base.path(), cwd.path(), "nope", HOOK_TYPE)
+            .unwrap()
+            .is_none());
     }
 
     fn assistant_with_tool_and_thinking(text: &str) -> Message {

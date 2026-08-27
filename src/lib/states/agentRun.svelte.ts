@@ -33,8 +33,10 @@ import type {
 import {
   listenToAgentStreamEvents,
   getAgentSessionMessages,
+  getAgentSessionHookNotices,
   abortAgentRun,
 } from "$lib/api/agentSession";
+import type { StoredHookNotice } from "$lib/api/agentSession";
 import { agentSessionActions } from "$lib/states/agentSession.svelte";
 
 /**
@@ -705,8 +707,13 @@ class AgentRunStore {
     // the restore stands down and lets the live state be the record.
     const runningBefore = this.states[sessionId]?.isRunning ?? false;
     try {
-      const rows: AgentSessionMessage[] =
-        await getAgentSessionMessages(sessionId);
+      // Both halves of the transcript, fetched together: the messages a hook
+      // injected and the record of what it did are one story.
+      const [rows, storedNotices]: [AgentSessionMessage[], StoredHookNotice[]] =
+        await Promise.all([
+          getAgentSessionMessages(sessionId),
+          getAgentSessionHookNotices(sessionId),
+        ]);
       const messages: AgentMessage[] = [];
       for (const row of rows) {
         const parsed = this.parseTranscriptRow(row);
@@ -722,9 +729,13 @@ class AgentRunStore {
         return;
       }
       state.messages = messages;
-      // Notices anchor to live message indices; a wholesale restore renumbers
-      // them, so stale entries are dropped rather than mis-anchored.
-      state.hookNotices = [];
+      // Anchors come back counted against this same transcript, so they land
+      // where the firing happened. The session id is stamped back on: the
+      // stored entry omits it, having lived in that session's file all along.
+      state.hookNotices = storedNotices.map((entry) => ({
+        anchor: entry.anchor,
+        notice: { ...entry.notice, sessionId },
+      }));
       // First restore complete: the session page switches from the spinner to
       // real content (or the empty state for an empty session).
       state.hydrated = true;
