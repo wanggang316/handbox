@@ -357,7 +357,7 @@
           </TableBaseRow>
         </TableGroup>
 
-        <TableGroup title={t("settings.tools.detail.params")}>
+        <TableGroup>
           <TableBaseRow
             layout="vertical"
             label={t("settings.tools.detail.params")}
@@ -370,7 +370,7 @@
           </TableBaseRow>
         </TableGroup>
 
-        <TableGroup title={t("settings.tools.detail.view")}>
+        <TableGroup>
           <TableBaseRow
             layout="vertical"
             label={t("settings.tools.detail.view")}

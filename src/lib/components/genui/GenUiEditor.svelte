@@ -70,7 +70,15 @@
   }
 
   // Validate through the resolveSpec pipeline; failures report stage + reason.
-  const result = $derived(explainSpec(specInput));
+  //
+  // Bindings are allowed here because this is the authoring surface for a
+  // custom tool's view, where `{ $state: "/city" }` is the whole point. The
+  // strict pass still guards the place it matters — a model's reply in the
+  // timeline. A spec linked to an agent instead is only ever injected as
+  // example text, never rendered, so a binding in one is inert rather than
+  // wrong. The preview below has no state to read, so a bound prop shows
+  // blank; the tool detail page previews it with sample arguments.
+  const result = $derived(explainSpec(specInput, { allowBindings: true }));
   const spec = $derived(result.ok ? result.spec : null);
   const error = $derived(result.ok ? null : result);
   const canSave = $derived(name.trim().length > 0 && result.ok && !saving);
