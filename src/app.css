@@ -346,6 +346,18 @@ html.sidebar-vibrancy {
   color: var(--base-content);
 }
 
+/* A markdown block's box hugs its own text, so the layout around it owns the
+   gap above and below. Without this the first paragraph's margin stacked on top
+   of the surrounding rhythm and the last one's on the bottom, which is why a
+   hook row sat further from the reply below it than from the card above it. */
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
 .markdown-content h1 {
   font-size: 1.5rem;
   font-weight: 700;

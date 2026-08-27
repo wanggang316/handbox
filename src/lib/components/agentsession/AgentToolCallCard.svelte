@@ -153,7 +153,9 @@
 {/snippet}
 
 {#if expandable}
-  <details class="tool-call group px-3 py-1.5">
+  <!-- No horizontal padding: the row shares the transcript column's left edge
+       with the reply text, the cards and the hook rows it sits between. -->
+  <details class="tool-call group py-1.5">
     <summary
       class="flex cursor-pointer list-none items-center gap-2 text-xs transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] {isError
         ? 'text-error'
@@ -202,7 +204,7 @@
   </details>
 {:else}
   <div
-    class="flex items-center gap-2 px-3 py-1.5 text-xs {isError
+    class="flex items-center gap-2 py-1.5 text-xs {isError
       ? 'text-error'
       : 'text-base-content/70'}"
     title={toolCall.toolName}
