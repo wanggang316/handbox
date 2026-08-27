@@ -1,12 +1,9 @@
 <script lang="ts">
-  import {
-    Loader2,
-    CheckCircle2,
-    XCircle,
-    ChevronRight,
-    ChevronDown,
-  } from "@lucide/svelte";
+  import { Loader2, XCircle, ChevronDown } from "@lucide/svelte";
   import { renderCodeBlock } from "$lib/utils/code";
+  import { parseMcpToolName, toolArgSummary } from "$lib/utils/toolCall";
+  import { resolveToolIcon } from "$lib/constants/agentTools";
+  import { mcpState } from "$lib/states/mcp.svelte";
   import { t } from "$lib/i18n";
   import type { ToolCallView } from "$lib/states/agentRun.svelte";
   import type { ToolResultContent } from "$lib/types/agentSession";
@@ -14,46 +11,55 @@
   interface Props {
     // Normalized tool-call view-model: live (tool_execution events) and
     // restored (committed toolcall + toolResult) sources share this shape, so
-    // the same call renders as the same card either way.
+    // the same call renders as the same row either way.
     toolCall: ToolCallView;
   }
 
   let { toolCall }: Props = $props();
 
-  let expanded = $state(false);
+  const ToolIcon = $derived(resolveToolIcon(toolCall.toolName));
 
-  function toggle() {
-    expanded = !expanded;
-  }
+  // An MCP tool registers as `mcp__<serverId>__<tool>`: the row shows the tool
+  // under its own name, prefixed by the server it came from (two servers can
+  // both expose a `search`). The id is a uuid, so the label comes from the
+  // server list — absent until MCP settings have been visited this session,
+  // which drops the prefix rather than showing a uuid.
+  const mcp = $derived(parseMcpToolName(toolCall.toolName));
+  const serverLabel = $derived.by(() => {
+    if (!mcp) return "";
+    const server = mcpState.servers.find((s) => s.id === mcp.serverId);
+    return server?.displayName || server?.name || "";
+  });
+  const displayName = $derived(
+    mcp?.tool || toolCall.toolName || t("agent.toolCall.fallbackName"),
+  );
 
+  // What the call operates on, on the collapsed row: the path it reads, the
+  // command it runs. The expanded body carries the arguments in full.
+  const summary = $derived(toolArgSummary(toolCall.args));
+
+  const isError = $derived(toolCall.status === "error");
+
+  // Running and failed are the states worth a word; a completed call says so by
+  // having a result to open, and stays a quiet line.
   const statusDisplay = $derived.by(() => {
     switch (toolCall.status) {
       case "executing":
         return {
           text: t("agent.toolCall.executing"),
           icon: Loader2,
-          color: "text-info",
           animate: true,
-        };
-      case "completed":
-        return {
-          text: t("agent.toolCall.completed"),
-          icon: CheckCircle2,
-          color: "text-success",
-          animate: false,
         };
       case "error":
         return {
           text: t("agent.toolCall.error"),
           icon: XCircle,
-          color: "text-error",
           animate: false,
         };
+      default:
+        return null;
     }
   });
-
-  const StatusIcon = $derived(statusDisplay.icon);
-  const isError = $derived(toolCall.status === "error");
 
   // Render args (any shape) as a formatted JSON code block.
   function renderArgs(args: unknown): string {
@@ -99,53 +105,59 @@
     return `data:${block.mimeType};base64,${block.data}`;
   }
 
+  const hasArgs = $derived(
+    toolCall.args !== undefined && toolCall.args !== null,
+  );
   const hasResult = $derived(textResult.length > 0 || imageResults.length > 0);
+  // Nothing behind the disclosure → a plain line, same as a hook notice with no
+  // execution capture.
+  const expandable = $derived(hasArgs || hasResult);
 </script>
 
-<div
-  class={`rounded-lg border bg-base-300 text-xs transition-colors ${
-    isError
-      ? "border-error/40 hover:bg-error/10"
-      : "border-[var(--hairline)] hover:bg-base-300/80"
-  }`}
->
-  <div class="flex items-center justify-between gap-2">
-    <button
-      type="button"
-      class="flex flex-1 items-center gap-2 text-left p-2"
-      onclick={toggle}
+<!-- A tool call reads as one line in the transcript — icon, name, subject,
+     state — matching the hook-notice rows it sits between. The arguments and
+     the result stay behind the native disclosure. -->
+{#snippet identity()}
+  <ToolIcon size={12} class="shrink-0" />
+  {#if serverLabel}
+    <span class="shrink-0 text-base-content/50">{serverLabel}</span>
+  {/if}
+  <span class="shrink-0 font-medium">{displayName}</span>
+  {#if summary}
+    <span class="truncate font-mono text-base-content/50">{summary}</span>
+  {/if}
+  {#if statusDisplay}
+    {@const StatusIcon = statusDisplay.icon}
+    <span
+      class="flex shrink-0 items-center gap-1 {isError
+        ? 'text-error'
+        : 'text-info'}"
     >
-      {#if expanded}
-        <ChevronDown size={14} class="shrink-0 text-base-content" />
-      {:else}
-        <ChevronRight size={14} class="shrink-0 text-base-content" />
-      {/if}
+      <StatusIcon size={12} class={statusDisplay.animate ? "animate-spin" : ""} />
+      <span>{statusDisplay.text}</span>
+    </span>
+  {/if}
+{/snippet}
 
-      <div class="flex flex-col gap-1">
-        <div class="text-sm text-base-content">
-          {toolCall.toolName || t("agent.toolCall.fallbackName")}
-        </div>
-      </div>
-    </button>
+{#if expandable}
+  <details class="tool-call group px-3 py-1.5">
+    <summary
+      class="flex cursor-pointer list-none items-center gap-2 text-xs transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] {isError
+        ? 'text-error'
+        : 'text-base-content/70 hover:text-base-content'}"
+      title={toolCall.toolName}
+    >
+      {@render identity()}
+      <ChevronDown
+        size={12}
+        class="shrink-0 opacity-60 transition-transform group-open:rotate-180"
+      />
+    </summary>
 
-    <div class="flex items-center justify-end gap-2 px-2 py-1">
-      <span
-        class={`text-[10px] ${statusDisplay.color} flex items-center gap-1`}
-      >
-        <StatusIcon
-          size={12}
-          class={statusDisplay.animate ? "animate-spin" : ""}
-        />
-        <span>{statusDisplay.text}</span>
-      </span>
-    </div>
-  </div>
-
-  {#if expanded}
     <div
-      class="p-3 space-y-2 rounded-b-lg text-[11px] leading-relaxed max-h-80 overflow-auto border-t border-[var(--hairline)]"
+      class="mt-1.5 ml-5 max-h-80 space-y-2 overflow-auto text-[11px] leading-relaxed"
     >
-      {#if toolCall.args !== undefined && toolCall.args !== null}
+      {#if hasArgs}
         <div>
           <div class="mb-1 text-[10px] text-base-content/70">Request</div>
           <div class="flex-1 break-words">
@@ -162,7 +174,7 @@
             <img
               src={imageSrc(image)}
               alt={t("agent.toolCall.resultImageAlt")}
-              class="max-w-full h-auto rounded-md mb-2"
+              class="mb-2 h-auto max-w-full rounded-md"
             />
           {/each}
 
@@ -174,5 +186,22 @@
         </div>
       {/if}
     </div>
-  {/if}
-</div>
+  </details>
+{:else}
+  <div
+    class="flex items-center gap-2 px-3 py-1.5 text-xs {isError
+      ? 'text-error'
+      : 'text-base-content/70'}"
+    title={toolCall.toolName}
+  >
+    {@render identity()}
+  </div>
+{/if}
+
+<style>
+  /* WebKit draws its own disclosure marker on <summary>; the row supplies its
+     own chevron instead. */
+  .tool-call summary::-webkit-details-marker {
+    display: none;
+  }
+</style>

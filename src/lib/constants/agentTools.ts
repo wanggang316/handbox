@@ -22,8 +22,11 @@ import {
   AppWindow,
   MessageCircleQuestionMark,
   Zap,
+  Wrench,
 } from "@lucide/svelte";
+import McpIcon from "$lib/components/ui/McpIcon.svelte";
 import type { MessageKey } from "$lib/i18n";
+import { parseMcpToolName } from "$lib/utils/toolCall";
 import { BUILTIN_TOOL_IDS } from "./builtinToolIds";
 
 export interface BuiltinTool {
@@ -110,6 +113,29 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     requiresWorkingDir: false,
   },
 ];
+
+/**
+ * Icon for a tool with no entry of its own — an MCP server's tools carry the
+ * MCP mark, anything else (a tool this build doesn't know) a generic wrench.
+ * Every tool call therefore renders with a glyph, never a bare row.
+ */
+export const DEFAULT_TOOL_ICON: typeof IconType = Wrench;
+
+const ICON_BY_TOOL_ID = new Map<string, typeof IconType>(
+  BUILTIN_TOOLS.map((tool) => [tool.id, tool.icon]),
+);
+
+/**
+ * Icon for any tool name that can reach the UI: a built-in id, an
+ * `mcp__<serverId>__<tool>` name, or an unknown one. Callers pass the raw
+ * registration name — the same string the backend and the timeline use.
+ */
+export function resolveToolIcon(toolName: string): typeof IconType {
+  const builtin = ICON_BY_TOOL_ID.get(toolName);
+  if (builtin) return builtin;
+  if (parseMcpToolName(toolName)) return McpIcon;
+  return DEFAULT_TOOL_ICON;
+}
 
 /**
  * All tool ids in canonical order — the default enabled set (everything on).

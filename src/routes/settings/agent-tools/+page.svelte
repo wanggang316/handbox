@@ -12,7 +12,11 @@
   import { settingsState, providerActions } from "$lib/states";
   import { getAllModels } from "$lib/states/provider.svelte";
   import { resolveAgentDefaultModel } from "$lib/utils/defaultModel";
-  import { BUILTIN_TOOLS, BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
+  import {
+    BUILTIN_TOOLS,
+    BUILTIN_TOOL_IDS,
+    resolveToolIcon,
+  } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
   import type { ModelWithProvider } from "$lib/types/provider";
 
@@ -48,6 +52,11 @@
     { id: "render_app", label: t("agent.tool.render_app"), desc: t("settings.agentTools.renderAppDesc") },
     { id: "ask_question", label: t("agent.tool.ask_question"), desc: t("settings.agentTools.askQuestionDesc") },
   ]);
+
+  // Same glyphs the timeline puts on a tool call, so a row here and a call
+  // there are recognisably the same tool.
+  const webSearchIcon = resolveToolIcon("web_search");
+  const skillIcon = resolveToolIcon("skill");
 
   function webSearchSnapshot(provider: string, apiKey: string): string {
     return JSON.stringify({ provider, apiKey });
@@ -214,6 +223,7 @@
     {#each codingAgentTools as tool (tool.id)}
       <SwitchRow
         label={t(tool.labelKey)}
+        icon={tool.icon}
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
       />
@@ -229,6 +239,7 @@
   <TableGroup>
     <SwitchRow
       label={t("agent.tool.web_search")}
+      icon={webSearchIcon}
       checked={isEnabled("web_search")}
       onChange={(checked) => handleToggle("web_search", checked)}
     />
@@ -258,6 +269,7 @@
     {#each uiExtensionTools as tool (tool.id)}
       <SwitchRow
         label={tool.label}
+        icon={resolveToolIcon(tool.id)}
         description={tool.desc}
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
@@ -274,6 +286,7 @@
   <TableGroup>
     <SwitchRow
       label={t("agent.tool.skill")}
+      icon={skillIcon}
       description={t("settings.agentTools.skillDesc")}
       checked={isEnabled("skill")}
       onChange={(checked) => handleToggle("skill", checked)}
