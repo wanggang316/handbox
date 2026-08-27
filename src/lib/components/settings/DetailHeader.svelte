@@ -2,17 +2,11 @@
   /**
    * Sticky header for a settings detail page (a provider, a custom tool).
    *
-   * It exists because two things conspired against the plain back button the
-   * detail pages used to carry:
-   *
-   * - The window's drag region is a FIXED 50px strip across the top with
-   *   `pointer-events: auto` and z-index 9999 (see `TitleBar`), so anything
-   *   inside it is unclickable. The `pt-14` lead-in puts the controls below it
-   *   — the same 56px the shared `PageHeader` already leaves — rather than
-   *   fighting it with a higher z-index.
-   * - The settings layout owns the scroller, so a header that merely sat at the
-   *   top of the page scrolled away with the content. `sticky` pins it there,
-   *   and the blurred background is what the page scrolls under.
+   * It exists because the settings layout owns the scroller, so a header that
+   * merely sat at the top of the page scrolled away with the content. `sticky`
+   * pins it to the top of that scroller — which the layout already keeps clear
+   * of the window's drag region — and the blurred background is what the page
+   * scrolls under.
    *
    * `actions` stays reachable for the same reason: a Save button at the bottom
    * of a long form is a Save button you have to scroll back to.
@@ -34,7 +28,7 @@
 </script>
 
 <header
-  class="sticky top-0 z-20 flex items-center gap-3 bg-[color:var(--bg-canvas)]/85 px-6 pt-14 pr-8 pb-3 backdrop-blur-sm"
+  class="sticky top-0 z-20 flex items-center gap-3 bg-[color:var(--bg-canvas)]/85 px-6 pt-1.5 pr-8 pb-3 backdrop-blur-sm"
 >
   <Button
     variant="secondary"

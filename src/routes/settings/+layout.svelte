@@ -33,16 +33,24 @@
   </div>
 
   <main
-    class="flex-1 overflow-auto bg-[color:var(--bg-canvas)] border-l border-[var(--hairline)] rounded-tl-xl rounded-bl-xl"
+    class="flex flex-1 flex-col overflow-hidden bg-[color:var(--bg-canvas)] border-l border-[var(--hairline)] rounded-tl-xl rounded-bl-xl"
   >
-    <!-- Constrain the content column: settings don't stretch with the window -->
-    <div class="mx-auto w-full max-w-3xl">
-      {#if currentTitle}
-        <div class="px-6 pb-2 pr-8 pt-14">
-          <PageHeader title={currentTitle} />
-        </div>
-      {/if}
-      {@render children()}
+    <!-- The window's drag region is a fixed 50px strip across the top (see
+         `TitleBar`) that swallows clicks. The scroller starts below it so no
+         row can ever scroll into that dead band; the strip itself stays bare
+         canvas, which is what makes the window draggable there. -->
+    <div class="h-[50px] shrink-0"></div>
+
+    <div class="flex-1 overflow-auto">
+      <!-- Constrain the content column: settings don't stretch with the window -->
+      <div class="mx-auto w-full max-w-3xl">
+        {#if currentTitle}
+          <div class="px-6 pb-2 pr-8 pt-1.5">
+            <PageHeader title={currentTitle} />
+          </div>
+        {/if}
+        {@render children()}
+      </div>
     </div>
   </main>
 </div>

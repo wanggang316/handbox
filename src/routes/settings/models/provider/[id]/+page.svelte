@@ -250,8 +250,8 @@
 {/snippet}
 
 <!-- The settings layout owns the scroller; a nested one here scrolled the
-     header out of reach. `DetailHeader` stays pinned and clear of the window's
-     drag region, which is what the old `z-10004` on the button was fighting. -->
+     header out of reach. `DetailHeader` stays pinned instead, which is what
+     the old `z-10004` on the back button was fighting. -->
 <div class="flex flex-col">
   <DetailHeader
     title={currentProvider?.name ?? ""}
