@@ -385,9 +385,11 @@ impl Extension for RuleHookExtension {
     }
 
     /// Latch this run's transcript writer (see [`RuleHookExtension::session_sink`]).
-    /// Ungated and run for every registered extension, so it is the one place
-    /// guaranteed to see a context — including for a session whose only rules
-    /// are approval ones, which never reach an [`Extension`] dispatch.
+    /// Ungated, so it runs for every REGISTERED extension whatever capabilities
+    /// it declares — which is what lets the approval path, dispatched outside
+    /// the chain entirely, record through the same sink. Registration is the
+    /// precondition: see the `has_approval_rules` arm in
+    /// `coding_agent_session::build_agent_session`.
     async fn on_load(&self, cx: &ExtensionContext) -> Result<(), ExtensionError> {
         *self.session_sink.lock().unwrap() = Some(cx.session_sink.clone());
         Ok(())
