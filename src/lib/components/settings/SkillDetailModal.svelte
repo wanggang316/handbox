@@ -5,14 +5,13 @@
    * The list used to inline `SKILL.md` behind a "view content" disclosure,
    * which could only ever show one file and pushed every row below it off
    * screen. A skill is prose plus references plus scripts, so the detail is a
-   * dialog whose file picker sits in one button: the switcher costs no width,
-   * and the content gets all of it.
+   * dialog whose whole directory collapses into one picker in the toolbar.
    *
    * The dialog is a fixed size and every file read is cached, so switching
    * files changes the text and nothing else — no resize, no spinner in the
    * place the content was.
    */
-  import { Package, FolderOpen, FileText } from "@lucide/svelte";
+  import { FolderOpen, FileText } from "@lucide/svelte";
   import Modal from "$lib/components/ui/Modal.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import Select from "$lib/components/ui/Select.svelte";
@@ -131,15 +130,10 @@
 
 <Modal bind:open {onClose}>
   <!-- Fixed size: the dialog is a reading pane, and one that resized itself
-       around each file made every switch feel like a new window. -->
-  <div class="flex h-[78vh] w-[min(1180px,90vw)] flex-col">
+       around each file made every switch feel like a new window. The width is
+       what prose and a wrapped code line want, not what a file column did. -->
+  <div class="flex h-[78vh] w-[min(860px,90vw)] flex-col">
     <div class="flex items-start gap-4 px-6 pt-14 pb-5">
-      <div
-        class="flex size-11 shrink-0 items-center justify-center rounded-full border border-[var(--hairline)] text-base-content/70"
-      >
-        <Package size={20} />
-      </div>
-
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2">
           <h2 class="truncate text-xl font-semibold text-base-content">
