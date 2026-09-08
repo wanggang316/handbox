@@ -5,13 +5,19 @@
    * The list used to inline `SKILL.md` behind a "view content" disclosure,
    * which could only ever show one file and pushed every row below it off
    * screen. A skill is prose plus references plus scripts, so the detail is a
-   * dialog with a file switcher: the list stays a list, and the content gets
-   * the width it needs.
+   * dialog whose file picker sits in one button: the switcher costs no width,
+   * and the content gets all of it.
+   *
+   * The dialog is a fixed size and every file read is cached, so switching
+   * files changes the text and nothing else — no resize, no spinner in the
+   * place the content was.
    */
-  import { Package, FolderOpen } from "@lucide/svelte";
+  import { Package, FolderOpen, FileText } from "@lucide/svelte";
   import Modal from "$lib/components/ui/Modal.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
+  import Select from "$lib/components/ui/Select.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
+  import CodePreview from "$lib/components/ui/CodePreview.svelte";
   import { listSkillFiles, readSkillFile } from "$lib/api/skill";
   import { renderMarkdown, markdownInteractions } from "$lib/utils";
   import { formatFileSize } from "$lib/utils/format";
@@ -37,60 +43,79 @@
   }: Props = $props();
 
   let files = $state<SkillFile[]>([]);
-  let selected = $state<string>("");
-  let content = $state<string>("");
-  let listing = $state(false);
+  let selected = $state("");
+  let content = $state("");
   let reading = $state(false);
   let error = $state<string | null>(null);
-
-  const selectedFile = $derived(files.find((f) => f.relPath === selected) ?? null);
-  const isMarkdown = $derived(selected.toLowerCase().endsWith(".md"));
+  let scroller = $state<HTMLDivElement | null>(null);
 
   /**
-   * `SKILL.md` is already in hand from discovery, so it renders on the first
-   * frame and only the other files cost a round trip.
+   * Every file read so far, keyed by relative path. A file already visited
+   * switches back synchronously, which is the difference between switching and
+   * flashing.
    */
-  function cachedContent(relPath: string): string | null {
-    return relPath === "SKILL.md" ? (skill?.body ?? null) : null;
-  }
+  let cache = new Map<string, string>();
+
+  const selectedFile = $derived(
+    files.find((f) => f.relPath === selected) ?? null,
+  );
+  const isMarkdown = $derived(selected.toLowerCase().endsWith(".md"));
+  const fileOptions = $derived(
+    files.map((f) => ({ value: f.relPath, label: f.relPath })),
+  );
 
   async function select(relPath: string): Promise<void> {
+    if (!relPath || relPath === selected) return;
     selected = relPath;
     error = null;
 
-    const cached = cachedContent(relPath);
-    if (cached !== null) {
-      content = cached;
+    const cached = cache.get(relPath);
+    if (cached !== undefined) {
+      show(cached);
       return;
     }
     if (!skill || !files.find((f) => f.relPath === relPath)?.readable) {
-      content = "";
+      show("");
       return;
     }
 
+    // The previous file stays on screen until the next one arrives: blanking
+    // the pane for a local read that takes a millisecond is the flash itself.
     reading = true;
+    const name = skill.name;
     try {
-      content = await readSkillFile(skill.name, relPath);
+      const text = await readSkillFile(name, relPath);
+      cache.set(relPath, text);
+      if (selected === relPath) show(text);
     } catch (e) {
       console.error("Failed to read skill file:", e);
-      content = "";
-      error = t("settings.skills.detail.loadFailed");
+      if (selected === relPath) {
+        content = "";
+        error = t("settings.skills.detail.loadFailed");
+      }
     } finally {
-      reading = false;
+      if (selected === relPath) reading = false;
     }
   }
 
-  // Reload whenever the dialog is opened on a skill. Listing failures are not
-  // fatal: SKILL.md is already known, so the dialog still shows the skill.
+  /** Swap the text and return to the top: a new file starts at its first line. */
+  function show(text: string): void {
+    content = text;
+    if (scroller) scroller.scrollTop = 0;
+  }
+
+  // Reload whenever the dialog is opened on a skill. A listing failure is not
+  // fatal: SKILL.md is already in hand, so the dialog still shows the skill.
   $effect(() => {
     if (!open || !skill) return;
 
     const name = skill.name;
-    files = skill.body === null ? [] : [{ relPath: "SKILL.md", size: 0, readable: true }];
+    const body = skill.body;
+    cache = new Map(body === null ? [] : [["SKILL.md", body]]);
+    files = body === null ? [] : [{ relPath: "SKILL.md", size: 0, readable: true }];
     selected = "SKILL.md";
-    content = skill.body ?? "";
+    content = body ?? "";
     error = null;
-    listing = true;
 
     listSkillFiles(name)
       .then((listed) => {
@@ -100,15 +125,14 @@
           void select(listed[0]?.relPath ?? "");
         }
       })
-      .catch((e) => console.error("Failed to list skill files:", e))
-      .finally(() => {
-        listing = false;
-      });
+      .catch((e) => console.error("Failed to list skill files:", e));
   });
 </script>
 
 <Modal bind:open {onClose}>
-  <div class="flex max-h-[85vh] w-[min(1180px,90vw)] flex-col">
+  <!-- Fixed size: the dialog is a reading pane, and one that resized itself
+       around each file made every switch feel like a new window. -->
+  <div class="flex h-[78vh] w-[min(1180px,90vw)] flex-col">
     <div class="flex items-start gap-4 px-6 pt-14 pb-5">
       <div
         class="flex size-11 shrink-0 items-center justify-center rounded-full border border-[var(--hairline)] text-base-content/70"
@@ -126,7 +150,7 @@
           </span>
         </div>
         {#if skill?.description}
-          <p class="mt-1 text-sm leading-relaxed text-base-content/60">
+          <p class="mt-1 line-clamp-3 text-sm leading-relaxed text-base-content/60">
             {skill.description}
           </p>
         {/if}
@@ -158,53 +182,57 @@
       </div>
     {/if}
 
-    <!-- The switcher earns its column only for a skill that has more than one
-         file; a single-file skill gets the full width for its prose. -->
-    <div class="flex min-h-0 flex-1 border-t border-[var(--hairline)]">
+    <!-- The whole directory lives in this one control. A skill with a single
+         file has nothing to switch between, so it shows the name instead. -->
+    <div
+      class="flex items-center gap-3 border-y border-[var(--hairline)] px-6 py-2.5"
+    >
       {#if files.length > 1}
-        <nav
-          class="w-56 shrink-0 overflow-y-auto border-r border-[var(--hairline)] p-2"
-        >
-          {#each files as file (file.relPath)}
-            <button
-              type="button"
-              class="mb-0.5 block w-full truncate rounded-md px-2.5 py-1.5 text-left font-mono text-xs transition-colors {file.relPath ===
-              selected
-                ? 'bg-base-200 text-base-content'
-                : 'text-base-content/55 hover:bg-base-200/60 hover:text-base-content/85'} {file.readable
-                ? ''
-                : 'opacity-50'}"
-              title={file.relPath}
-              onclick={() => select(file.relPath)}
-            >
-              {file.relPath}
-            </button>
-          {/each}
-        </nav>
+        <Select
+          autoWidth
+          size="sm"
+          align="start"
+          options={fileOptions}
+          value={selected}
+          onChange={select}
+        />
+      {:else}
+        <span class="flex items-center gap-1.5 font-mono text-xs text-base-content/60">
+          <FileText size={14} />
+          {selected}
+        </span>
       {/if}
 
-      <div class="min-w-0 flex-1 overflow-y-auto px-6 py-5 select-text">
-        {#if listing && files.length === 0}
-          <div class="flex justify-center py-10"><Spinner size={24} /></div>
-        {:else if error}
-          <p class="text-sm text-error">{error}</p>
-        {:else if selectedFile && !selectedFile.readable}
-          <p class="text-sm text-base-content/50">
-            {t("settings.skills.detail.notReadable", {
-              size: formatFileSize(selectedFile.size),
-            })}
-          </p>
-        {:else if reading}
-          <div class="flex justify-center py-10"><Spinner size={24} /></div>
-        {:else if isMarkdown}
-          <div class="markdown-content text-[13px]" use:markdownInteractions>
-            {@html renderMarkdown(content)}
-          </div>
-        {:else}
-          <pre
-            class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-base-content/80">{content}</pre>
-        {/if}
-      </div>
+      {#if reading}
+        <Spinner size={14} />
+      {/if}
+
+      {#if selectedFile && selectedFile.size > 0}
+        <span class="ml-auto text-xs text-base-content/35">
+          {formatFileSize(selectedFile.size)}
+        </span>
+      {/if}
+    </div>
+
+    <div
+      bind:this={scroller}
+      class="min-h-0 flex-1 overflow-auto px-6 py-5 select-text"
+    >
+      {#if error}
+        <p class="text-sm text-error">{error}</p>
+      {:else if selectedFile && !selectedFile.readable}
+        <p class="text-sm text-base-content/50">
+          {t("settings.skills.detail.notReadable", {
+            size: formatFileSize(selectedFile.size),
+          })}
+        </p>
+      {:else if isMarkdown}
+        <div class="markdown-content text-[13px]" use:markdownInteractions>
+          {@html renderMarkdown(content)}
+        </div>
+      {:else}
+        <CodePreview code={content} filename={selected} />
+      {/if}
     </div>
   </div>
 </Modal>
