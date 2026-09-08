@@ -16,6 +16,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 
+## [0.6.0] - 2026-09-08
+
+### Added
+- Define your own tools in Settings → Tools. Give a tool a name, an icon, a
+  prompt telling the model when to call it, typed parameters, and a GenUI view;
+  the model calls it like any other tool and the call appears in the chat as
+  that view.
+- Built-in and MCP tools open a read-only detail page, so you can see the
+  description and parameters the model is actually given.
+- Each agent now carries its own default model, so a coding agent can run on a
+  large model while a quick translator runs on a cheap one. Agents without one
+  adopt the previous app-wide default on first launch.
+- A skill opens in a detail dialog showing its whole directory: pick any file
+  from a tree, with markdown rendered and source files shown with line numbers
+  and syntax highlighting.
+- What a hook did is now part of the conversation. Each firing shows as a
+  collapsed row inside the reply it belongs to, and comes back when you reopen
+  the session.
+
+### Changed
+- Tool calls render as one line — icon, name, and a preview of what the call
+  acts on — with the arguments and result behind a disclosure. Every tool has
+  an icon, MCP tools included.
+- The agent editor is split into Instructions, Tools, and Model tabs.
+- GenUI is its own entry under Settings → Agents, and is edited in a dialog
+  over the tool you are configuring instead of on a separate page.
+- Settings rows with a detail view open when you click anywhere on the row.
+- Rows in a reply share one left edge and even spacing, so a tool call, a hook
+  row, and the text around them read as one reply.
+
+### Fixed
+- Text a hook injects no longer appears as if you had typed it. It shows as a
+  hook firing, so a hook that resumes a turn no longer looks like the app
+  answering the same question twice.
+- A reply that calls several tools shows one actions row instead of one per
+  step. Copy takes the whole reply, and the usage tooltip sums every step.
+- The composer shrinks back to one line after you send a long message.
+- Settings rows scrolled under the top edge of the window respond to clicks
+  again, and the back button on a detail page stays put while you scroll.
+- Sessions whose only hook rules are approval ones now record their firings.
+
+### Removed
+- The app-wide default model under Settings → Agent Tools. Each agent now
+  carries its own.
+
+
 ## [0.5.6] - 2026-08-25
 
 ### Added
