@@ -13,7 +13,6 @@
     LoaderCircle,
     Zap,
     RefreshCw,
-    FolderOpen,
     AlertTriangle,
   } from "@lucide/svelte";
 
@@ -173,10 +172,11 @@
               {/if}
             </div>
 
-            <!-- These controls swallow the click so neither the switch nor
-                 Reveal in Finder also opens the detail. -->
+            <!-- The switch swallows the click so flipping it never also opens
+                 the detail. Revealing the directory lives in the detail, where
+                 the reader has already decided this is the skill they mean. -->
             <div
-              class="flex items-center gap-2 shrink-0"
+              class="flex items-center shrink-0"
               role="none"
               onclick={(e) => e.stopPropagation()}
               onkeydown={(e) => e.stopPropagation()}
@@ -189,15 +189,6 @@
                     handleToggleSkillBefore(skill, enabled)}
                 />
               {/if}
-              <button
-                type="button"
-                class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
-                title={t("settings.skills.openDir")}
-                aria-label={t("settings.skills.openDir")}
-                onclick={() => handleOpenDir(skill)}
-              >
-                <FolderOpen size={15} />
-              </button>
             </div>
           </div>
 
