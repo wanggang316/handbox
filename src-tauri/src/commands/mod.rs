@@ -20,6 +20,7 @@ pub mod provider;
 pub mod quick_action;
 pub mod settings;
 pub mod skill;
+pub mod tool_definition;
 pub mod window;
 
 pub use accessibility::*;
@@ -44,4 +45,5 @@ pub use provider::*;
 pub use quick_action::*;
 pub use settings::*;
 pub use skill::*;
+pub use tool_definition::*;
 pub use window::*;

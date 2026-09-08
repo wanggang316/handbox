@@ -6,6 +6,7 @@
   import Select from "../ui/Select.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
   import Modal from "../ui/Modal.svelte";
+  import Tabs from "../ui/Tabs.svelte";
   import {
     TableGroup,
     TableBaseRow,
@@ -13,12 +14,16 @@
     SwitchRow,
   } from "../ui/table";
   import DefaultRow from "../ui/table/DefaultRow.svelte";
-  import { AGENT_ICONS, resolveAgentIcon } from "$lib/utils/agentIcons";
+  import IconPicker from "../ui/IconPicker.svelte";
+  import ModelSelectButton from "../settings/ModelSelectButton.svelte";
   import { normalizeError } from "$lib/utils/error";
   import { t } from "$lib/i18n";
   import type { Agent } from "$lib/types";
   import type { McpServerConfig } from "$lib/types/llm";
   import { agentActions } from "$lib/states/agent.svelte";
+  import { getAllModels, providerActions } from "$lib/states/provider.svelte";
+  import { resolveDefaultModel } from "$lib/utils/defaultModel";
+  import type { ModelWithProvider } from "$lib/types/provider";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { genuiState, genuiActions } from "$lib/states/genui.svelte";
   import { listSkills } from "$lib/api/skill";
@@ -43,6 +48,10 @@
     generativeUi: boolean;
     // Linked GenUI id; empty string means none.
     genuiId: string;
+    // Model a session from this agent starts on; a (model, provider) pair, both
+    // empty when unset.
+    defaultModelId: string;
+    defaultProviderId: string;
     description: string;
     builtinTools: string[];
     workingDirMode: string;
@@ -89,6 +98,16 @@
     { value: "manual", label: t("agent.input.manualExecution") },
   ]);
 
+  // The three tabs split the definition by what a change is about: what the
+  // agent is told, what it can reach, and what it runs on. $derived so the
+  // labels track a language switch.
+  const tabItems = $derived([
+    { value: "instructions", label: t("agent.form.tabInstructions") },
+    { value: "tools", label: t("agent.form.tabTools") },
+    { value: "model", label: t("agent.form.tabModel") },
+  ]);
+  let activeTab = $state("instructions");
+
   // Builtin agents: the name is read-only (enforced by the backend).
   const isBuiltin = $derived(agent?.builtin ?? false);
 
@@ -120,21 +139,8 @@
   let skillsModalOpen = $state(false);
   let mcpModalOpen = $state(false);
 
-  // Icon picker popover: picking replaces and closes; picking the current icon
-  // clears it (back to the default Bot). Outside click closes.
-  let iconPickerOpen = $state(false);
-
-  function handleIconPickerOutside(event: MouseEvent) {
-    if (!iconPickerOpen) return;
-    const target = event.target as HTMLElement;
-    if (!target.closest(".icon-picker")) {
-      iconPickerOpen = false;
-    }
-  }
-
   function pickIcon(name: string) {
-    formData.icon = formData.icon === name ? "" : name;
-    iconPickerOpen = false;
+    formData.icon = name;
   }
 
   let skillSearch = $state("");
@@ -172,6 +178,11 @@
         .loadServers()
         .catch((e) => console.error("Failed to load MCP servers:", e));
     }
+    if (getAllModels().length === 0) {
+      providerActions
+        .loadProvidersWithModels()
+        .catch((e) => console.error("Failed to load the model catalog:", e));
+    }
     listSkills()
       .then((skills) => {
         availableSkills = skills.filter((s) => s.body !== null);
@@ -187,13 +198,13 @@
     mcpServers: [],
     generativeUi: false,
     genuiId: "",
+    defaultModelId: "",
+    defaultProviderId: "",
     description: "",
     builtinTools: [],
     workingDirMode: "optional",
     toolExecutionMode: "manual",
   });
-
-  const CurrentIcon = $derived(resolveAgentIcon(formData.icon));
 
   // Linked names absent from discovery (skill deleted/renamed): kept as removable rows.
   const missingSelectedSkills = $derived(
@@ -212,6 +223,31 @@
   });
 
   let saving = $state(false);
+
+  // Resolved against the live catalog: a provider disabled after the pick makes
+  // the pair dangle, which the row says out loud rather than silently showing
+  // the placeholder as if nothing had been chosen.
+  const defaultModelResolution = $derived(
+    resolveDefaultModel(
+      {
+        modelId: formData.defaultModelId,
+        providerId: formData.defaultProviderId,
+      },
+      getAllModels()
+    )
+  );
+  const selectedDefaultModel = $derived<ModelWithProvider | null>(
+    defaultModelResolution.available ? defaultModelResolution.model : null
+  );
+  const defaultModelDangling = $derived(
+    !defaultModelResolution.available &&
+      defaultModelResolution.reason === "dangling-default"
+  );
+
+  function pickDefaultModel(model: ModelWithProvider) {
+    formData.defaultModelId = model.id;
+    formData.defaultProviderId = model.provider_id;
+  }
 
   function isMcpSelected(serverId: string): boolean {
     return formData.mcpServers.some((s) => s.serverId === serverId);
@@ -320,6 +356,23 @@
         await agentActions.updateAgentField(agent.id, "genuiId", effectiveGenuiId);
       }
 
+      // The model pair travels as one field: half of it names no model.
+      if (
+        (agent.defaultModelId ?? "") !== data.defaultModelId ||
+        (agent.defaultProviderId ?? "") !== data.defaultProviderId
+      ) {
+        await agentActions.updateAgentField(
+          agent.id,
+          "defaultModel",
+          data.defaultModelId && data.defaultProviderId
+            ? {
+                modelId: data.defaultModelId,
+                providerId: data.defaultProviderId,
+              }
+            : null
+        );
+      }
+
       if (
         JSON.stringify(data.skills ?? []) !== JSON.stringify(agent.skills ?? [])
       ) {
@@ -384,6 +437,12 @@
             data.description
           );
         }
+        if (data.defaultModelId && data.defaultProviderId) {
+          await agentActions.updateAgentField(newAgent.id, "defaultModel", {
+            modelId: data.defaultModelId,
+            providerId: data.defaultProviderId,
+          });
+        }
         if (data.builtinTools.length > 0) {
           await agentActions.updateAgentField(
             newAgent.id,
@@ -445,6 +504,8 @@
         mcpServers: agent.mcpServers ? [...agent.mcpServers] : [],
         generativeUi: agent.generativeUi ?? false,
         genuiId: agent.genuiId ?? "",
+        defaultModelId: agent.defaultModelId ?? "",
+        defaultProviderId: agent.defaultProviderId ?? "",
         description: agent.description ?? "",
         builtinTools: agent.builtinTools ? [...agent.builtinTools] : [],
         workingDirMode: agent.workingDirMode ?? "optional",
@@ -459,6 +520,8 @@
         mcpServers: [],
         generativeUi: false,
         genuiId: "",
+        defaultModelId: "",
+        defaultProviderId: "",
         description: "",
         builtinTools: [],
         workingDirMode: "optional",
@@ -480,7 +543,9 @@
 </script>
 
 <!-- Agent editor page in the settings style: centered max-w-3xl reading width,
-     TableGroup cards; Skill / MCP picked via modals. -->
+     TableGroup cards; Skill / MCP picked via modals. The definition carries
+     three unrelated concerns, so they sit on their own tabs instead of in one
+     column where scrolling past the prompt was the price of reaching a slider. -->
 <div class="h-full flex flex-col">
   <div class="flex-shrink-0 px-6 pb-4 pt-12">
     <div class="mx-auto w-full max-w-3xl">
@@ -493,41 +558,11 @@
       </button>
 
       <div class="flex items-center gap-3">
-        <!-- Current-icon button; click opens the in-place picker popover. -->
-        <div class="icon-picker relative flex-shrink-0">
-          <button
-            type="button"
-            aria-expanded={iconPickerOpen}
-            title={t("agent.form.iconLabel")}
-            class="flex h-10 w-10 items-center justify-center rounded-lg bg-base-200 text-base-content/70 transition-colors hover:bg-base-300 hover:text-base-content"
-            onclick={() => (iconPickerOpen = !iconPickerOpen)}
-          >
-            <CurrentIcon size={20} />
-          </button>
-          {#if iconPickerOpen}
-            <div
-              class="absolute left-0 top-full z-[var(--z-popover)] mt-2 w-[19rem] rounded-xl border border-[var(--hairline)] bg-[var(--bg-card)] p-3 shadow-xl"
-            >
-              <div class="flex flex-wrap gap-1.5">
-                {#each AGENT_ICONS as opt (opt.name)}
-                  {@const Icon = opt.Icon}
-                  <button
-                    type="button"
-                    aria-pressed={formData.icon === opt.name}
-                    title={opt.name}
-                    class="flex h-8 w-8 items-center justify-center rounded-md border transition-colors {formData.icon ===
-                    opt.name
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-transparent text-base-content/55 hover:bg-base-200 hover:text-base-content'}"
-                    onclick={() => pickIcon(opt.name)}
-                  >
-                    <Icon size={16} />
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
-        </div>
+        <IconPicker
+          value={formData.icon}
+          label={t("agent.form.iconLabel")}
+          onSelect={pickIcon}
+        />
 
         <div class="min-w-0 flex-1">
           <input
@@ -552,108 +587,141 @@
               : t("common.create")}
         </Button>
       </div>
+
+      <!-- Pinned with the header, not scrolled with the panel: a tab you have to
+           scroll back up to reach is a tab you stop using. -->
+      <div class="mt-5">
+        <Tabs
+          value={activeTab}
+          items={tabItems}
+          onChange={(value) => (activeTab = value)}
+        />
+      </div>
     </div>
   </div>
 
   <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-y-4">
+      {#if activeTab === "instructions"}
+        <TableGroup>
+          <TableBaseRow>
+            <textarea
+              class="field min-h-80 w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
+              bind:value={formData.systemPrompt}
+              placeholder={t("agent.systemPrompt.placeholder")}
+            ></textarea>
+            <div class="mt-1 text-right text-xs text-base-content/35">
+              {t("agent.form.charCount", { count: formData.systemPrompt.length })}
+            </div>
+          </TableBaseRow>
+        </TableGroup>
+      {:else if activeTab === "tools"}
+        <TableGroup>
+          <TableBaseRow label={t("agent.form.builtinTools")} layout="vertical">
+            <div class="flex flex-wrap gap-1.5">
+              {#each BUILTIN_TOOLS as tool (tool)}
+                <button
+                  type="button"
+                  aria-pressed={isToolSelected(tool)}
+                  class="rounded-md border px-2 py-1 font-mono text-xs transition-colors {isToolSelected(
+                    tool,
+                  )
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-[var(--hairline)] text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
+                  onclick={() => toggleBuiltinTool(tool, !isToolSelected(tool))}
+                >
+                  {tool}
+                </button>
+              {/each}
+            </div>
+          </TableBaseRow>
 
-      <TableGroup title={t("agent.form.systemPromptTitle")}>
-        <TableBaseRow>
-          <textarea
-            class="field min-h-48 w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
-            bind:value={formData.systemPrompt}
-            placeholder={t("agent.systemPrompt.placeholder")}
-          ></textarea>
-          <div class="mt-1 text-right text-xs text-base-content/35">
-            {t("agent.form.charCount", { count: formData.systemPrompt.length })}
-          </div>
-        </TableBaseRow>
-      </TableGroup>
-
-      <TableGroup title={t("agent.form.sectionTools")}>
-        <TableBaseRow label={t("agent.form.builtinTools")} layout="vertical">
-          <div class="flex flex-wrap gap-1.5">
-            {#each BUILTIN_TOOLS as tool (tool)}
-              <button
-                type="button"
-                aria-pressed={isToolSelected(tool)}
-                class="rounded-md border px-2 py-1 font-mono text-xs transition-colors {isToolSelected(
-                  tool,
-                )
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-[var(--hairline)] text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
-                onclick={() => toggleBuiltinTool(tool, !isToolSelected(tool))}
-              >
-                {tool}
-              </button>
-            {/each}
-          </div>
-        </TableBaseRow>
-
-        <SelectRow
-          label={t("agent.form.toolExecution")}
-          options={toolExecutionModeOptions}
-          bind:selectedValue={formData.toolExecutionMode}
-        />
-
-        <DefaultRow
-          label={t("agent.form.skillsTitle")}
-          value={t("agent.form.linkedCount", { count: formData.skills.length })}
-          onclick={() => (skillsModalOpen = true)}
-        />
-
-        <DefaultRow
-          label={t("agent.form.mcpServers")}
-          value={t("agent.form.linkedCount", {
-            count: formData.mcpServers.length,
-          })}
-          onclick={() => (mcpModalOpen = true)}
-        />
-      </TableGroup>
-
-      <TableGroup title={t("agent.form.sectionRuntime")}>
-        <SelectRow
-          label={t("agent.form.workingDir")}
-          options={workingDirModeOptions}
-          bind:selectedValue={formData.workingDirMode}
-        />
-
-        <SwitchRow
-          label={t("agent.form.generativeUi")}
-          description={t("agent.form.generativeUiDesc")}
-          bind:checked={formData.generativeUi}
-        />
-
-        {#if formData.generativeUi}
           <SelectRow
-            label={t("agent.form.genuiHint")}
-            options={genuiOptions}
-            bind:selectedValue={formData.genuiId}
+            label={t("agent.form.toolExecution")}
+            options={toolExecutionModeOptions}
+            bind:selectedValue={formData.toolExecutionMode}
           />
-        {/if}
-      </TableGroup>
 
-      <TableGroup
-        title={t("agent.form.modelParams")}
-        collapsible
-        defaultCollapsed
-      >
-        {#each PARAM_META as p (p.key)}
-          <SwitchRow label={p.label} bind:checked={paramEnabled[p.key]} />
-          {#if paramEnabled[p.key]}
-            <TableBaseRow>
-              <LabeledSlider
-                bind:value={paramValues[p.key]}
-                min={p.min}
-                max={p.max}
-                step={p.step}
-                showValue={true}
-              />
-            </TableBaseRow>
+          <!-- The working directory is what the file and shell tools act in, so
+               it is a tool setting rather than a session one. -->
+          <SelectRow
+            label={t("agent.form.workingDir")}
+            options={workingDirModeOptions}
+            bind:selectedValue={formData.workingDirMode}
+          />
+
+          <DefaultRow
+            label={t("agent.form.skillsTitle")}
+            value={t("agent.form.linkedCount", { count: formData.skills.length })}
+            onclick={() => (skillsModalOpen = true)}
+          />
+
+          <DefaultRow
+            label={t("agent.form.mcpServers")}
+            value={t("agent.form.linkedCount", {
+              count: formData.mcpServers.length,
+            })}
+            onclick={() => (mcpModalOpen = true)}
+          />
+        </TableGroup>
+
+        <!-- Generative UI is a tool too: it is how the agent answers with an
+             interface instead of prose, and the template is what it renders. -->
+        <TableGroup>
+          <SwitchRow
+            label={t("agent.form.generativeUi")}
+            description={t("agent.form.generativeUiDesc")}
+            bind:checked={formData.generativeUi}
+          />
+
+          {#if formData.generativeUi}
+            <SelectRow
+              label={t("agent.form.genuiHint")}
+              options={genuiOptions}
+              bind:selectedValue={formData.genuiId}
+            />
           {/if}
-        {/each}
-      </TableGroup>
+        </TableGroup>
+      {:else}
+        <TableGroup>
+          <TableBaseRow
+            label={t("agent.form.defaultModel")}
+            helpText={t("agent.form.defaultModelHint")}
+          >
+            <!-- The warning precedes the picker so the picker stays flush with
+                 the right edge, in line with every other row's control. -->
+            <div class="flex items-center gap-3">
+              {#if defaultModelDangling}
+                <span class="text-xs text-warning">
+                  {t("agent.form.defaultModelUnavailable")}
+                </span>
+              {/if}
+              <ModelSelectButton
+                selectedModel={selectedDefaultModel}
+                placeholder={t("agent.form.defaultModelNone")}
+                onModelSelect={pickDefaultModel}
+              />
+            </div>
+          </TableBaseRow>
+        </TableGroup>
+
+        <TableGroup title={t("agent.form.modelParams")}>
+          {#each PARAM_META as p (p.key)}
+            <SwitchRow label={p.label} bind:checked={paramEnabled[p.key]} />
+            {#if paramEnabled[p.key]}
+              <TableBaseRow>
+                <LabeledSlider
+                  bind:value={paramValues[p.key]}
+                  min={p.min}
+                  max={p.max}
+                  step={p.step}
+                  showValue={true}
+                />
+              </TableBaseRow>
+            {/if}
+          {/each}
+        </TableGroup>
+      {/if}
     </div>
   </div>
 </div>
@@ -814,6 +882,3 @@
     </div>
   </div>
 </Modal>
-
-<!-- Close the icon picker on outside click; clicks inside .icon-picker keep it open. -->
-<svelte:window onclick={handleIconPickerOutside} />

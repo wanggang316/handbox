@@ -15,6 +15,21 @@ import {
   resolveDefaultModel,
 } from "./defaultModel";
 import type { ModelWithProvider } from "../types/provider";
+import type { Agent } from "../types/agent";
+
+/** The minimum Agent shape the resolver reads; the rest is irrelevant to it. */
+const agentStub: Agent = {
+  id: "agent-1",
+  name: "Agent",
+  mcpServers: [],
+  skills: [],
+  builtin: false,
+  builtinTools: [],
+  starters: [],
+  createdAt: 0,
+  updatedAt: 0,
+};
+
 
 /** Build a catalog item with only the fields the resolver matches on. */
 function makeModel(id: string, providerId: string): ModelWithProvider {
@@ -110,7 +125,7 @@ describe("resolveAgentDefaultModel", () => {
   it("reads the pair off the agent settings slice", () => {
     const result = resolveAgentDefaultModel(
       {
-        defaultEnabledTools: [],
+        ...agentStub,
         defaultModelId: "gpt-4o",
         defaultProviderId: "openai-provider",
       },

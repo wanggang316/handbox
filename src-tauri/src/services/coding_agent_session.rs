@@ -130,9 +130,16 @@ pub fn build_agent_session(
     let stream_options: SimpleStreamOptions =
         model_runtime::build_stream_options(&chat_options, &config.api_key);
 
-    let mut tools = select_enabled_tools(&config.working_dir, &config.enabled_tools);
-    // Per-session MCP tools (namespaced `mcp__server__tool`) run alongside the
-    // built-ins. Empty for sessions with no MCP bindings.
+    // Per-session MCP tools (namespaced `mcp__server__tool`), the extension
+    // tools and the user-defined ones all arrive as `extra_tools` and run
+    // alongside the built-ins. Their names go into the filter first so a session
+    // that lists one is not reported as naming an unknown tool.
+    let already_registered: Vec<String> = extra_tools.iter().map(|t| t.name.clone()).collect();
+    let mut tools = select_enabled_tools(
+        &config.working_dir,
+        &config.enabled_tools,
+        &already_registered,
+    );
     tools.extend(extra_tools);
 
     // Guarantee the JSONL file the `resume_session` branch opens exists, named
@@ -265,16 +272,26 @@ fn remap_legacy_tool_name(name: &str) -> &str {
 }
 
 /// Filter the coding-agent built-ins down to the per-session `enabled` names
-/// (each mapped through [`remap_legacy_tool_name`] first). Extension-tool ids
-/// ([`extensions::EXTENSION_TOOL_IDS`]) are skipped — they are resolved outside
-/// this filter. An empty `enabled` registers NO tools ("not listed = not
-/// enabled"), never the full set; unknown names only warn. Output follows the
-/// canonical `create_default_tools` order.
-pub fn select_enabled_tools(cwd: &Path, enabled: &[String]) -> Vec<AgentTool> {
+/// (each mapped through [`remap_legacy_tool_name`] first). An empty `enabled`
+/// registers NO tools ("not listed = not enabled"), never the full set; unknown
+/// names only warn. Output follows the canonical `create_default_tools` order.
+///
+/// Two kinds of name are legitimately absent from the built-in set and must not
+/// warn: the extension-tool ids ([`extensions::EXTENSION_TOOL_IDS`]), whose
+/// registration is decided elsewhere (`web_search` needs an API key, `skill`
+/// gates a pipeline rather than a tool), and `already_registered` — the names
+/// the caller is about to append itself, which is how user-defined tools stay
+/// out of the warning without a central registry to enrol in.
+pub fn select_enabled_tools(
+    cwd: &Path,
+    enabled: &[String],
+    already_registered: &[String],
+) -> Vec<AgentTool> {
     let mut wanted: Vec<&str> = enabled
         .iter()
         .map(|name| remap_legacy_tool_name(name.as_str()))
         .filter(|name| !extensions::EXTENSION_TOOL_IDS.contains(name))
+        .filter(|name| !already_registered.iter().any(|other| other == name))
         .collect();
 
     let selected: Vec<AgentTool> = create_default_tools(cwd)
@@ -567,21 +584,41 @@ mod tests {
     fn select_enabled_tools_uses_canonical_order() {
         let cwd = TempDir::new().unwrap();
         // Request in scrambled order; output must follow create_default_tools.
-        let names: Vec<String> =
-            select_enabled_tools(cwd.path(), &["ls".into(), "read".into(), "bash".into()])
-                .into_iter()
-                .map(|t| t.name)
-                .collect();
+        let names: Vec<String> = select_enabled_tools(
+            cwd.path(),
+            &["ls".into(), "read".into(), "bash".into()],
+            &[],
+        )
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
         assert_eq!(names, vec!["read", "bash", "ls"]);
     }
 
     /// Registered names of the tools `select_enabled_tools` returns.
     fn tool_names(cwd: &Path, enabled: &[&str]) -> Vec<String> {
         let owned: Vec<String> = enabled.iter().map(|s| s.to_string()).collect();
-        select_enabled_tools(cwd, &owned)
+        select_enabled_tools(cwd, &owned, &[])
             .into_iter()
             .map(|t| t.name)
             .collect()
+    }
+
+    /// A user-defined tool's name is a legitimate `enabled_tools` entry the
+    /// caller registers itself: it must select no built-in here, and — the
+    /// point of the parameter — must not be reported as an unknown name.
+    #[test]
+    fn an_already_registered_name_selects_no_builtin() {
+        let cwd = TempDir::new().unwrap();
+        let names: Vec<String> = select_enabled_tools(
+            cwd.path(),
+            &["read".into(), "weather_card".into()],
+            &["weather_card".to_string()],
+        )
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+        assert_eq!(names, vec!["read"]);
     }
 
     // A legacy session carries the old native read-only names; after the remap

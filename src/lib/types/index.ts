@@ -30,6 +30,7 @@ export * from "./provider";
 export * from "./settings";
 export * from "./mcp";
 export * from "./hookRule";
+export * from "./toolDefinition";
 export * from "./skill";
 export * from "./user";
 export * from "./agentSession";

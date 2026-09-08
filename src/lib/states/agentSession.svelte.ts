@@ -27,6 +27,7 @@ import {
   newDraftSessionId,
 } from "./draftSession";
 import { agentState, agentActions } from "./agent.svelte";
+import type { Agent } from "../types/agent";
 import { settingsState } from "./settings.svelte";
 import { getAllModels, providerActions } from "./provider.svelte";
 
@@ -62,23 +63,23 @@ function titleGenerationRule(): TitleGenerationRule {
 }
 
 /**
- * Stamp the configured default model (settings > Agent) onto instantiation
- * overrides that do not pin one, so a freshly created session is runnable
- * without opening the model picker.
+ * Stamp the source definition's default model onto instantiation overrides that
+ * do not pin one, so a freshly created session is runnable without opening the
+ * model picker.
  *
- * Definitions carry no model, so without this every new session starts blank.
  * Callers that resolved their own model (quick action, selection) pass the pair
- * explicitly and are left untouched. The catalog is loaded on demand because
- * helper windows skip the main window's preload; a dangling or unset default
- * simply leaves the session model-less.
+ * explicitly and are left untouched. The definition and the catalog are both
+ * loaded on demand — helper windows skip the main window's preload — and a
+ * dangling or unset default simply leaves the session model-less.
  */
 async function withDefaultModel(
+  definitionId: UUID,
   overrides?: InstantiateAgentSessionRequest,
 ): Promise<InstantiateAgentSessionRequest | undefined> {
   if (overrides?.modelId && overrides.providerId) return overrides;
 
-  const preference = settingsState.settings?.agent;
-  if (!preference?.defaultModelId || !preference.defaultProviderId) {
+  const definition = await loadDefinition(definitionId);
+  if (!definition?.defaultModelId || !definition.defaultProviderId) {
     return overrides;
   }
 
@@ -93,8 +94,21 @@ async function withDefaultModel(
 
   return applyDefaultModel(
     overrides,
-    resolveAgentDefaultModel(preference, getAllModels()),
+    resolveAgentDefaultModel(definition, getAllModels()),
   );
+}
+
+/** The definition, fetching the list once if it is still cold. */
+async function loadDefinition(definitionId: UUID): Promise<Agent | null> {
+  if (agentState.agents.length === 0) {
+    try {
+      await agentActions.loadAgents();
+    } catch (error) {
+      console.error("Failed to load agents for the default model:", error);
+      return null;
+    }
+  }
+  return agentState.agents.find((agent) => agent.id === definitionId) ?? null;
 }
 
 /**
@@ -328,7 +342,7 @@ export const agentSessionActions = {
     }
     const definition =
       agentState.agents.find((agent) => agent.id === definitionId) ?? null;
-    const withModel = await withDefaultModel({});
+    const withModel = await withDefaultModel(definitionId, {});
 
     const draft = buildDraftSession({
       id: existing?.id ?? newDraftSessionId(),
@@ -427,7 +441,7 @@ export const agentSessionActions = {
       isLoading = true;
       const session = await agentSessionApi.createSessionFromDefinition(
         definitionId,
-        await withDefaultModel(overrides),
+        await withDefaultModel(definitionId, overrides),
       );
       const existing = Array.isArray(sessions) ? sessions : [];
       sessions = [session, ...existing];
@@ -470,7 +484,7 @@ export const agentSessionActions = {
     const updated = await agentSessionApi.reinstantiateSessionFromDefinition(
       sessionId,
       definitionId,
-      await withDefaultModel(carried),
+      await withDefaultModel(definitionId, carried),
     );
     const index = sessions.findIndex((session) => session.id === sessionId);
     if (index !== -1) {

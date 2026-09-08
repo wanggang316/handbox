@@ -14,6 +14,7 @@ import {
   Wrench,
   Anchor,
   MessagesSquare,
+  LayoutTemplate,
 } from "@lucide/svelte";
 import type { Icon as IconType } from "@lucide/svelte";
 import McpIcon from "$lib/components/ui/McpIcon.svelte";
@@ -86,6 +87,13 @@ export function getSettingsNavGroups(): SettingsNavGroup[] {
           title: t("settings.sidebar.agentTools"),
           icon: Wrench,
           url: "/settings/agent-tools",
+        },
+        // Next to Agent Tools: a GenUI is what a tool's call renders through.
+        {
+          id: "genui",
+          title: "GenUI",
+          icon: LayoutTemplate,
+          url: "/settings/genui",
         },
         { id: "mcp", title: "MCP", icon: McpIcon, url: "/settings/mcp" },
         {

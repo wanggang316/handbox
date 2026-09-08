@@ -158,9 +158,8 @@ pub async fn agent_update_field(
             AgentParameter::McpServers(servers)
         }
         "skills" => {
-            let skills = serde_json::from_value(value).map_err(|e| {
-                AppError::validation_error(&format!("Invalid skills value: {}", e))
-            })?;
+            let skills = serde_json::from_value(value)
+                .map_err(|e| AppError::validation_error(&format!("Invalid skills value: {}", e)))?;
             AgentParameter::Skills(skills)
         }
         "reasoning" => {
@@ -204,6 +203,27 @@ pub async fn agent_update_field(
             AgentParameter::GenUiId(v)
         }
         "providerId" => AgentParameter::ProviderId(optional_string(&value, "providerId")?),
+        // `{ modelId, providerId }`, or null to clear. Taken as one value so a
+        // half-set pair — which names no model — cannot be written.
+        "defaultModel" => {
+            if value.is_null() {
+                AgentParameter::DefaultModel(None, None)
+            } else {
+                let model_id = optional_string(&value["modelId"], "defaultModel.modelId")?;
+                let provider_id = optional_string(&value["providerId"], "defaultModel.providerId")?;
+                match (model_id, provider_id) {
+                    (Some(model_id), Some(provider_id)) => {
+                        AgentParameter::DefaultModel(Some(model_id), Some(provider_id))
+                    }
+                    (None, None) => AgentParameter::DefaultModel(None, None),
+                    _ => {
+                        return Err(AppError::validation_error(
+                            "defaultModel needs both modelId and providerId, or null",
+                        ))
+                    }
+                }
+            }
+        }
         "icon" => AgentParameter::Icon(optional_string(&value, "icon")?),
         "description" => AgentParameter::Description(optional_string(&value, "description")?),
         "builtinTools" => {
@@ -233,7 +253,9 @@ pub async fn agent_update_field(
         }
     };
 
-    agent_service.update_agent_parameter(agent_id, parameter).await
+    agent_service
+        .update_agent_parameter(agent_id, parameter)
+        .await
 }
 
 #[tauri::command]

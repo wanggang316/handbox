@@ -29,6 +29,7 @@
     createSessionFromDefinition,
     updateAgentSessionField,
   } from "$lib/api/agentSession";
+  import { getAgent } from "$lib/api/agent";
   import {
     resolveSpec,
     looksLikeStreamingSpec,
@@ -183,16 +184,21 @@
       if (getAllModels().length === 0) {
         await providerActions.loadProvidersWithModels(false);
       }
-      const resolved = resolveAgentDefaultModel(
-        settingsState.settings?.agent,
-        getAllModels(),
-      );
+      // This window talks to the API directly rather than through the session
+      // store, so it resolves the agent's default model itself — and fetches
+      // just that one definition rather than the whole list.
+      const definitionId = configuredAgentId ?? "builtin-chat";
+      const definition = await getAgent(definitionId).catch((error) => {
+        console.error("selection: failed to load the agent definition", error);
+        return null;
+      });
+      const resolved = resolveAgentDefaultModel(definition, getAllModels());
       if (!resolved.available) {
         return null;
       }
 
       const session = await createSessionFromDefinition(
-        configuredAgentId ?? "builtin-chat",
+        definitionId,
         {
           modelId: resolved.modelId,
           providerId: resolved.providerId,

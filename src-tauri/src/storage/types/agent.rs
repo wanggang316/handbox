@@ -29,6 +29,13 @@ pub struct Agent {
     /// Selected provider id. `None` (legacy/builtin rows) = picked in the UI
     /// at instantiation time.
     pub provider_id: Option<String>,
+    /// Model a session created from this agent starts on, as a `(model,
+    /// provider)` PAIR — the same model id can exist under several providers,
+    /// so neither half identifies a model alone. `None` leaves the session
+    /// model-less and the composer asks. Replaces the app-wide default that
+    /// could not differ per agent.
+    pub default_model_id: Option<String>,
+    pub default_provider_id: Option<String>,
     /// Lucide icon name.
     pub icon: Option<String>,
     pub description: Option<String>,
@@ -122,6 +129,8 @@ mod tests {
             generative_ui: Some(true),
             genui_id: None,
             provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             icon: None,
             description: None,
             builtin: false,
@@ -162,6 +171,8 @@ mod tests {
             generative_ui: Some(true),
             genui_id: None,
             provider_id: None,
+            default_model_id: None,
+            default_provider_id: None,
             icon: None,
             description: None,
             builtin: false,
@@ -188,8 +199,7 @@ mod tests {
     #[test]
     fn create_agent_request_partial() {
         let json = r#"{"name": "Test Agent"}"#;
-        let req: CreateAgentRequest =
-            serde_json::from_str(json).expect("deserialize");
+        let req: CreateAgentRequest = serde_json::from_str(json).expect("deserialize");
         assert_eq!(req.name, "Test Agent");
         assert!(req.skills.is_none());
     }

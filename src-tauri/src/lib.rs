@@ -17,8 +17,9 @@ use crate::commands::*;
 use crate::services::{
     selection::setup_selection, AgentProjectService, AgentService, AgentSessionService,
     GenUiService, HookRuleService, JobExecutor, JobScheduler, JobService, McpService, ModelService,
-    ProviderService, SettingsService, StorageService, UserSessionService,
+    ProviderService, SettingsService, StorageService, ToolDefinitionService, UserSessionService,
 };
+use crate::models::settings::UpdateSettingsRequest;
 use crate::storage::Database;
 use crate::utils::logger;
 use std::sync::Arc;
@@ -261,8 +262,16 @@ pub fn run() {
             hook_rule_create,
             hook_rule_update,
             hook_rule_delete,
+            tool_definition_list,
+            tool_definition_get,
+            tool_definition_create,
+            tool_definition_update,
+            tool_definition_delete,
+            agent_tool_catalog,
             skill_list,
             skill_set_disabled,
+            skill_files,
+            skill_file_read,
             settings_get,
             settings_update,
             settings_reset,
@@ -339,6 +348,8 @@ async fn initialize_services(
 
     let hook_rule_service = HookRuleService::new(database_service.clone());
 
+    let tool_definition_service = ToolDefinitionService::new(database_service.clone());
+
     let settings_service = SettingsService::new(storage_service.clone());
 
     // Register the Quick Action global hotkey from the persisted
@@ -379,6 +390,45 @@ async fn initialize_services(
     }
 
     let agent_service = AgentService::new(database_service.clone());
+
+    // One-time: the model a session starts on moved from an app-wide setting
+    // onto the agent definition (migration 070). Hand the old value to every
+    // agent that has none, then clear it, so an upgrade keeps running on the
+    // model the user already picked instead of asking again per agent.
+    {
+        let legacy = settings_service
+            .get_settings()
+            .map(|settings| {
+                (
+                    settings.agent.default_model_id,
+                    settings.agent.default_provider_id,
+                )
+            })
+            .unwrap_or((None, None));
+        if let (Some(model_id), Some(provider_id)) = legacy {
+            match agent_service
+                .adopt_default_model_where_unset(&model_id, &provider_id)
+                .await
+            {
+                Ok(adopted) => {
+                    tracing::info!(
+                        "[startup] {adopted} agent(s) adopted the former app-wide default model"
+                    );
+                    // Clearing it is what makes this run once.
+                    if let Err(e) = settings_service.update_settings(UpdateSettingsRequest {
+                        section: "agent".to_string(),
+                        data: serde_json::json!({
+                            "defaultModelId": null,
+                            "defaultProviderId": null,
+                        }),
+                    }) {
+                        tracing::warn!("[startup] failed to clear the legacy default model: {e}");
+                    }
+                }
+                Err(e) => tracing::warn!("[startup] default-model adoption failed: {e}"),
+            }
+        }
+    }
 
     // GenUI: CRUD for named JSON-Render UI specs.
     let genui_service = GenUiService::new(database_service.clone());
@@ -466,6 +516,7 @@ async fn initialize_services(
     app.manage(model_service);
     app.manage(mcp_service);
     app.manage(hook_rule_service);
+    app.manage(tool_definition_service);
     app.manage(settings_service);
     app.manage(user_session_service);
     app.manage(agent_service);

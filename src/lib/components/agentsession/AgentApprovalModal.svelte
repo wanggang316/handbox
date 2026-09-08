@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { ShieldAlert, FilePlus, FilePen, Terminal } from "@lucide/svelte";
+  import { ShieldAlert } from "@lucide/svelte";
   import Modal from "$lib/components/ui/Modal.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import { renderCodeBlock } from "$lib/utils/code";
+  import { resolveToolIcon } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
   import type {
     AgentApprovalRequest,
@@ -26,23 +27,24 @@
 
   let { request, onRespond }: Props = $props();
 
-  // Tool name → localized label + icon. Unknown names fall back to the raw
-  // toolName (never silently hide the call). $derived so labels track language switch.
-  const TOOL_META = $derived<
-    Record<string, { label: string; icon: typeof Terminal }>
-  >({
-    write: { label: t("agent.approval.toolWrite"), icon: FilePlus },
-    edit: { label: t("agent.approval.toolEdit"), icon: FilePen },
-    bash: { label: t("agent.approval.toolBash"), icon: Terminal },
+  // Tool name → localized label. Approval is only ever asked for the three
+  // dangerous built-ins and for MCP tools marked manual, so anything else falls
+  // back to the raw toolName (never silently hide the call). $derived so labels
+  // track language switch.
+  const TOOL_LABELS = $derived<Record<string, string>>({
+    write: t("agent.approval.toolWrite"),
+    edit: t("agent.approval.toolEdit"),
+    bash: t("agent.approval.toolBash"),
   });
 
-  const meta = $derived(
-    TOOL_META[request.toolName] ?? {
-      label: request.toolName || t("agent.approval.toolFallback"),
-      icon: ShieldAlert,
-    },
+  const label = $derived(
+    TOOL_LABELS[request.toolName] ||
+      request.toolName ||
+      t("agent.approval.toolFallback"),
   );
-  const ToolIcon = $derived(meta.icon);
+  // Shared registry: the same glyph the timeline row uses, so the tool being
+  // approved is recognisable as the tool that then appears in the transcript.
+  const ToolIcon = $derived(resolveToolIcon(request.toolName));
 
   // Defensive string read from args (shape is dictated by the backend tool schema).
   function argString(key: string): string | null {
@@ -153,7 +155,7 @@
     <div class="px-6 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
       <div class="flex items-center gap-2 text-base-content">
         <ToolIcon size={16} class="shrink-0 text-warning" />
-        <span class="text-sm font-medium">{meta.label}</span>
+        <span class="text-sm font-medium">{label}</span>
         <span class="text-[11px] text-base-content/50">({request.toolName})</span
         >
       </div>

@@ -31,12 +31,12 @@ use crate::services::coding_agent_session::{build_agent_session, config_from_row
 use crate::services::extensions::ask_question::{
     self, QuestionEmitter, QuestionResponse, QUESTION_REQUEST_EVENT,
 };
-use crate::services::extensions::{render_app, render_card, web_search};
+use crate::services::extensions::{dynamic_tool, render_app, render_card, web_search};
 use crate::services::skills::Skill;
 use crate::services::{
     abort_run, drive_agent_run, images_from_attachments, steer_run, AgentRunRequest, AgentService,
     AgentSessionService, CodingRunSink, GenUiService, HookRuleService, McpService, ProviderService,
-    SettingsService, SkillService,
+    SettingsService, SkillService, ToolDefinitionService,
 };
 use crate::storage::types::UUID;
 use hand_ai_model::Message;
@@ -186,6 +186,7 @@ pub async fn agent_run_stream(
     agents: State<'_, AgentService>,
     genui: State<'_, GenUiService>,
     hook_rules: State<'_, HookRuleService>,
+    tool_definitions: State<'_, ToolDefinitionService>,
 ) -> Result<(), AppError> {
     let session_id = request.session_id.clone();
 
@@ -213,6 +214,7 @@ pub async fn agent_run_stream(
         &agents,
         &genui,
         &hook_rules,
+        &tool_definitions,
     )
     .await
     {
@@ -251,6 +253,7 @@ async fn assemble_and_drive(
     agents: &AgentService,
     genui: &GenUiService,
     hook_rules: &HookRuleService,
+    tool_definitions: &ToolDefinitionService,
 ) -> Result<crate::services::RunDriveHandles, AppError> {
     let session_id = request.session_id.clone();
 
@@ -486,6 +489,25 @@ async fn assemble_and_drive(
             session_id.clone(),
             Some(question_emitter),
         ));
+    }
+
+    // User-defined tools. Their gate is the definition's own `enabled` flag
+    // rather than the session's `enabled_tools`: scope is global in v1, the same
+    // choice hook rules made, so a tool the user just created works in the
+    // sessions they already have open. Failing to read them degrades to "no
+    // custom tools" rather than blocking the turn.
+    match tool_definitions.list_enabled().await {
+        Ok(definitions) => {
+            for definition in &definitions {
+                extra_tools.push(dynamic_tool::make_dynamic_tool(definition));
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[agent_run_stream] failed to load user-defined tools: {}",
+                e
+            );
+        }
     }
 
     let mut session = build_agent_session(

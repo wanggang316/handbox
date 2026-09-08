@@ -44,6 +44,12 @@
   import { RENDER_CARD_TOOL_NAME } from "./renderCard";
   import AppPill from "./AppPill.svelte";
   import { RENDER_APP_TOOL_NAME } from "./renderApp";
+  import GenUiToolCard from "./GenUiToolCard.svelte";
+  import {
+    findToolByName,
+    toolDefinitionActions,
+  } from "$lib/states/toolDefinition.svelte";
+  import type { ToolDefinition } from "$lib/types/toolDefinition";
   import MessageNavRail, { type MessageNavItem } from "./MessageNavRail.svelte";
   import SelectionReplyButton from "./SelectionReplyButton.svelte";
   import { splitQuote } from "./quote";
@@ -113,14 +119,101 @@
     return !!u && (u.input > 0 || u.output > 0 || u.totalTokens > 0);
   }
 
-  // Input/output tokens, spelled out for the usage tooltip and its aria-label.
-  function usageLabel(
-    message: Extract<AgentMessage, { role: "assistant" }>,
-  ): string {
-    const input = t("agent.timeline.usageInput", { count: message.usage.input });
-    const output = t("agent.timeline.usageOutput", {
-      count: message.usage.output,
+  /**
+   * A turn's assistant messages, keyed by the LAST of them.
+   *
+   * One reply is often several assistant messages: the model narrates, calls a
+   * tool, reads the result, continues. The reader sees one answer, so the
+   * actions row belongs on the turn's last message and must speak for the whole
+   * turn — one row per reply, not one per step.
+   *
+   * A user message opens a turn; toolResult messages sit inside one and are
+   * rendered by their paired card, so only assistant indices are collected.
+   */
+  const turnAssistants = $derived.by(() => {
+    const turns = new Map<number, number[]>();
+    let current: number[] = [];
+    const close = () => {
+      if (current.length > 0) {
+        turns.set(current[current.length - 1], current);
+        current = [];
+      }
+    };
+    runState.messages.forEach((message, index) => {
+      if (message.role === "user") {
+        close();
+      } else if (message.role === "assistant") {
+        current.push(index);
+      }
     });
+    close();
+    return turns;
+  });
+
+  /**
+   * Whether the next row continues this turn rather than starting a new one.
+   *
+   * The column's 24px rhythm separates one turn from the next. A turn that
+   * calls tools is several assistant messages, and spending that gap between
+   * its steps broke one reply into what looked like several — the hook row
+   * closing a step sat far below its own card and far above the text that
+   * followed it. A continued step closes up to the intra-message 8px instead.
+   *
+   * The gap is asked of the message ABOVE it because `space-y-*` is a bottom
+   * margin on every non-last child, so that is the only side that can shrink
+   * it; a top margin on the continuation would just collapse against it.
+   *
+   * toolResult messages render inside their paired card, never as a row of
+   * their own, so they are skipped when looking ahead.
+   */
+  function continuedByTurnStep(index: number): boolean {
+    for (let next = index + 1; next < runState.messages.length; next++) {
+      const role = runState.messages[next].role;
+      if (role === "toolResult") continue;
+      // The in-progress skeleton is rendered by the LIVE view, not as a row.
+      return role === "assistant" && next !== liveAssistantIndex;
+    }
+    return false;
+  }
+
+  function assistantAt(
+    index: number,
+  ): Extract<AgentMessage, { role: "assistant" }> {
+    return runState.messages[index] as Extract<
+      AgentMessage,
+      { role: "assistant" }
+    >;
+  }
+
+  /** Everything the turn said, in order — what "copy" puts on the clipboard. */
+  function turnText(indices: number[]): string {
+    return indices
+      .map((index) => assistantText(assistantAt(index)))
+      .filter((text) => text.length > 0)
+      .join("\n\n");
+  }
+
+  /** Steps that reported usage; an aborted or errored step contributes none. */
+  function turnUsageSteps(indices: number[]): number[] {
+    return indices.filter((index) => hasUsage(assistantAt(index)));
+  }
+
+  /**
+   * Input/output tokens for the whole turn, spelled out for the usage tooltip
+   * and its aria-label. Summed across steps: a turn that called three tools
+   * spent all three steps' tokens, and reporting only the last would understate
+   * it every time.
+   */
+  function turnUsageLabel(indices: number[]): string {
+    let inputTotal = 0;
+    let outputTotal = 0;
+    for (const index of turnUsageSteps(indices)) {
+      const usage = assistantAt(index).usage;
+      inputTotal += usage.input;
+      outputTotal += usage.output;
+    }
+    const input = t("agent.timeline.usageInput", { count: inputTotal });
+    const output = t("agent.timeline.usageOutput", { count: outputTotal });
     return `${input} · ${output}`;
   }
 
@@ -303,6 +396,17 @@
     return message.role === "user"
       ? parseInjectedMessage(userText(message))
       : null;
+  }
+
+  // User-defined tools are presentational: a call to one that has a view linked
+  // renders as that view, driven by the call's own arguments. Definitions load
+  // once per session and never block a paint, so a transcript opened before they
+  // arrive shows plain tool rows and swaps to cards when they do.
+  toolDefinitionActions.ensureLoaded();
+
+  function viewToolFor(toolName: string): ToolDefinition | null {
+    const definition = findToolByName(toolName);
+    return definition?.genuiId ? definition : null;
   }
 
 
@@ -873,8 +977,11 @@
   <!-- The row carries the hook's identity — name, kind, message. A command
        firing keeps its execution capture behind the native disclosure; a row
        with nothing more to show stays a plain line. -->
+  <!-- No horizontal padding: every row in the transcript — reply text, cards,
+       tool rows, the actions row — shares the column's left edge, and an inset
+       here made hook firings look like they belonged to something else. -->
   {#if notice.detail}
-    <details class="hook-notice group px-3 py-1.5">
+    <details class="hook-notice group py-1.5">
       <summary
         class="flex cursor-pointer list-none items-center gap-2 text-xs {tone}"
       >
@@ -888,7 +995,7 @@
         class="mt-1.5 ml-5 max-h-64 overflow-y-auto rounded-md bg-base-200 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-base-content/70">{notice.detail}</pre>
     </details>
   {:else}
-    <div class="flex items-center gap-2 px-3 py-1.5 text-xs {tone}">
+    <div class="flex items-center gap-2 py-1.5 text-xs {tone}">
       {@render hookIdentity(notice)}
     </div>
   {/if}
@@ -901,7 +1008,7 @@
      a command's execution capture — it is written for the model, and spelled
      out in full it competes with the conversation for attention. -->
 {#snippet injectedRow(block: InjectedMessage)}
-  <details class="hook-notice group px-3 py-1.5">
+  <details class="hook-notice group py-1.5">
     <summary
       class="flex cursor-pointer list-none items-center gap-2 text-xs text-base-content/70"
     >
@@ -1005,7 +1112,13 @@
         {:else if message.role === "assistant" && i !== liveAssistantIndex}
           <!-- Finished assistant message; the in-progress skeleton renders in the
                LIVE view below and is skipped here. -->
-          <div class="flex flex-col gap-2" data-message-index={i}>
+          <!-- Non-null only on the LAST assistant message of a turn, where the
+               actions row goes; the steps before it are the same reply. -->
+          {@const turn = turnAssistants.get(i)}
+          <div
+            class="flex flex-col gap-2 {continuedByTurnStep(i) ? 'mb-2' : ''}"
+            data-message-index={i}
+          >
             <div class="flex-1 min-w-0">
               {#if assistantThinking(message)}
                 <AgentThinkingBlock thinking={assistantThinking(message)} />
@@ -1057,6 +1170,13 @@
                         {sessionId}
                         fallbackTitle={appTitle}
                       />
+                    {:else if viewToolFor(block.name)}
+                      <!-- A user-defined tool with a view: the call's arguments
+                           are the data, rendered through the linked GenUI spec. -->
+                      <GenUiToolCard
+                        toolCall={toolCallView(block)}
+                        definition={viewToolFor(block.name)!}
+                      />
                     {:else}
                       <AgentToolCallCard toolCall={toolCallView(block)} />
                     {/if}
@@ -1078,14 +1198,31 @@
               <!-- Hooks that fired on this turn, above the actions: they belong
                    to the reply, and the action row is the message's footer —
                    trailing them after it left them floating between two
-                   messages with nothing saying which one they came from. -->
-              {@render hookNotices(i)}
+                   messages with nothing saying which one they came from.
+                   Carries the same 8px every other block in a message does, so
+                   a hook row sits the same distance from the reply below it as
+                   from the one above; the wrapper is conditional because an
+                   empty one would spend that gap on nothing. -->
+              {#if hookNoticesAfter(i).length > 0}
+                <div class="mt-2">
+                  {@render hookNotices(i)}
+                </div>
+              {/if}
 
-              <!-- Message actions. Usage is an icon rather than a running total:
-                   the numbers matter when asked for, not on every turn. -->
-              {#if assistantText(message) || hasUsage(message)}
-                <div class="mt-2 flex items-center gap-0.5 text-base-content/40">
-                  {#if assistantText(message)}
+              <!-- Turn actions. Rendered once per reply — on the turn's last
+                   assistant message — rather than once per step, and speaking
+                   for the whole turn. Usage is an icon rather than a running
+                   total: the numbers matter when asked for, not every turn. -->
+              {#if turn && (turnText(turn).length > 0 || turnUsageSteps(turn).length > 0)}
+                <!-- Pulled left by the icon's optical inset: each control is a
+                     28px box around a 14px glyph, so the row's box edge sits 7px
+                     right of where the glyph reads. The negative margin is what
+                     puts the glyph — the thing the eye tracks — on the same left
+                     edge as the reply text above it. -->
+                <div
+                  class="mt-2 -ml-[7px] flex items-center gap-0.5 text-base-content/40"
+                >
+                  {#if turnText(turn)}
                     <Tooltip
                       content={copiedIndex === i
                         ? t("agent.timeline.copied")
@@ -1096,7 +1233,7 @@
                         size="icon-sm"
                         class="text-base-content/40 enabled:hover:text-base-content"
                         ariaLabel={t("agent.timeline.copy")}
-                        onclick={() => copyMessage(i, assistantText(message))}
+                        onclick={() => copyMessage(i, turnText(turn))}
                       >
                         {#if copiedIndex === i}
                           <Check size={14} />
@@ -1124,8 +1261,8 @@
                     </Tooltip>
                   {/if}
 
-                  {#if hasUsage(message)}
-                    <Tooltip content={usageLabel(message)}>
+                  {#if turnUsageSteps(turn).length > 0}
+                    <Tooltip content={turnUsageLabel(turn)}>
                       <!-- Mirrors the icon-sm clear button: it is a hover target
                            like its neighbour, so it answers hover the same way.
                            It stays out of the tab order though — one stop per
@@ -1134,7 +1271,7 @@
                       <span
                         class="flex size-7 items-center justify-center rounded-md transition-[color,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300 hover:text-base-content"
                         role="img"
-                        aria-label={usageLabel(message)}
+                        aria-label={turnUsageLabel(turn)}
                       >
                         <ChartNoAxesColumn size={14} />
                       </span>
@@ -1204,7 +1341,7 @@
            compaction_end arrives. The summary is intentionally not rendered. -->
       {#if runState.isCompacting}
         <div
-          class="flex items-center gap-2 px-3 py-2 text-xs text-base-content/60"
+          class="flex items-center gap-2 py-2 text-xs text-base-content/60"
         >
           <div
             class="h-3 w-3 rounded-full bg-current animate-[pulse-scale_1.5s_ease-in-out_infinite]"

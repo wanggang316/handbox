@@ -98,17 +98,7 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   // Agent Tools page
   "settings.agentTools.title": "Agent Tools",
   "settings.agentTools.description":
-    "Model and tools new Agent sessions start with. Existing sessions are unaffected.",
-  "settings.agentTools.defaultModel.title": "Default model",
-  "settings.agentTools.defaultModel.label": "Model for new sessions",
-  "settings.agentTools.defaultModel.hint":
-    "Model picked automatically when a new Agent session is created; you can still switch inside the session.",
-  "settings.agentTools.defaultModel.none": "Not selected",
-  "settings.agentTools.defaultModel.unavailable":
-    "The selected model is no longer available — pick another",
-  "settings.agentTools.defaultModel.emptyCatalog":
-    "Enable a provider and add a model under Models first.",
-  "settings.agentTools.defaultModel.openModels": "Open model settings",
+    "Tools new Agent sessions start with. Existing sessions are unaffected; the default model is set per agent, in its definition.",
   "settings.agentTools.webSearch.title": "Web Search",
   "settings.agentTools.webSearch.provider": "Search provider",
   "settings.agentTools.webSearch.apiKey": "API Key",
@@ -125,6 +115,96 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.agentTools.skillDesc":
     "Let the model discover and load skills on demand",
 
+  // Tool detail / custom tools
+  "settings.tools.custom.title": "Custom tools",
+  "settings.tools.custom.description":
+    "Define tools of your own: the model calls them with the parameters you declare, and HandBox renders those parameters through the linked view.",
+  "settings.tools.custom.empty": "No custom tools yet",
+  "settings.tools.custom.new": "New tool",
+  "settings.tools.custom.noView": "No view linked",
+  "settings.tools.detail.newTitle": "New tool",
+  "settings.tools.detail.back": "Back",
+  "settings.tools.detail.notFound": "No such tool",
+  "settings.tools.detail.readOnly": "Built-in tool, read-only",
+  "settings.tools.detail.mcpReadOnly": "MCP tool, read-only",
+  "settings.tools.detail.basics": "Basics",
+  "settings.tools.detail.name": "Registration name",
+  "settings.tools.detail.nameHint":
+    "The name the model calls: starts with a lowercase letter, then lowercase letters, digits and underscores only.",
+  "settings.tools.detail.namePlaceholder": "weather_card",
+  "settings.tools.detail.displayName": "Display name",
+  "settings.tools.detail.displayNamePlaceholder": "Weather card",
+  "settings.tools.detail.prompt": "Prompt",
+  "settings.tools.detail.promptHint":
+    "Tells the model when and why to call this tool.",
+  "settings.tools.detail.promptPlaceholder":
+    "Call when the user asks about the weather; fill the parameters with measured values",
+  "settings.tools.detail.params": "Parameters",
+  "settings.tools.detail.paramsHint":
+    "A parameter is both a field the model fills in and a binding path for the view.",
+  "settings.tools.detail.view": "View (GenUI)",
+  "settings.tools.detail.viewHint":
+    'Rendered as a card when the tool is called; read a parameter with { "$state": "/name" } in the spec.',
+  "settings.tools.detail.viewNone": "None (show as a plain tool row)",
+  "settings.tools.detail.viewEdit": "Edit this GenUI",
+  "settings.tools.detail.viewNew": "Create a GenUI",
+  "settings.tools.detail.preview": "Preview",
+  "settings.tools.detail.previewHint":
+    "Rendered with sample values; the real content comes from the model.",
+  "settings.tools.detail.previewInvalid": "This GenUI cannot render: {reason}",
+  "settings.tools.detail.previewMissing": "The linked GenUI no longer exists",
+  "settings.tools.detail.schema": "Parameter schema",
+  "settings.tools.detail.deleteTitle": "Delete tool",
+  "settings.tools.detail.deleteMessage": "Delete “{name}”?",
+  "settings.tools.detail.saveFailed": "Save failed",
+  "settings.tools.paramType.string": "Text",
+  "settings.tools.paramType.number": "Number",
+  "settings.tools.paramType.boolean": "Boolean",
+  "settings.tools.paramType.stringList": "Text list",
+  "settings.tools.paramType.stringMatrix": "Table rows",
+  "settings.tools.paramType.keyValueList": "Key/value pairs",
+  "settings.tools.params.empty":
+    "No parameters yet — the model will call this tool with none",
+  "settings.tools.params.add": "Add parameter",
+  "settings.tools.params.remove": "Remove parameter",
+  "settings.tools.params.required": "Required",
+  "settings.tools.params.namePlaceholder": "Name, e.g. city",
+  "settings.tools.params.descriptionPlaceholder":
+    "Tell the model what belongs here",
+
+  // GenUI page
+  "settings.genui.description":
+    "Reusable interface templates: linked to a tool they render its call, linked to an agent they serve as an example of the reply format.",
+  "settings.genui.new": "New GenUI",
+  "settings.genui.count": "{count} templates",
+  "settings.genui.empty": "No GenUI templates yet",
+  "settings.genui.emptyHint":
+    "Create one here, or create and link it straight from a tool's detail.",
+  "settings.genui.deleteTitle": "Delete GenUI",
+  "settings.genui.deleteMessage":
+    "Delete “{name}”? Agents and tools linking to it are unlinked automatically. This cannot be undone.",
+  "settings.genui.editor.createTitle": "New GenUI",
+  "settings.genui.editor.editTitle": "Edit GenUI",
+  "settings.genui.editor.name": "Name",
+  "settings.genui.editor.namePlaceholder": "Name this GenUI",
+  "settings.genui.editor.spec": "spec JSON",
+  "settings.genui.editor.preview": "Preview",
+  "settings.genui.editor.invalid": "Validation failed",
+  "settings.genui.editor.stage.empty": "Empty input",
+  "settings.genui.editor.stage.json": "JSON syntax",
+  "settings.genui.editor.stage.shape": "Top-level shape",
+  "settings.genui.editor.stage.components": "Components / structure",
+  "settings.genui.editor.stage.props": "Component props",
+  "settings.genui.editor.stage.references": "Reference integrity",
+  "settings.genui.editor.examples":
+    "Start from an example · click to load it into the editor ({count})",
+  "settings.genui.editor.exampleLoaded": "Loaded",
+  "settings.genui.editor.previewUnavailable": "Preview unavailable",
+  "settings.genui.editor.components": "Available components ({count})",
+  "settings.genui.editor.saving": "Saving…",
+  "settings.genui.editor.saveFailed": "Failed to save the GenUI",
+  "settings.genui.deleteFailed": "Failed to delete the GenUI",
+
   // Skills page
   "settings.skills.title": "Skills",
   "settings.skills.description":
@@ -134,8 +214,10 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.skills.scope.project": "Project",
   "settings.skills.scope.appData": "App",
   "settings.skills.openDir": "Open directory",
-  "settings.skills.collapseBody": "Collapse",
-  "settings.skills.expandBody": "View content",
+  "settings.skills.detail.badge": "Skill",
+  "settings.skills.detail.notReadable":
+    "Binary or too large to preview ({size})",
+  "settings.skills.detail.loadFailed": "Failed to read the file",
   "settings.skills.empty": "No skills yet",
   "settings.skills.emptyHint":
     "Put a SKILL.md file in the skills directory, then click Refresh to see it here.",

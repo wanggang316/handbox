@@ -30,6 +30,7 @@ pub mod settings;
 pub mod skill_service;
 pub mod skills;
 pub mod storage;
+pub mod tool_definition;
 pub mod user_session;
 
 pub use crate::storage::Database;
@@ -57,4 +58,5 @@ pub use selection::setup_selection;
 pub use settings::SettingsService;
 pub use skill_service::SkillService;
 pub use storage::StorageService;
+pub use tool_definition::ToolDefinitionService;
 pub use user_session::UserSessionService;

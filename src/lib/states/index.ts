@@ -20,6 +20,12 @@ export { settingsState } from './settings.svelte';
 
 export { mcpState, mcpActions } from './mcp.svelte';
 
+export {
+  toolDefinitionState,
+  toolDefinitionActions,
+  findToolByName
+} from './toolDefinition.svelte';
+
 export { uiState, type Notification } from './ui.svelte';
 
 export { toastStore, toastActions, type ToastMessage } from './toast.svelte';

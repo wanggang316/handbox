@@ -1,5 +1,5 @@
 /**
- * Curated GenUI starter templates, used by `GenUiEditor` as "load an example"
+ * Curated GenUI starter templates, used by `GenUiEditorModal` as "load an example"
  * starting point. Each is a catalog-valid {@link Spec} that renders through the
  * same `resolveSpec → Renderer` pipeline as chat. Kept as a plain data module
  * (no `.svelte`) so it can be reused without pulling in component code.

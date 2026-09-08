@@ -13,7 +13,6 @@
   import type { Model } from "$lib/types/provider";
   import {
     Trash2,
-    ChevronLeft,
     SquarePen,
     Star,
     Info,
@@ -22,6 +21,7 @@
     Eye as EyeIcon,
   } from "@lucide/svelte";
   import AddProviderModal from "$lib/components/settings/AddProviderModal.svelte";
+  import DetailHeader from "$lib/components/settings/DetailHeader.svelte";
   import Button from "$lib/components/ui/Button.svelte";
   import TableGroup from "$lib/components/ui/table/TableGroup.svelte";
   import TableBaseRow from "$lib/components/ui/table/TableBaseRow.svelte";
@@ -249,21 +249,17 @@
   {/if}
 {/snippet}
 
-<div class="flex flex-col h-screen">
-  <header class="text-base-content py-2 px-4 flex-shrink-0">
-    <Button
-      variant="secondary"
-      size="icon"
-      shape="pill"
-      ariaLabel={t("provider.backAria")}
-      class="hover:text-base-content/80 z-10004 relative"
-      onclick={handleBack}
-    >
-      <ChevronLeft size={22} />
-    </Button>
-  </header>
+<!-- The settings layout owns the scroller; a nested one here scrolled the
+     header out of reach. `DetailHeader` stays pinned instead, which is what
+     the old `z-10004` on the back button was fighting. -->
+<div class="flex flex-col">
+  <DetailHeader
+    title={currentProvider?.name ?? ""}
+    backLabel={t("provider.backAria")}
+    onBack={handleBack}
+  />
 
-  <main class="flex-grow overflow-y-auto p-6 pr-8">
+  <div class="px-6 pr-8 pb-10">
     {#if currentProvider}
       <TableGroup>
         <TableBaseRow label={currentProvider.name} icon={iconSnippet}>
@@ -440,7 +436,7 @@
         </div>
       {/if}
     {/if}
-  </main>
+  </div>
 </div>
 
 <ModelInfoModal

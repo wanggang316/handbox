@@ -9,12 +9,12 @@
   import Toggle from "$lib/components/ui/Toggle.svelte";
   import ConfirmModal from "$lib/components/ui/ConfirmModal.svelte";
   import McpServerFormModal from "$lib/components/settings/McpServerFormModal.svelte";
+  import DetailHeader from "$lib/components/settings/DetailHeader.svelte";
   import { mcpState, mcpActions } from "$lib/states/mcp.svelte";
   import { updateToolEnabled } from "$lib/api";
   import type { McpServer } from "$lib/types";
   import { formatDateTime } from "$lib/utils/date";
   import {
-    ChevronLeft,
     RefreshCw,
     SquarePen,
     Trash2,
@@ -206,23 +206,19 @@
   }
 </script>
 
-<div class="flex flex-col h-screen">
-  <header class="text-base-content py-2 px-4 flex-shrink-0">
-    <Button
-      variant="secondary"
-      size="icon"
-      shape="pill"
-      ariaLabel={t("provider.backAria")}
-      class="hover:text-base-content/80 z-10004 relative"
-      onclick={handleBack}
-    >
-      <ChevronLeft size={22} />
-    </Button>
-  </header>
+<!-- The settings layout owns the scroller; a nested one here scrolled the
+     header out of reach. `DetailHeader` stays pinned instead, which is what
+     the old `z-10004` on the back button was fighting. -->
+<div class="flex flex-col">
+  <DetailHeader
+    title={server?.displayName ?? server?.name ?? ""}
+    backLabel={t("provider.backAria")}
+    onBack={handleBack}
+  />
 
   <!-- Connection errors, tool argument names and resource URIs are all data
        users copy out to debug, so this pane is selectable. -->
-  <main class="flex-grow overflow-y-auto p-6 pr-8 select-text">
+  <div class="px-6 pr-8 pb-10 select-text">
     {#if server}
       <TableGroup>
         <div class="px-6 py-4">
@@ -496,7 +492,7 @@
         {/if}
       {/if}
     {/if}
-  </main>
+  </div>
 </div>
 
 <McpServerFormModal

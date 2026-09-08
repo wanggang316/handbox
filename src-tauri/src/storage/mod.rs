@@ -8,6 +8,7 @@ pub mod job_repository;
 pub mod mcp_repository;
 pub mod model_repository;
 pub mod provider_repository;
+pub mod tool_definition_repository;
 pub mod types;
 
 pub use agent_project_repository::AgentProjectRepository;
@@ -20,3 +21,4 @@ pub use job_repository::{JobExecutionRepository, JobRepository};
 pub use mcp_repository::McpRepository;
 pub use model_repository::ModelRepository;
 pub use provider_repository::ProviderRepository;
+pub use tool_definition_repository::ToolDefinitionRepository;

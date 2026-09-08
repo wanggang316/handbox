@@ -5,6 +5,7 @@
   import Button from "$lib/components/ui/Button.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
+  import SkillDetailModal from "$lib/components/settings/SkillDetailModal.svelte";
   import { skillState, skillActions } from "$lib/states/skill.svelte";
   import type { SkillInfo, SkillScope } from "$lib/types";
   import { t } from "$lib/i18n";
@@ -12,12 +13,12 @@
     LoaderCircle,
     Zap,
     RefreshCw,
-    FolderOpen,
-    ChevronsUpDown,
     AlertTriangle,
   } from "@lucide/svelte";
 
-  let expandedBodies = $state<Record<string, boolean>>({});
+  // The detail dialog owns the skill's content; the list stays a list.
+  let detailOpen = $state(false);
+  let detailSkill = $state<SkillInfo | null>(null);
   // SvelteSet: plain Set in $state is not deeply reactive, so has() in the
   // Toggle disabled binding would never re-run on add/delete
   let inFlightSkills = new SvelteSet<string>();
@@ -34,9 +35,15 @@
     return `${skill.scope}:${skill.path}`;
   }
 
-  function toggleBody(skill: SkillInfo) {
-    const key = skillKey(skill);
-    expandedBodies[key] = !expandedBodies[key];
+  function openDetail(skill: SkillInfo) {
+    detailSkill = skill;
+    detailOpen = true;
+  }
+
+  function handleRowKeydown(event: KeyboardEvent, skill: SkillInfo) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openDetail(skill);
   }
 
   function getScopeLabel(scope: SkillScope): string {
@@ -135,8 +142,15 @@
     <TableGroup>
       {#each skillState.skills as skill (skillKey(skill))}
         {@const hasError = skill.diagnostics.length > 0}
-        {@const expanded = expandedBodies[skillKey(skill)]}
-        <div class="w-full px-6 py-4">
+        <!-- role="button" on a div, not a <button>: the row embeds a toggle and
+             a folder button, and HTML forbids nesting interactive elements. -->
+        <div
+          role="button"
+          tabindex="0"
+          class="w-full cursor-default px-6 py-4 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300"
+          onclick={() => openDetail(skill)}
+          onkeydown={(e) => handleRowKeydown(e, skill)}
+        >
           <div class="flex items-start justify-between gap-3">
             <div class="flex flex-1 min-w-0 flex-col gap-1">
               <div class="flex items-center gap-2 flex-wrap">
@@ -158,7 +172,15 @@
               {/if}
             </div>
 
-            <div class="flex items-center gap-2 shrink-0">
+            <!-- The switch swallows the click so flipping it never also opens
+                 the detail. Revealing the directory lives in the detail, where
+                 the reader has already decided this is the skill they mean. -->
+            <div
+              class="flex items-center shrink-0"
+              role="none"
+              onclick={(e) => e.stopPropagation()}
+              onkeydown={(e) => e.stopPropagation()}
+            >
               {#if !hasError}
                 <Toggle
                   checked={!skill.disabled}
@@ -167,15 +189,6 @@
                     handleToggleSkillBefore(skill, enabled)}
                 />
               {/if}
-              <button
-                type="button"
-                class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
-                title={t("settings.skills.openDir")}
-                aria-label={t("settings.skills.openDir")}
-                onclick={() => handleOpenDir(skill)}
-              >
-                <FolderOpen size={15} />
-              </button>
             </div>
           </div>
 
@@ -187,23 +200,6 @@
                   <span class="break-words">{diagnostic}</span>
                 </div>
               {/each}
-            </div>
-          {/if}
-
-          {#if skill.body}
-            <div class="mt-2">
-              <button
-                type="button"
-                class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-300 rounded px-1 -ml-1 py-0.5 transition-colors"
-                onclick={() => toggleBody(skill)}
-              >
-                <span>{expanded ? t("settings.skills.collapseBody") : t("settings.skills.expandBody")}</span>
-                <ChevronsUpDown size={12} />
-              </button>
-              {#if expanded}
-                <pre
-                  class="mt-2 max-h-80 overflow-auto rounded-lg bg-base-200 p-3 text-xs text-base-content/80 whitespace-pre-wrap break-words font-mono">{skill.body}</pre>
-              {/if}
             </div>
           {/if}
         </div>
@@ -221,3 +217,13 @@
     </TableGroup>
   </div>
 </div>
+
+<SkillDetailModal
+  bind:open={detailOpen}
+  skill={detailSkill}
+  onToggleBefore={(enabled) =>
+    detailSkill
+      ? handleToggleSkillBefore(detailSkill, enabled)
+      : Promise.resolve(false)}
+  onOpenDir={() => detailSkill && handleOpenDir(detailSkill)}
+/>

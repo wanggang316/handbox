@@ -8,13 +8,21 @@
     SelectRow,
     TextRow,
   } from "$lib/components/ui/table";
-  import ModelSelectButton from "$lib/components/settings/ModelSelectButton.svelte";
-  import { settingsState, providerActions } from "$lib/states";
-  import { getAllModels } from "$lib/states/provider.svelte";
-  import { resolveAgentDefaultModel } from "$lib/utils/defaultModel";
-  import { BUILTIN_TOOLS, BUILTIN_TOOL_IDS } from "$lib/constants/agentTools";
+  import Button from "$lib/components/ui/Button.svelte";
+  import { Plus } from "@lucide/svelte";
+  import { settingsState } from "$lib/states";
+  import {
+    toolDefinitionState,
+    toolDefinitionActions,
+  } from "$lib/states/toolDefinition.svelte";
+  import { resolveAgentIcon } from "$lib/utils/agentIcons";
+  import {
+    BUILTIN_TOOLS,
+    BUILTIN_TOOL_IDS,
+    resolveToolIcon,
+  } from "$lib/constants/agentTools";
   import { t } from "$lib/i18n";
-  import type { ModelWithProvider } from "$lib/types/provider";
+  import type { ToolDefinition } from "$lib/types/toolDefinition";
 
   // Globally enabled default tool set (coding-agent registry names); a missing
   // agent section means all enabled.
@@ -49,6 +57,33 @@
     { id: "ask_question", label: t("agent.tool.ask_question"), desc: t("settings.agentTools.askQuestionDesc") },
   ]);
 
+  // Same glyphs the timeline puts on a tool call, so a row here and a call
+  // there are recognisably the same tool.
+  const webSearchIcon = resolveToolIcon("web_search");
+  const skillIcon = resolveToolIcon("skill");
+
+  /**
+   * Detail view for any tool. One route serves all three sources — a custom
+   * tool's uuid, a built-in id, an `mcp__…` name — because none of those can
+   * collide; the page decides editable vs read-only from what the id resolves
+   * to. `skill` has no tool of its own to show, so its row has no detail.
+   */
+  function openToolDetail(toolId: string): void {
+    void goto(`/settings/agent-tools/${encodeURIComponent(toolId)}`);
+  }
+
+  /** Enable/disable is the definition's own flag; it gates every session. */
+  async function toggleCustomTool(
+    tool: ToolDefinition,
+    enabled: boolean,
+  ): Promise<void> {
+    try {
+      await toolDefinitionActions.updateTool(tool.id, { enabled });
+    } catch (error) {
+      console.error("更新自定义工具失败:", error);
+    }
+  }
+
   function webSearchSnapshot(provider: string, apiKey: string): string {
     return JSON.stringify({ provider, apiKey });
   }
@@ -76,44 +111,12 @@
       .catch((error) => {
         console.error("加载 Agent 工具设置失败:", error);
       });
-    // Catalog needed to resolve / detect-dangling the default model display.
-    providerActions.loadProvidersWithModels().catch((error) => {
-      console.error("加载模型目录失败:", error);
+    // Always re-read: a tool may have been created, renamed or deleted on the
+    // detail page since the store last loaded.
+    toolDefinitionActions.loadTools().catch((error) => {
+      console.error("加载自定义工具失败:", error);
     });
   });
-
-  // Resolve the persisted default against the live catalog. Reactive on both
-  // the settings slice (changes when a pick is persisted) and the catalog
-  // (loaded in onMount), so the row repaints without extra bookkeeping.
-  const modelResolution = $derived(
-    resolveAgentDefaultModel(settingsState.settings?.agent, getAllModels()),
-  );
-
-  // Only a resolved model reaches the button: a dangling default falls back to
-  // the placeholder, with the stale pair left on disk so re-enabling the
-  // provider restores it.
-  const defaultModel = $derived<ModelWithProvider | null>(
-    modelResolution.available ? modelResolution.model : null,
-  );
-
-  /** Persist the pick immediately (no Save step), mirroring the other rows. */
-  async function handleDefaultModelSelect(
-    model: ModelWithProvider,
-  ): Promise<void> {
-    try {
-      await settingsState.updateSettings({
-        section: "agent",
-        data: { defaultModelId: model.id, defaultProviderId: model.provider_id },
-      });
-    } catch (error) {
-      console.error("更新 Agent 默认模型失败:", error);
-    }
-  }
-
-  /** Jump to the model settings to enable a provider (empty-catalog guidance). */
-  function openModelSettings(): void {
-    void goto("/settings/models");
-  }
 
   function isEnabled(toolId: string): boolean {
     return enabledTools.includes(toolId);
@@ -168,42 +171,6 @@
     </p>
   </div>
 
-  <TableGroup title={t("settings.agentTools.defaultModel.title")}>
-    <TableBaseRow
-      label={t("settings.agentTools.defaultModel.label")}
-      layout="vertical"
-      helpText={t("settings.agentTools.defaultModel.hint")}
-    >
-      {#if modelResolution.available || modelResolution.reason !== "empty-catalog"}
-        <div class="flex items-center gap-3 mt-2">
-          <ModelSelectButton
-            selectedModel={defaultModel}
-            placeholder={t("settings.agentTools.defaultModel.none")}
-            onModelSelect={handleDefaultModelSelect}
-          />
-          {#if modelResolution.available === false && modelResolution.reason === "dangling-default"}
-            <span class="text-xs text-warning">
-              {t("settings.agentTools.defaultModel.unavailable")}
-            </span>
-          {/if}
-        </div>
-      {:else}
-        <div class="flex items-center justify-between gap-3 mt-2">
-          <p class="text-sm text-base-content/70">
-            {t("settings.agentTools.defaultModel.emptyCatalog")}
-          </p>
-          <button
-            type="button"
-            class="text-sm text-base-content/70 hover:text-base-content transition-colors whitespace-nowrap"
-            onclick={openModelSettings}
-          >
-            {t("settings.agentTools.defaultModel.openModels")}
-          </button>
-        </div>
-      {/if}
-    </TableBaseRow>
-  </TableGroup>
-
   <div class="flex flex-col gap-y-1 mt-2">
     <p class="text-sm font-medium text-base-content">
       {t("settings.agentTools.system.title")}
@@ -214,8 +181,10 @@
     {#each codingAgentTools as tool (tool.id)}
       <SwitchRow
         label={t(tool.labelKey)}
+        icon={tool.icon}
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
+        onOpenDetail={() => openToolDetail(tool.id)}
       />
     {/each}
   </TableGroup>
@@ -229,8 +198,10 @@
   <TableGroup>
     <SwitchRow
       label={t("agent.tool.web_search")}
+      icon={webSearchIcon}
       checked={isEnabled("web_search")}
       onChange={(checked) => handleToggle("web_search", checked)}
+      onOpenDetail={() => openToolDetail("web_search")}
     />
     {#if isEnabled("web_search")}
       <SelectRow
@@ -258,9 +229,11 @@
     {#each uiExtensionTools as tool (tool.id)}
       <SwitchRow
         label={tool.label}
+        icon={resolveToolIcon(tool.id)}
         description={tool.desc}
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
+        onOpenDetail={() => openToolDetail(tool.id)}
       />
     {/each}
   </TableGroup>
@@ -272,11 +245,61 @@
   </div>
 
   <TableGroup>
+    <!-- No detail: `skill` gates the skill pipeline rather than registering a
+         tool, so there is no description or schema to show. -->
     <SwitchRow
       label={t("agent.tool.skill")}
+      icon={skillIcon}
       description={t("settings.agentTools.skillDesc")}
       checked={isEnabled("skill")}
       onChange={(checked) => handleToggle("skill", checked)}
     />
+  </TableGroup>
+
+  <div class="flex flex-col gap-y-1 mt-2">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-col gap-y-1">
+        <p class="text-sm font-medium text-base-content">
+          {t("settings.tools.custom.title")}
+        </p>
+        <p class="text-[13px] leading-snug text-base-content/55">
+          {t("settings.tools.custom.description")}
+        </p>
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        class="shrink-0"
+        onclick={() => openToolDetail("new")}
+      >
+        <Plus size={14} />
+        {t("settings.tools.custom.new")}
+      </Button>
+    </div>
+  </div>
+
+  <TableGroup>
+    {#if toolDefinitionState.tools.length === 0}
+      <TableBaseRow>
+        <p class="text-[13px] text-base-content/55">
+          {t("settings.tools.custom.empty")}
+        </p>
+      </TableBaseRow>
+    {:else}
+      {#each toolDefinitionState.tools as tool (tool.id)}
+        <!-- The registration name reads as the subtitle: it is what the model
+             calls and what a transcript's tool row is keyed by. -->
+        <SwitchRow
+          label={tool.displayName}
+          icon={resolveAgentIcon(tool.icon)}
+          description={tool.genuiId
+            ? tool.name
+            : `${tool.name} · ${t("settings.tools.custom.noView")}`}
+          checked={tool.enabled}
+          onChange={(checked) => toggleCustomTool(tool, checked)}
+          onOpenDetail={() => openToolDetail(tool.id)}
+        />
+      {/each}
+    {/if}
   </TableGroup>
 </div>

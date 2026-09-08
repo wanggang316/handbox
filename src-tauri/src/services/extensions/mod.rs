@@ -19,9 +19,15 @@
 //!  - **Not a built-in**: `select_enabled_tools` skips these ids silently
 //!    instead of warning on them.
 //!
+//! [`dynamic_tool`] is the one exception to the identity rule: user-defined
+//! tools are built from stored rows, so their names are not on
+//! [`EXTENSION_TOOL_IDS`] and their gate is the definition's own `enabled` flag.
+//! `select_enabled_tools` skips them because they arrive in `extra_tools`.
+//!
 //! One module per tool; cross-tool prompt doctrine lives here.
 
 pub mod ask_question;
+pub mod dynamic_tool;
 pub mod render_app;
 pub mod render_card;
 pub mod web_search;
