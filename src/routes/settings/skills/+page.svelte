@@ -5,6 +5,7 @@
   import Button from "$lib/components/ui/Button.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
+  import SkillDetailModal from "$lib/components/settings/SkillDetailModal.svelte";
   import { skillState, skillActions } from "$lib/states/skill.svelte";
   import type { SkillInfo, SkillScope } from "$lib/types";
   import { t } from "$lib/i18n";
@@ -13,11 +14,13 @@
     Zap,
     RefreshCw,
     FolderOpen,
-    ChevronsUpDown,
+    ChevronRight,
     AlertTriangle,
   } from "@lucide/svelte";
 
-  let expandedBodies = $state<Record<string, boolean>>({});
+  // The detail dialog owns the skill's content; the list stays a list.
+  let detailOpen = $state(false);
+  let detailSkill = $state<SkillInfo | null>(null);
   // SvelteSet: plain Set in $state is not deeply reactive, so has() in the
   // Toggle disabled binding would never re-run on add/delete
   let inFlightSkills = new SvelteSet<string>();
@@ -34,9 +37,9 @@
     return `${skill.scope}:${skill.path}`;
   }
 
-  function toggleBody(skill: SkillInfo) {
-    const key = skillKey(skill);
-    expandedBodies[key] = !expandedBodies[key];
+  function openDetail(skill: SkillInfo) {
+    detailSkill = skill;
+    detailOpen = true;
   }
 
   function getScopeLabel(scope: SkillScope): string {
@@ -135,7 +138,6 @@
     <TableGroup>
       {#each skillState.skills as skill (skillKey(skill))}
         {@const hasError = skill.diagnostics.length > 0}
-        {@const expanded = expandedBodies[skillKey(skill)]}
         <div class="w-full px-6 py-4">
           <div class="flex items-start justify-between gap-3">
             <div class="flex flex-1 min-w-0 flex-col gap-1">
@@ -176,6 +178,18 @@
               >
                 <FolderOpen size={15} />
               </button>
+              <!-- Its own button rather than a row-wide click target: the row
+                   already holds a toggle, and nesting that inside a button is
+                   both invalid markup and an ambiguous place to click. -->
+              <button
+                type="button"
+                class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
+                title={t("settings.skills.detail.open")}
+                aria-label={t("settings.skills.detail.open")}
+                onclick={() => openDetail(skill)}
+              >
+                <ChevronRight size={16} />
+              </button>
             </div>
           </div>
 
@@ -187,23 +201,6 @@
                   <span class="break-words">{diagnostic}</span>
                 </div>
               {/each}
-            </div>
-          {/if}
-
-          {#if skill.body}
-            <div class="mt-2">
-              <button
-                type="button"
-                class="flex items-center gap-1 text-xs text-base-content/60 hover:text-base-content hover:bg-base-300 rounded px-1 -ml-1 py-0.5 transition-colors"
-                onclick={() => toggleBody(skill)}
-              >
-                <span>{expanded ? t("settings.skills.collapseBody") : t("settings.skills.expandBody")}</span>
-                <ChevronsUpDown size={12} />
-              </button>
-              {#if expanded}
-                <pre
-                  class="mt-2 max-h-80 overflow-auto rounded-lg bg-base-200 p-3 text-xs text-base-content/80 whitespace-pre-wrap break-words font-mono">{skill.body}</pre>
-              {/if}
             </div>
           {/if}
         </div>
@@ -221,3 +218,13 @@
     </TableGroup>
   </div>
 </div>
+
+<SkillDetailModal
+  bind:open={detailOpen}
+  skill={detailSkill}
+  onToggleBefore={(enabled) =>
+    detailSkill
+      ? handleToggleSkillBefore(detailSkill, enabled)
+      : Promise.resolve(false)}
+  onOpenDir={() => detailSkill && handleOpenDir(detailSkill)}
+/>

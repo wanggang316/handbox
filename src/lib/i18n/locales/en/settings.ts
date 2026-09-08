@@ -214,8 +214,11 @@ export const settingsEn: Record<keyof typeof settingsZh, string> = {
   "settings.skills.scope.project": "Project",
   "settings.skills.scope.appData": "App",
   "settings.skills.openDir": "Open directory",
-  "settings.skills.collapseBody": "Collapse",
-  "settings.skills.expandBody": "View content",
+  "settings.skills.detail.open": "View details",
+  "settings.skills.detail.badge": "Skill",
+  "settings.skills.detail.notReadable":
+    "Binary or too large to preview ({size})",
+  "settings.skills.detail.loadFailed": "Failed to read the file",
   "settings.skills.empty": "No skills yet",
   "settings.skills.emptyHint":
     "Put a SKILL.md file in the skills directory, then click Refresh to see it here.",

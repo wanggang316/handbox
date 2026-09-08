@@ -14,3 +14,12 @@ export interface SkillInfo {
   diagnostics: string[];
   disabled: boolean;
 }
+
+/** One file inside a skill's directory, as returned by `skill_files`. */
+export interface SkillFile {
+  /** Path relative to the skill directory, always `/`-separated. */
+  relPath: string;
+  size: number;
+  /** False for binary assets and oversized files; reading them is refused. */
+  readable: boolean;
+}

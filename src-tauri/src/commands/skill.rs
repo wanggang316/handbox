@@ -1,4 +1,4 @@
-//! Skill discovery IPC command.
+//! Skill discovery and file-reading IPC commands.
 //!
 //! Exposes [`skill_list`], a read-only view over [`SkillService::discover`] for
 //! the settings UI and the agent-input skill toggle. The command never fails on
@@ -6,6 +6,13 @@
 //! layer folds *both* into a flat [`SkillInfo`] list — clean skills carry their
 //! metadata with an empty `diagnostics`, while validation failures surface as
 //! entries with `description`/`body` cleared and a non-empty `diagnostics`.
+//!
+//! [`skill_files`] and [`skill_file_read`] back the detail view, which shows a
+//! skill as the directory it really is rather than only its `SKILL.md`. Both
+//! address a skill by *name* and re-resolve the directory through discovery, so
+//! no caller-supplied path reaches the filesystem as a root — that, plus
+//! [`resolve_skill_file`]'s containment check, is what keeps them from being a
+//! general-purpose file reader.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -216,6 +223,239 @@ fn dir_name(dir: &Path) -> String {
     dir.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// One file inside a skill's directory, as offered by the detail view.
+///
+/// `rel_path` is the identity: it is what [`skill_file_read`] takes back, and
+/// it is always `/`-separated so the frontend can use it verbatim as a key and
+/// a label regardless of platform.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFile {
+    /// Path relative to the skill directory, `/`-separated.
+    pub rel_path: String,
+    pub size: u64,
+    /// Whether [`skill_file_read`] will hand back this file's text. Binary
+    /// assets and oversized files are still listed — a skill's shape is worth
+    /// seeing even where its bytes are not renderable.
+    pub readable: bool,
+}
+
+/// Caps on what a skill directory listing will walk and what a single file may
+/// weigh. A skill is prose plus a handful of scripts; these bound the damage a
+/// pathological directory (a checked-in `node_modules`, a video) can do to the
+/// IPC payload and the renderer.
+const MAX_SKILL_FILES: usize = 200;
+const MAX_SKILL_FILE_DEPTH: usize = 4;
+const MAX_SKILL_FILE_BYTES: u64 = 512 * 1024;
+
+/// Directory names never worth listing: build output and VCS bookkeeping that
+/// no skill author means to publish as part of the skill.
+const SKIPPED_DIRS: &[&str] = &["node_modules", "__pycache__", "target", "dist"];
+
+/// Extensions the detail view cannot render. Everything else is treated as
+/// text: a skill directory holds prose, scripts and templates, so naming the
+/// few binary asset types hides less than allow-listing the text ones would.
+const BINARY_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "icns", "svgz", "pdf", "zip", "gz", "tar",
+    "bz2", "xz", "7z", "woff", "woff2", "ttf", "otf", "eot", "mp3", "mp4", "mov", "wav", "avi",
+    "webm", "so", "dylib", "dll", "exe", "bin", "wasm", "db", "sqlite",
+];
+
+/// Whether a listed path is a binary asset, decided by extension alone.
+///
+/// Pure so the classification is testable without a filesystem. Extension
+/// matching is ASCII-case-insensitive; a file with no extension counts as text
+/// (skills ship `Makefile`, `LICENSE` and bare scripts).
+fn is_binary_path(rel_path: &str) -> bool {
+    rel_path
+        .rsplit_once('.')
+        .map(|(_, ext)| {
+            BINARY_EXTENSIONS
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(ext))
+        })
+        .unwrap_or(false)
+}
+
+/// Validate a caller-supplied relative path and return it as a `PathBuf`.
+///
+/// Only plain forward-slash-separated components are accepted: anything
+/// absolute, any `.` or `..` segment, any backslash and any control character
+/// is rejected with a structured `VALIDATION_ERROR`. This is the first of two
+/// defences — [`resolve_skill_file`] still confirms the resolved path stayed
+/// inside the skill directory, which is what catches escapes through symlinks.
+fn sanitize_rel_path(rel_path: &str) -> Result<PathBuf, AppError> {
+    if rel_path.is_empty() {
+        return Err(AppError::validation_error("文件路径不能为空"));
+    }
+    if rel_path.contains('\\') || rel_path.chars().any(char::is_control) {
+        return Err(AppError::validation_error("文件路径包含非法字符"));
+    }
+
+    let mut out = PathBuf::new();
+    for segment in rel_path.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(AppError::validation_error(
+                "文件路径必须是技能目录下的相对路径",
+            ));
+        }
+        out.push(segment);
+    }
+    Ok(out)
+}
+
+/// Resolve `rel_path` against a skill directory, refusing anything that lands
+/// outside it.
+///
+/// Both sides are canonicalized before the containment check so a symlink
+/// inside the skill directory cannot be used to read arbitrary files: the
+/// symlink resolves to its target, and a target outside the (also resolved)
+/// skill directory fails the prefix test.
+fn resolve_skill_file(dir: &Path, rel_path: &str) -> Result<PathBuf, AppError> {
+    let relative = sanitize_rel_path(rel_path)?;
+    let base = dir
+        .canonicalize()
+        .map_err(|e| AppError::not_found(&format!("技能目录不可读：{e}")))?;
+    let target = base
+        .join(relative)
+        .canonicalize()
+        .map_err(|e| AppError::not_found(&format!("文件不存在或不可读：{e}")))?;
+
+    if !target.starts_with(&base) {
+        return Err(AppError::validation_error("文件不在技能目录内"));
+    }
+    Ok(target)
+}
+
+/// Walk a skill directory into a flat, sorted file listing.
+///
+/// Breadth is bounded by [`MAX_SKILL_FILES`] and [`MAX_SKILL_FILE_DEPTH`];
+/// hidden entries, [`SKIPPED_DIRS`] and symlinks are skipped (a symlinked
+/// directory could otherwise walk the whole disk, or loop). Unreadable entries
+/// are dropped rather than propagated: a listing that shows most of a skill
+/// beats an error that shows none of it.
+///
+/// `SKILL.md` sorts first because it is what the reader came for; the rest is
+/// lexicographic, which keeps a directory's files adjacent.
+fn collect_skill_files(dir: &Path) -> Vec<SkillFile> {
+    let mut files: Vec<SkillFile> = Vec::new();
+    let mut queue: Vec<(PathBuf, String, usize)> = vec![(dir.to_path_buf(), String::new(), 0)];
+
+    while let Some((current, prefix, depth)) = queue.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if files.len() >= MAX_SKILL_FILES {
+                break;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || SKIPPED_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+
+            let rel_path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+
+            if meta.is_dir() {
+                if depth + 1 < MAX_SKILL_FILE_DEPTH {
+                    queue.push((entry.path(), rel_path, depth + 1));
+                }
+            } else if meta.is_file() {
+                let size = meta.len();
+                files.push(SkillFile {
+                    readable: size <= MAX_SKILL_FILE_BYTES && !is_binary_path(&rel_path),
+                    rel_path,
+                    size,
+                });
+            }
+        }
+    }
+
+    files.sort_by(|a, b| {
+        let rank = |f: &SkillFile| u8::from(f.rel_path != "SKILL.md");
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| a.rel_path.cmp(&b.rel_path))
+    });
+    files
+}
+
+/// Locate a skill's directory by name, including skills that failed validation.
+///
+/// Resolution goes through the same discovery the list view uses, so the name
+/// the frontend holds is the only thing it has to pass back — no directory
+/// path crosses the IPC boundary in the caller's direction, which is what
+/// keeps these two commands from being a general-purpose file reader.
+fn resolve_skill_dir(
+    skill_service: &SkillService,
+    name: &str,
+    working_dir: Option<&str>,
+) -> Result<PathBuf, AppError> {
+    let (skills, errors) = skill_service.discover(working_dir.map(Path::new));
+    to_skill_infos(skills, errors, &[])
+        .into_iter()
+        .find(|info| info.name == name)
+        .map(|info| info.path)
+        .ok_or_else(|| AppError::not_found(&format!("技能不存在：{name}")))
+}
+
+/// List the files that make up a skill, for the detail view's file switcher.
+///
+/// Named rather than pathed (see [`resolve_skill_dir`]); the listing is capped
+/// and never fails on individual unreadable entries. Fails only when the name
+/// resolves to no discovered skill.
+#[tauri::command]
+pub async fn skill_files(
+    name: String,
+    working_dir: Option<String>,
+    skill_service: State<'_, Arc<SkillService>>,
+) -> Result<Vec<SkillFile>, AppError> {
+    let dir = resolve_skill_dir(&skill_service, &name, working_dir.as_deref())?;
+    Ok(collect_skill_files(&dir))
+}
+
+/// Read one file from a skill's directory as UTF-8 text.
+///
+/// `rel_path` must be a plain relative path that resolves inside the skill
+/// directory ([`resolve_skill_file`]). Oversized files and non-UTF-8 bytes are
+/// refused with a structured error rather than truncated or lossily decoded —
+/// a half-file shown as if whole is worse than a message saying why not.
+#[tauri::command]
+pub async fn skill_file_read(
+    name: String,
+    rel_path: String,
+    working_dir: Option<String>,
+    skill_service: State<'_, Arc<SkillService>>,
+) -> Result<String, AppError> {
+    let dir = resolve_skill_dir(&skill_service, &name, working_dir.as_deref())?;
+    let target = resolve_skill_file(&dir, &rel_path)?;
+
+    let meta =
+        std::fs::metadata(&target).map_err(|e| AppError::not_found(&format!("文件不可读：{e}")))?;
+    if !meta.is_file() {
+        return Err(AppError::validation_error("目标不是文件"));
+    }
+    if meta.len() > MAX_SKILL_FILE_BYTES {
+        return Err(AppError::validation_error(&format!(
+            "文件过大（上限 {} KB）",
+            MAX_SKILL_FILE_BYTES / 1024
+        )));
+    }
+
+    std::fs::read_to_string(&target)
+        .map_err(|e| AppError::validation_error(&format!("文件不是 UTF-8 文本：{e}")))
 }
 
 #[cfg(test)]
@@ -780,5 +1020,136 @@ mod tests {
         for info in &infos {
             assert!(!info.disabled, "whitespace entries must be inert: {info:?}");
         }
+    }
+
+    // --- skill file listing / reading -----------------------------------
+
+    // Extension classification is what decides whether the detail view offers a
+    // file at all, and it has to hold for uppercase extensions and for the
+    // extensionless files skills routinely ship.
+    #[test]
+    fn is_binary_path_classifies_by_extension_case_insensitively() {
+        assert!(is_binary_path("assets/logo.png"));
+        assert!(is_binary_path("assets/LOGO.PNG"));
+        assert!(!is_binary_path("SKILL.md"));
+        assert!(!is_binary_path("scripts/run.sh"));
+        assert!(!is_binary_path("Makefile"));
+        assert!(!is_binary_path("references/notes.txt"));
+    }
+
+    // Every shape that could reach outside the skill directory is refused
+    // before any filesystem call.
+    #[test]
+    fn sanitize_rel_path_rejects_escapes_and_accepts_plain_relatives() {
+        assert!(sanitize_rel_path("SKILL.md").is_ok());
+        assert!(sanitize_rel_path("references/deep/notes.md").is_ok());
+
+        for bad in [
+            "",
+            "..",
+            "../secrets",
+            "references/../../secrets",
+            "/etc/passwd",
+            "./SKILL.md",
+            "refs//notes.md",
+            "refs\\notes.md",
+            "notes\u{0}.md",
+        ] {
+            assert!(sanitize_rel_path(bad).is_err(), "{bad:?} must be rejected");
+        }
+    }
+
+    // A symlink inside the skill directory pointing outside it passes
+    // `sanitize_rel_path` (it is a plain name) and must still be refused by the
+    // canonicalized containment check.
+    #[cfg(unix)]
+    #[test]
+    fn resolve_skill_file_refuses_a_symlink_escaping_the_skill_dir() {
+        let root = TempDir::new().unwrap();
+        let dir = root.path().join("alpha");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("SKILL.md"), "body").unwrap();
+
+        let outside = root.path().join("secret.txt");
+        fs::write(&outside, "secret").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("link.txt")).unwrap();
+
+        assert!(resolve_skill_file(&dir, "SKILL.md").is_ok());
+        assert!(
+            resolve_skill_file(&dir, "link.txt").is_err(),
+            "a symlink resolving outside the skill directory must be refused"
+        );
+    }
+
+    // The listing shows the whole skill, SKILL.md first, and marks binary
+    // assets unreadable while still listing them. Hidden entries and skipped
+    // build directories never appear.
+    #[test]
+    fn collect_skill_files_orders_skill_md_first_and_flags_binaries() {
+        let root = TempDir::new().unwrap();
+        let dir = root.path().join("alpha");
+        fs::create_dir_all(dir.join("references")).unwrap();
+        fs::create_dir_all(dir.join("node_modules")).unwrap();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::write(dir.join("SKILL.md"), "body").unwrap();
+        fs::write(dir.join("logo.png"), [0u8, 1, 2]).unwrap();
+        fs::write(dir.join("references/notes.md"), "notes").unwrap();
+        fs::write(dir.join("node_modules/ignored.js"), "x").unwrap();
+        fs::write(dir.join(".git/config"), "x").unwrap();
+
+        let files = collect_skill_files(&dir);
+        let paths: Vec<&str> = files.iter().map(|f| f.rel_path.as_str()).collect();
+        assert_eq!(paths, vec!["SKILL.md", "logo.png", "references/notes.md"]);
+
+        let logo = files.iter().find(|f| f.rel_path == "logo.png").unwrap();
+        assert!(!logo.readable, "a binary asset is listed but not offered");
+        assert_eq!(logo.size, 3);
+        assert!(files[0].readable);
+    }
+
+    // Depth is bounded so a deep tree cannot turn one listing into a full-disk
+    // walk; entries past the limit are simply absent.
+    #[test]
+    fn collect_skill_files_stops_at_the_depth_limit() {
+        let root = TempDir::new().unwrap();
+        let dir = root.path().join("alpha");
+        let mut deep = dir.clone();
+        for level in 0..(MAX_SKILL_FILE_DEPTH + 2) {
+            deep = deep.join(format!("d{level}"));
+        }
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("buried.md"), "x").unwrap();
+        fs::write(dir.join("SKILL.md"), "body").unwrap();
+
+        let files = collect_skill_files(&dir);
+        assert_eq!(
+            files
+                .iter()
+                .map(|f| f.rel_path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["SKILL.md"],
+            "files below the depth limit must not be listed"
+        );
+    }
+
+    // A skill that failed validation still resolves: its files are exactly what
+    // the reader needs to see in order to fix it.
+    #[test]
+    fn resolve_skill_dir_finds_valid_and_broken_skills_and_rejects_unknown_names() {
+        let app = TempDir::new().unwrap();
+        let user = TempDir::new().unwrap();
+        write_skill_raw(app.path(), "alpha", &skill_md("a", "a"));
+        write_skill_raw(user.path(), "broken", "no frontmatter at all");
+        let service = SkillService::for_test(app.path().to_path_buf(), user.path().to_path_buf());
+
+        assert_eq!(
+            resolve_skill_dir(&service, "alpha", None).unwrap(),
+            app.path().join("alpha")
+        );
+        assert_eq!(
+            resolve_skill_dir(&service, "broken", None).unwrap(),
+            user.path().join("broken")
+        );
+        assert!(resolve_skill_dir(&service, "missing", None).is_err());
     }
 }

@@ -270,6 +270,8 @@ pub fn run() {
             agent_tool_catalog,
             skill_list,
             skill_set_disabled,
+            skill_files,
+            skill_file_read,
             settings_get,
             settings_update,
             settings_reset,
