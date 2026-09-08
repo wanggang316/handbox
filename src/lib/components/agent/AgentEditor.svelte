@@ -6,6 +6,7 @@
   import Select from "../ui/Select.svelte";
   import LabeledSlider from "../ui/LabeledSlider.svelte";
   import Modal from "../ui/Modal.svelte";
+  import Tabs from "../ui/Tabs.svelte";
   import {
     TableGroup,
     TableBaseRow,
@@ -96,6 +97,16 @@
     { value: "auto", label: t("agent.input.autoExecution") },
     { value: "manual", label: t("agent.input.manualExecution") },
   ]);
+
+  // The three tabs split the definition by what a change is about: what the
+  // agent is told, what it can reach, and what it runs on. $derived so the
+  // labels track a language switch.
+  const tabItems = $derived([
+    { value: "instructions", label: t("agent.form.tabInstructions") },
+    { value: "tools", label: t("agent.form.tabTools") },
+    { value: "model", label: t("agent.form.tabModel") },
+  ]);
+  let activeTab = $state("instructions");
 
   // Builtin agents: the name is read-only (enforced by the backend).
   const isBuiltin = $derived(agent?.builtin ?? false);
@@ -532,7 +543,9 @@
 </script>
 
 <!-- Agent editor page in the settings style: centered max-w-3xl reading width,
-     TableGroup cards; Skill / MCP picked via modals. -->
+     TableGroup cards; Skill / MCP picked via modals. The definition carries
+     three unrelated concerns, so they sit on their own tabs instead of in one
+     column where scrolling past the prompt was the price of reaching a slider. -->
 <div class="h-full flex flex-col">
   <div class="flex-shrink-0 px-6 pb-4 pt-12">
     <div class="mx-auto w-full max-w-3xl">
@@ -574,130 +587,140 @@
               : t("common.create")}
         </Button>
       </div>
+
+      <!-- Pinned with the header, not scrolled with the panel: a tab you have to
+           scroll back up to reach is a tab you stop using. -->
+      <div class="mt-5">
+        <Tabs
+          value={activeTab}
+          items={tabItems}
+          onChange={(value) => (activeTab = value)}
+        />
+      </div>
     </div>
   </div>
 
   <div class="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-y-4">
+      {#if activeTab === "instructions"}
+        <TableGroup>
+          <TableBaseRow>
+            <textarea
+              class="field min-h-80 w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
+              bind:value={formData.systemPrompt}
+              placeholder={t("agent.systemPrompt.placeholder")}
+            ></textarea>
+            <div class="mt-1 text-right text-xs text-base-content/35">
+              {t("agent.form.charCount", { count: formData.systemPrompt.length })}
+            </div>
+          </TableBaseRow>
+        </TableGroup>
+      {:else if activeTab === "tools"}
+        <TableGroup>
+          <TableBaseRow label={t("agent.form.builtinTools")} layout="vertical">
+            <div class="flex flex-wrap gap-1.5">
+              {#each BUILTIN_TOOLS as tool (tool)}
+                <button
+                  type="button"
+                  aria-pressed={isToolSelected(tool)}
+                  class="rounded-md border px-2 py-1 font-mono text-xs transition-colors {isToolSelected(
+                    tool,
+                  )
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-[var(--hairline)] text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
+                  onclick={() => toggleBuiltinTool(tool, !isToolSelected(tool))}
+                >
+                  {tool}
+                </button>
+              {/each}
+            </div>
+          </TableBaseRow>
 
-      <TableGroup title={t("agent.form.systemPromptTitle")}>
-        <TableBaseRow>
-          <textarea
-            class="field min-h-48 w-full resize-y px-3 py-2.5 font-mono text-sm leading-relaxed"
-            bind:value={formData.systemPrompt}
-            placeholder={t("agent.systemPrompt.placeholder")}
-          ></textarea>
-          <div class="mt-1 text-right text-xs text-base-content/35">
-            {t("agent.form.charCount", { count: formData.systemPrompt.length })}
-          </div>
-        </TableBaseRow>
-      </TableGroup>
-
-      <TableGroup title={t("agent.form.sectionTools")}>
-        <TableBaseRow label={t("agent.form.builtinTools")} layout="vertical">
-          <div class="flex flex-wrap gap-1.5">
-            {#each BUILTIN_TOOLS as tool (tool)}
-              <button
-                type="button"
-                aria-pressed={isToolSelected(tool)}
-                class="rounded-md border px-2 py-1 font-mono text-xs transition-colors {isToolSelected(
-                  tool,
-                )
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-[var(--hairline)] text-base-content/60 hover:border-[var(--hairline-strong)] hover:text-base-content'}"
-                onclick={() => toggleBuiltinTool(tool, !isToolSelected(tool))}
-              >
-                {tool}
-              </button>
-            {/each}
-          </div>
-        </TableBaseRow>
-
-        <SelectRow
-          label={t("agent.form.toolExecution")}
-          options={toolExecutionModeOptions}
-          bind:selectedValue={formData.toolExecutionMode}
-        />
-
-        <DefaultRow
-          label={t("agent.form.skillsTitle")}
-          value={t("agent.form.linkedCount", { count: formData.skills.length })}
-          onclick={() => (skillsModalOpen = true)}
-        />
-
-        <DefaultRow
-          label={t("agent.form.mcpServers")}
-          value={t("agent.form.linkedCount", {
-            count: formData.mcpServers.length,
-          })}
-          onclick={() => (mcpModalOpen = true)}
-        />
-      </TableGroup>
-
-      <TableGroup title={t("agent.form.sectionRuntime")}>
-        <!-- The model a session from this agent starts on. It replaced an
-             app-wide setting, so it sits with the rest of the runtime the
-             definition decides. -->
-        <TableBaseRow
-          label={t("agent.form.defaultModel")}
-          layout="vertical"
-          helpText={t("agent.form.defaultModelHint")}
-        >
-          <div class="mt-2 flex items-center gap-3">
-            <ModelSelectButton
-              selectedModel={selectedDefaultModel}
-              placeholder={t("agent.form.defaultModelNone")}
-              onModelSelect={pickDefaultModel}
-            />
-            {#if defaultModelDangling}
-              <span class="text-xs text-warning">
-                {t("agent.form.defaultModelUnavailable")}
-              </span>
-            {/if}
-          </div>
-        </TableBaseRow>
-
-        <SelectRow
-          label={t("agent.form.workingDir")}
-          options={workingDirModeOptions}
-          bind:selectedValue={formData.workingDirMode}
-        />
-
-        <SwitchRow
-          label={t("agent.form.generativeUi")}
-          description={t("agent.form.generativeUiDesc")}
-          bind:checked={formData.generativeUi}
-        />
-
-        {#if formData.generativeUi}
           <SelectRow
-            label={t("agent.form.genuiHint")}
-            options={genuiOptions}
-            bind:selectedValue={formData.genuiId}
+            label={t("agent.form.toolExecution")}
+            options={toolExecutionModeOptions}
+            bind:selectedValue={formData.toolExecutionMode}
           />
-        {/if}
-      </TableGroup>
 
-      <TableGroup
-        title={t("agent.form.modelParams")}
-        collapsible
-        defaultCollapsed
-      >
-        {#each PARAM_META as p (p.key)}
-          <SwitchRow label={p.label} bind:checked={paramEnabled[p.key]} />
-          {#if paramEnabled[p.key]}
-            <TableBaseRow>
-              <LabeledSlider
-                bind:value={paramValues[p.key]}
-                min={p.min}
-                max={p.max}
-                step={p.step}
-                showValue={true}
-              />
-            </TableBaseRow>
+          <!-- The working directory is what the file and shell tools act in, so
+               it is a tool setting rather than a session one. -->
+          <SelectRow
+            label={t("agent.form.workingDir")}
+            options={workingDirModeOptions}
+            bind:selectedValue={formData.workingDirMode}
+          />
+
+          <DefaultRow
+            label={t("agent.form.skillsTitle")}
+            value={t("agent.form.linkedCount", { count: formData.skills.length })}
+            onclick={() => (skillsModalOpen = true)}
+          />
+
+          <DefaultRow
+            label={t("agent.form.mcpServers")}
+            value={t("agent.form.linkedCount", {
+              count: formData.mcpServers.length,
+            })}
+            onclick={() => (mcpModalOpen = true)}
+          />
+        </TableGroup>
+
+        <!-- Generative UI is a tool too: it is how the agent answers with an
+             interface instead of prose, and the template is what it renders. -->
+        <TableGroup>
+          <SwitchRow
+            label={t("agent.form.generativeUi")}
+            description={t("agent.form.generativeUiDesc")}
+            bind:checked={formData.generativeUi}
+          />
+
+          {#if formData.generativeUi}
+            <SelectRow
+              label={t("agent.form.genuiHint")}
+              options={genuiOptions}
+              bind:selectedValue={formData.genuiId}
+            />
           {/if}
-        {/each}
-      </TableGroup>
+        </TableGroup>
+      {:else}
+        <TableGroup>
+          <TableBaseRow
+            label={t("agent.form.defaultModel")}
+            layout="vertical"
+            helpText={t("agent.form.defaultModelHint")}
+          >
+            <div class="mt-2 flex items-center gap-3">
+              <ModelSelectButton
+                selectedModel={selectedDefaultModel}
+                placeholder={t("agent.form.defaultModelNone")}
+                onModelSelect={pickDefaultModel}
+              />
+              {#if defaultModelDangling}
+                <span class="text-xs text-warning">
+                  {t("agent.form.defaultModelUnavailable")}
+                </span>
+              {/if}
+            </div>
+          </TableBaseRow>
+        </TableGroup>
+
+        <TableGroup title={t("agent.form.modelParams")}>
+          {#each PARAM_META as p (p.key)}
+            <SwitchRow label={p.label} bind:checked={paramEnabled[p.key]} />
+            {#if paramEnabled[p.key]}
+              <TableBaseRow>
+                <LabeledSlider
+                  bind:value={paramValues[p.key]}
+                  min={p.min}
+                  max={p.max}
+                  step={p.step}
+                  showValue={true}
+                />
+              </TableBaseRow>
+            {/if}
+          {/each}
+        </TableGroup>
+      {/if}
     </div>
   </div>
 </div>
