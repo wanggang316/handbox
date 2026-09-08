@@ -11,15 +11,15 @@
    * files changes the text and nothing else — no resize, no spinner in the
    * place the content was.
    */
-  import { FolderOpen, FileText } from "@lucide/svelte";
+  import { ChevronsUpDown, Folder, FolderOpen, FileText } from "@lucide/svelte";
   import Modal from "$lib/components/ui/Modal.svelte";
   import Toggle from "$lib/components/ui/Toggle.svelte";
-  import Select from "$lib/components/ui/Select.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
   import CodePreview from "$lib/components/ui/CodePreview.svelte";
   import { listSkillFiles, readSkillFile } from "$lib/api/skill";
   import { renderMarkdown, markdownInteractions } from "$lib/utils";
   import { formatFileSize } from "$lib/utils/format";
+  import { buildSkillFileTree } from "./skillFileTree";
   import { t } from "$lib/i18n";
   import type { SkillFile, SkillInfo } from "$lib/types";
 
@@ -59,9 +59,23 @@
     files.find((f) => f.relPath === selected) ?? null,
   );
   const isMarkdown = $derived(selected.toLowerCase().endsWith(".md"));
-  const fileOptions = $derived(
-    files.map((f) => ({ value: f.relPath, label: f.relPath })),
-  );
+  const treeRows = $derived(buildSkillFileTree(files));
+
+  let treeOpen = $state(false);
+
+  function pick(relPath: string): void {
+    treeOpen = false;
+    void select(relPath);
+  }
+
+  // Capture phase: the dialog closes on Escape too, and dismissing the picker
+  // is what the key means while the picker is what is open.
+  function handleEscape(event: KeyboardEvent): void {
+    if (!treeOpen || event.key !== "Escape") return;
+    event.stopPropagation();
+    event.preventDefault();
+    treeOpen = false;
+  }
 
   async function select(relPath: string): Promise<void> {
     if (!relPath || relPath === selected) return;
@@ -115,6 +129,7 @@
     selected = "SKILL.md";
     content = body ?? "";
     error = null;
+    treeOpen = false;
 
     listSkillFiles(name)
       .then((listed) => {
@@ -127,6 +142,8 @@
       .catch((e) => console.error("Failed to list skill files:", e));
   });
 </script>
+
+<svelte:window onkeydowncapture={handleEscape} />
 
 <Modal bind:open {onClose}>
   <!-- Fixed size: the dialog is a reading pane, and one that resized itself
@@ -179,17 +196,63 @@
     <!-- The whole directory lives in this one control. A skill with a single
          file has nothing to switch between, so it shows the name instead. -->
     <div
-      class="flex items-center gap-3 border-y border-[var(--hairline)] px-6 py-2.5"
+      class="relative z-10 flex items-center gap-3 border-y border-[var(--hairline)] px-6 py-2.5"
     >
       {#if files.length > 1}
-        <Select
-          autoWidth
-          size="sm"
-          align="start"
-          options={fileOptions}
-          value={selected}
-          onChange={select}
-        />
+        <div class="relative">
+          <button
+            type="button"
+            class="flex h-7 items-center gap-1.5 rounded-md border border-[var(--field-border)] px-2 font-mono text-xs text-base-content transition-colors hover:border-[var(--field-border-hover)]"
+            onclick={() => (treeOpen = !treeOpen)}
+          >
+            <FileText size={14} class="shrink-0 text-base-content/50" />
+            {selected}
+            <ChevronsUpDown size={14} class="shrink-0 text-base-content/50" />
+          </button>
+
+          {#if treeOpen}
+            <!-- Dismissal surface. `fixed` resolves against the dialog, which
+                 is transformed, so it covers the dialog rather than the app —
+                 exactly the reach a click-away needs here. -->
+            <button
+              type="button"
+              class="fixed inset-0 cursor-default"
+              aria-label={t("common.close")}
+              onclick={() => (treeOpen = false)}
+            ></button>
+
+            <div
+              class="absolute top-full left-0 mt-1.5 max-h-80 w-80 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-[var(--bg-card)] p-1 shadow-lg"
+            >
+              {#each treeRows as row (row.relPath)}
+                {@const indent = `padding-left: ${row.depth * 14 + 8}px`}
+                {#if row.isDirectory}
+                  <div
+                    class="flex items-center gap-1.5 py-1.5 pr-2 text-xs text-base-content/40"
+                    style={indent}
+                  >
+                    <Folder size={13} class="shrink-0" />
+                    {row.name}
+                  </div>
+                {:else}
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-1.5 rounded-md py-1.5 pr-2 text-left text-sm transition-colors {row.relPath ===
+                    selected
+                      ? 'bg-base-200 text-base-content'
+                      : 'text-base-content/75 hover:bg-base-200/60 hover:text-base-content'} {row.readable
+                      ? ''
+                      : 'opacity-50'}"
+                    style={indent}
+                    onclick={() => pick(row.relPath)}
+                  >
+                    <span class="truncate">{row.name}</span>
+                  </button>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        </div>
       {:else}
         <span class="flex items-center gap-1.5 font-mono text-xs text-base-content/60">
           <FileText size={14} />
