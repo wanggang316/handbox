@@ -199,7 +199,6 @@ export const settingsZh = {
   "settings.skills.scope.project": "项目",
   "settings.skills.scope.appData": "应用",
   "settings.skills.openDir": "打开目录",
-  "settings.skills.detail.open": "查看详情",
   "settings.skills.detail.badge": "技能",
   "settings.skills.detail.notReadable": "二进制文件或体积过大，无法预览（{size}）",
   "settings.skills.detail.loadFailed": "读取文件失败",

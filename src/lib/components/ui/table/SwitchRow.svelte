@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Icon as IconType } from "@lucide/svelte";
-  import { ChevronRight } from "@lucide/svelte";
   import Toggle from "../Toggle.svelte";
   import TableBaseRow from "./TableBaseRow.svelte";
 
@@ -14,14 +13,11 @@
     disabled?: boolean;
     onChange?: (value: boolean) => void;
     /**
-     * Opens a detail view for this row. Rendered as its own chevron button
-     * beside the toggle rather than by making the row clickable — the toggle is
-     * interactive, and nesting it inside a row-wide button would be both
-     * invalid markup and an ambiguous click target.
+     * Opens a detail view for this row. The whole row becomes the target — a
+     * chevron beside the toggle asked the reader to hit a 16px glyph to reach
+     * what the entire row is about.
      */
     onOpenDetail?: () => void;
-    /** Accessible name for the chevron; required when `onOpenDetail` is set. */
-    detailAriaLabel?: string;
   }
 
   let {
@@ -33,12 +29,17 @@
     disabled = false,
     onChange = (_value: boolean) => {},
     onOpenDetail = undefined,
-    detailAriaLabel = "",
   }: Props = $props();
 
   function handleToggleChange(value: boolean) {
     checked = value;
     onChange(value);
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onOpenDetail?.();
   }
 </script>
 
@@ -49,24 +50,37 @@
   {/if}
 {/snippet}
 
-<TableBaseRow
-  {label}
-  {description}
-  {helpText}
-  icon={icon ? iconSnippet : undefined}
->
-  <div class="flex items-center gap-1">
-    <Toggle bind:checked {disabled} onChange={handleToggleChange} />
-    {#if onOpenDetail}
-      <button
-        type="button"
-        aria-label={detailAriaLabel}
-        title={detailAriaLabel}
-        class="flex size-7 items-center justify-center rounded-md text-base-content/40 transition-[color,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300 hover:text-base-content"
-        onclick={onOpenDetail}
-      >
-        <ChevronRight size={16} />
-      </button>
-    {/if}
+{#snippet row()}
+  <TableBaseRow
+    {label}
+    {description}
+    {helpText}
+    icon={icon ? iconSnippet : undefined}
+  >
+    <!-- The toggle swallows the click so flipping the switch never navigates. -->
+    <div
+      class="flex items-center"
+      role="none"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
+    >
+      <Toggle bind:checked {disabled} onChange={handleToggleChange} />
+    </div>
+  </TableBaseRow>
+{/snippet}
+
+{#if onOpenDetail}
+  <!-- role="button" on a div, not a <button>: the row embeds the toggle's own
+       control, and HTML forbids nesting one interactive element in another. -->
+  <div
+    role="button"
+    tabindex="0"
+    class="cursor-default transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300"
+    onclick={onOpenDetail}
+    onkeydown={handleKeydown}
+  >
+    {@render row()}
   </div>
-</TableBaseRow>
+{:else}
+  {@render row()}
+{/if}

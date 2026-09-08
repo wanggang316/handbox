@@ -185,7 +185,6 @@
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
         onOpenDetail={() => openToolDetail(tool.id)}
-        detailAriaLabel={t(tool.labelKey)}
       />
     {/each}
   </TableGroup>
@@ -203,7 +202,6 @@
       checked={isEnabled("web_search")}
       onChange={(checked) => handleToggle("web_search", checked)}
       onOpenDetail={() => openToolDetail("web_search")}
-      detailAriaLabel={t("agent.tool.web_search")}
     />
     {#if isEnabled("web_search")}
       <SelectRow
@@ -236,7 +234,6 @@
         checked={isEnabled(tool.id)}
         onChange={(checked) => handleToggle(tool.id, checked)}
         onOpenDetail={() => openToolDetail(tool.id)}
-        detailAriaLabel={tool.label}
       />
     {/each}
   </TableGroup>
@@ -301,7 +298,6 @@
           checked={tool.enabled}
           onChange={(checked) => toggleCustomTool(tool, checked)}
           onOpenDetail={() => openToolDetail(tool.id)}
-          detailAriaLabel={tool.displayName}
         />
       {/each}
     {/if}

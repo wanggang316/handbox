@@ -14,7 +14,6 @@
     Zap,
     RefreshCw,
     FolderOpen,
-    ChevronRight,
     AlertTriangle,
   } from "@lucide/svelte";
 
@@ -40,6 +39,12 @@
   function openDetail(skill: SkillInfo) {
     detailSkill = skill;
     detailOpen = true;
+  }
+
+  function handleRowKeydown(event: KeyboardEvent, skill: SkillInfo) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openDetail(skill);
   }
 
   function getScopeLabel(scope: SkillScope): string {
@@ -138,7 +143,15 @@
     <TableGroup>
       {#each skillState.skills as skill (skillKey(skill))}
         {@const hasError = skill.diagnostics.length > 0}
-        <div class="w-full px-6 py-4">
+        <!-- role="button" on a div, not a <button>: the row embeds a toggle and
+             a folder button, and HTML forbids nesting interactive elements. -->
+        <div
+          role="button"
+          tabindex="0"
+          class="w-full cursor-default px-6 py-4 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-out)] hover:bg-base-300"
+          onclick={() => openDetail(skill)}
+          onkeydown={(e) => handleRowKeydown(e, skill)}
+        >
           <div class="flex items-start justify-between gap-3">
             <div class="flex flex-1 min-w-0 flex-col gap-1">
               <div class="flex items-center gap-2 flex-wrap">
@@ -160,7 +173,14 @@
               {/if}
             </div>
 
-            <div class="flex items-center gap-2 shrink-0">
+            <!-- These controls swallow the click so neither the switch nor
+                 Reveal in Finder also opens the detail. -->
+            <div
+              class="flex items-center gap-2 shrink-0"
+              role="none"
+              onclick={(e) => e.stopPropagation()}
+              onkeydown={(e) => e.stopPropagation()}
+            >
               {#if !hasError}
                 <Toggle
                   checked={!skill.disabled}
@@ -177,18 +197,6 @@
                 onclick={() => handleOpenDir(skill)}
               >
                 <FolderOpen size={15} />
-              </button>
-              <!-- Its own button rather than a row-wide click target: the row
-                   already holds a toggle, and nesting that inside a button is
-                   both invalid markup and an ambiguous place to click. -->
-              <button
-                type="button"
-                class="rounded-md p-1.5 text-base-content/45 transition-colors hover:bg-base-content/10 hover:text-base-content"
-                title={t("settings.skills.detail.open")}
-                aria-label={t("settings.skills.detail.open")}
-                onclick={() => openDetail(skill)}
-              >
-                <ChevronRight size={16} />
               </button>
             </div>
           </div>
