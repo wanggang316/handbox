@@ -686,20 +686,21 @@
         <TableGroup>
           <TableBaseRow
             label={t("agent.form.defaultModel")}
-            layout="vertical"
             helpText={t("agent.form.defaultModelHint")}
           >
-            <div class="mt-2 flex items-center gap-3">
-              <ModelSelectButton
-                selectedModel={selectedDefaultModel}
-                placeholder={t("agent.form.defaultModelNone")}
-                onModelSelect={pickDefaultModel}
-              />
+            <!-- The warning precedes the picker so the picker stays flush with
+                 the right edge, in line with every other row's control. -->
+            <div class="flex items-center gap-3">
               {#if defaultModelDangling}
                 <span class="text-xs text-warning">
                   {t("agent.form.defaultModelUnavailable")}
                 </span>
               {/if}
+              <ModelSelectButton
+                selectedModel={selectedDefaultModel}
+                placeholder={t("agent.form.defaultModelNone")}
+                onModelSelect={pickDefaultModel}
+              />
             </div>
           </TableBaseRow>
         </TableGroup>
